@@ -46,20 +46,31 @@ that receipt.  A served answer that came over the bridge says so in
 this vocabulary already has, and nothing is ever looked up "by a similar
 scope".
 
-**One road, two readings.**  What is read at the end of the road is the
-only thing that differs between the door's two operations: the three
-served slices (``search_graph``, ``get_implementation_context``) and the
-authority candidate rows (``check_authority(section="candidates")``).  The
-gates, the two roads, the one store open and the refusal vocabulary are
-written once, in :func:`_read_published`, and both operations are that
-function with a different reader -- so a consumer that moves onto the store
-cannot bring a second resolution with its own idea of what ``served``
-means.
+**One road, three readings.**  What is read at the end of the road is the
+only thing that differs between the door's operations: the three served
+slices (``search_graph``, ``get_implementation_context``), the authority
+candidate rows (``check_authority(section="candidates")``) and the run
+summary's store-carried blocks (``get_run_summary``, consumer migration
+C1).  The gates, the two roads, the one store open and the refusal
+vocabulary are written once, in :func:`_read_published`, and every
+operation is that function with a different reader -- so a consumer that
+moves onto the store cannot bring a second resolution with its own idea of
+what ``served`` means.
+
+**The serving switch** (:data:`ENV_SERVE_FROM`) is the per-consumer return
+road of the consumer-migration program, and it is temporary: a consumer
+that moved onto the store goes back to memory under ``memory`` without the
+store being read, and says so (``store_disabled``, the switch named in
+``detail``).  It is honoured by the migrated consumers only --
+``get_run_summary`` today -- and is removed with the last consumer's
+cutover, no later than 2026-11-30.  The publication flag above stays the
+kill switch of every reading.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, TypeVar
@@ -76,9 +87,11 @@ from ..canonical.errors import (
 from ..canonical.serving import (
     ServedAuthorityCandidates,
     ServedRunSlices,
+    ServedRunSummary,
     ServedUnitLocation,
     read_served_authority_candidates,
     read_served_run_slices,
+    read_served_run_summary,
 )
 from ..canonical.store import RunStore
 from ..core.canonical_snapshot import resolve_run_store_config, verified_linked_run
@@ -227,6 +240,48 @@ def read_run_store_authority_candidates(
     return _read_published(root=root, link=link, read=read_served_authority_candidates)
 
 
+#: The serving switch of the migrated consumers (module docstring): one
+#: name, spelled once, read from the environment on every call like the
+#: publication flag.
+ENV_SERVE_FROM: Final = "CODECLONE_SERVE_FROM"
+SERVE_FROM_MEMORY: Final = "memory"
+SERVE_FROM_RUN_STORE: Final = "run_store"
+SERVE_FROM_SOURCES: Final[tuple[str, ...]] = (SERVE_FROM_MEMORY, SERVE_FROM_RUN_STORE)
+#: Where a migrated consumer reads when the switch names neither source:
+#: memory until the consumer's cutover.
+SERVE_FROM_DEFAULT: Final = SERVE_FROM_MEMORY
+
+
+def serving_source(environ: Mapping[str, str] | None = None) -> str:
+    """The source the serving switch names, or the default for any other
+    value (an unset or misspelled switch never reads a store it was not
+    asked to)."""
+    env = os.environ if environ is None else environ
+    value = env.get(ENV_SERVE_FROM, "").strip().lower()
+    return value if value in SERVE_FROM_SOURCES else SERVE_FROM_DEFAULT
+
+
+def read_run_store_summary(
+    *, root: Path, link: RunSnapshotLink | None
+) -> tuple[ServedRunSummary | None, RunStoreServingOutcome]:
+    """The store-carried blocks of one execution's run summary, or a typed
+    reason for none.
+
+    The same gates, the same two roads and the same one store open as
+    :func:`read_run_store_slices`, behind the serving switch: a record that
+    stated a bridge is answered from memory without a store read while the
+    switch names memory, and the answer names the switch.
+    """
+    source = serving_source()
+    if link is not None and source == SERVE_FROM_MEMORY:
+        return _memory(
+            SERVING_REASON_STORE_DISABLED,
+            store_run_id=link.store_run_id,
+            detail=f"{ENV_SERVE_FROM}={source}",
+        )
+    return _read_published(root=root, link=link, read=read_served_run_summary)
+
+
 #: The store's own typed refusals and the reason each one is answered with,
 #: in the order a refusal is matched -- the ONE table the door branches on,
 #: so a new refusal class lands here as a row and never as a new clause.
@@ -340,7 +395,12 @@ def _store_answer(
 
 
 __all__ = [
+    "ENV_SERVE_FROM",
     "MEMORY_BY_DESIGN_REASONS",
+    "SERVE_FROM_DEFAULT",
+    "SERVE_FROM_MEMORY",
+    "SERVE_FROM_RUN_STORE",
+    "SERVE_FROM_SOURCES",
     "SERVING_DETAIL_IDENTITY_BRIDGE",
     "SERVING_REASONS",
     "SERVING_REASON_DIVERGENT",
@@ -359,7 +419,10 @@ __all__ = [
     "RunStoreServingOutcome",
     "ServedAuthorityCandidates",
     "ServedRunSlices",
+    "ServedRunSummary",
     "ServedUnitLocation",
     "read_run_store_authority_candidates",
     "read_run_store_slices",
+    "read_run_store_summary",
+    "serving_source",
 ]

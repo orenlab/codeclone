@@ -17,6 +17,7 @@ from ._report_section import (
     removed_report_section_payload,
     require_mapping_section,
 )
+from ._run_store_serving import served_run_summary
 from ._session_baseline import (
     CloneBaselineState,
     MetricsBaselineState,
@@ -926,7 +927,14 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
         root: str | None = None,
     ) -> dict[str, object]:
         record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
-        return self._summary_payload(record.summary, record=record)
+        # The store's answer when it is the memory's byte for byte, the
+        # memory's otherwise -- and the answer says which, and why
+        # (consumer migration C1, ``_run_store_serving.served_run_summary``).
+        payload, serving = served_run_summary(
+            record, self._summary_payload(record.summary, record=record)
+        )
+        payload["serving"] = serving.as_payload()
+        return payload
 
     def compare_runs(
         self,

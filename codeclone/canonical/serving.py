@@ -46,6 +46,17 @@ and row order -- has one owner, ``canonical.authority_projection``, and
 this module only hands it the four families it needs, read bounded.  What
 this module adds is the witness the families cannot carry: whether the run
 MEASURED them at all.
+
+**The run summary** (``get_run_summary``, consumer migration C1) is the
+third reading.  Its fields are owned by the three tier projections
+(``summary_projection``, ``comparison_projection``,
+``evaluation_projection``); this module only arranges their answers into the
+blocks the surface publishes, in the surface's key order, so the surface
+compares and never computes.  It is the one reading here that is NOT
+bounded: the tier projections take a whole model, so the run is read with
+:meth:`RunStore.read_run`, which also proves the run whole (membership,
+scope receipt, identity) -- the cost is measured and stated in the C1 wave
+report rather than hidden.
 """
 
 from __future__ import annotations
@@ -56,7 +67,25 @@ from pathlib import Path
 from typing import Final, cast
 
 from codeclone.canonical.authority_projection import candidate_rows_from_families
+from codeclone.canonical.comparison_projection import (
+    baseline_state,
+    metric_deltas,
+    metrics_baseline_state,
+    new_by_source_kind,
+    new_clone_groups,
+    novelty_counts,
+)
+from codeclone.canonical.comparison_rows import (
+    NOVELTY_KNOWN,
+    NOVELTY_NEW,
+    NOVELTY_UNAVAILABLE,
+)
 from codeclone.canonical.errors import CanonicalModelError
+from codeclone.canonical.evaluation_projection import (
+    CLONES_ONLY_MODE,
+    diff_health_delta,
+    health_payload,
+)
 from codeclone.canonical.identity import (
     FileId,
     ImportTarget,
@@ -67,6 +96,7 @@ from codeclone.canonical.identity import (
     UnresolvedTarget,
 )
 from codeclone.canonical.model import (
+    CanonicalModel,
     ImportObservationRow,
     RelationshipObservationRow,
     relationship_resolution_status,
@@ -81,6 +111,15 @@ from codeclone.canonical.store import (
     FAMILY_SEMANTIC_EDGE,
     FAMILY_UNIT_SPAN,
     RunStore,
+)
+from codeclone.canonical.summary_projection import (
+    analysis_mode,
+    analysis_profile,
+    coverage_join,
+    dead_code,
+    finding_counts,
+    inventory,
+    security_surfaces,
 )
 from codeclone.contracts.report_identity import PRODUCER_STATE_COMPLETE
 from codeclone.models import (
@@ -363,13 +402,138 @@ def read_served_authority_candidates(
     return ServedAuthorityCandidates(run_id=run_id, items=items)
 
 
+#: The surface's word for a block whose producers a clones-only run never
+#: ran -- the same two keys ``evaluation_projection.health_payload`` answers
+#: for ``health`` and the MCP helpers spell for ``security_surfaces``.
+_METRICS_SKIPPED: Final[Mapping[str, object]] = {
+    "available": False,
+    "reason": "metrics_skipped",
+}
+
+#: The analysis half of the surface's ``security_surfaces`` block.  A run
+#: whose metrics ran always states all four, zero when it holds no row.
+SECURITY_SURFACE_COUNT_KEYS: Final[tuple[str, ...]] = (
+    "items",
+    "categories",
+    "production",
+    "tests",
+)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ServedRunSummary:
+    """The store-carried fields of one run's ``get_run_summary``.
+
+    Each attribute is one top-level block of the surface's answer, in the
+    surface's own key order and spelling; an empty mapping is the surface's
+    absence (it omits the key).  What the store does NOT carry is absent
+    here by construction, and named so it cannot rot:
+
+    * ``baseline`` has no ``runtime_python_tag`` / ``interpreter_provenance``
+      -- the interpreter that ran, execution (``comparison_projection``);
+    * ``inventory`` always states the four counts: whether the surface
+      shows ``functions`` / ``classes`` or an ``entity_counts`` refusal is
+      the report's inventory scope, which turns on the cache split a run
+      store keeps out of its rows (DET-01), so the surface keeps that branch;
+    * ``security_surfaces`` has no ``report_only`` / ``note`` (presentation).
+
+    Every other field of the answer -- identity, version, provenance,
+    schema, cache, warnings, failures, drift, hints -- is not a store fact.
+    """
+
+    run_id: str
+    mode: str
+    baseline: Mapping[str, object]
+    metrics_baseline: Mapping[str, object]
+    inventory: Mapping[str, object]
+    health: Mapping[str, object]
+    findings: Mapping[str, object]
+    diff: Mapping[str, object]
+    analysis_profile: Mapping[str, int]
+    dead_code: Mapping[str, object]
+    coverage_join: Mapping[str, object]
+    security_surfaces: Mapping[str, object]
+
+
+def _findings_block(model: CanonicalModel) -> dict[str, object]:
+    """``findings``: the counts over the projected finding universe, the
+    family breakdown restricted to the families that hold a group (the
+    surface builds it from the groups present), the tri-state novelty."""
+    counts = finding_counts(model)
+    novelty = novelty_counts(model)
+    by_family = cast("Mapping[str, int]", counts["by_family"])
+    return {
+        "total": counts["total"],
+        "new": novelty[NOVELTY_NEW],
+        "known": novelty[NOVELTY_KNOWN],
+        "unavailable": novelty[NOVELTY_UNAVAILABLE],
+        "by_family": {family: count for family, count in by_family.items() if count},
+        "production": counts["production"],
+        "new_by_source_kind": new_by_source_kind(model),
+    }
+
+
+def _diff_block(model: CanonicalModel) -> dict[str, object]:
+    """``diff``: the clone novelty under its availability, the stored health
+    delta, and the six delta terms, in the surface's order."""
+    facts = model.facts.comparison
+    return {
+        "new_clones": new_clone_groups(facts),
+        "health_delta": diff_health_delta(model),
+        **metric_deltas(facts),
+    }
+
+
+def _security_block(model: CanonicalModel, mode: str) -> dict[str, object]:
+    if mode == CLONES_ONLY_MODE:
+        return dict(_METRICS_SKIPPED)
+    return {
+        **dict.fromkeys(SECURITY_SURFACE_COUNT_KEYS, 0),
+        **security_surfaces(model),
+    }
+
+
+def run_summary_from_model(model: CanonicalModel, *, run_id: str) -> ServedRunSummary:
+    """Arrange one stored run's tier projections into the summary blocks."""
+    mode = analysis_mode(model)
+    facts = model.facts.comparison
+    return ServedRunSummary(
+        run_id=run_id,
+        mode=mode,
+        baseline=baseline_state(facts),
+        metrics_baseline=metrics_baseline_state(facts),
+        inventory=inventory(model),
+        health=health_payload(model),
+        findings=_findings_block(model),
+        diff=_diff_block(model),
+        analysis_profile=analysis_profile(model),
+        dead_code=dead_code(model),
+        coverage_join=coverage_join(model),
+        security_surfaces=_security_block(model, mode),
+    )
+
+
+def read_served_run_summary(store: RunStore, run_id: str) -> ServedRunSummary:
+    """Read one published run whole and arrange its summary blocks.
+
+    :meth:`RunStore.read_run`, not a family read: the tier projections take
+    a model (see the module docstring).  A run the store does not hold
+    refuses typed (``UnknownRunError``), as every reading here does.
+    """
+    return run_summary_from_model(store.read_run(run_id), run_id=run_id)
+
+
 __all__ = [
     "AUTHORITY_PRODUCER_FAMILY",
+    "SECURITY_SURFACE_COUNT_KEYS",
     "ServedAuthorityCandidates",
     "ServedRunSlices",
+    "ServedRunSummary",
     "ServedUnitLocation",
     "module_dep_order_key",
     "read_served_authority_candidates",
     "read_served_run_slices",
+    "read_served_run_summary",
     "relationship_record_order_key",
+    "run_summary_from_model",
 ]

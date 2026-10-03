@@ -31,23 +31,34 @@ its slices, so the shadow read costs one bounded store read and one tuple
 comparison per query, and buys a runtime witness that the store-backed
 answer is the producer's answer.
 
-Two readings go through that one decision (:func:`_shadow_read`), each with
-its own memory side and its own agreement: the three slices of
-``search_graph`` / ``get_implementation_context``, and the authority
-candidate rows ``check_authority(section="candidates")`` pages.  The
-candidates' memory is the sealed document's own rows, and their agreement
-is the WIRE: a page serializes each row with its key order and JSON types,
-so two rows Python calls equal (``True == 1``, one dict against the same
-dict with its keys reordered) are two different pages, and the store's
-answer is served only when it is byte for byte the document's.
+Three readings go through that one decision (:func:`_shadow_read`), each
+with its own memory side and its own agreement: the three slices of
+``search_graph`` / ``get_implementation_context``, the authority candidate
+rows ``check_authority(section="candidates")`` pages, and the run summary
+(``get_run_summary``, consumer migration C1).  The candidates' memory is
+the sealed document's own rows, and their agreement is the WIRE: a page
+serializes each row with its key order and JSON types, so two rows Python
+calls equal (``True == 1``, one dict against the same dict with its keys
+reordered) are two different pages, and the store's answer is served only
+when it is byte for byte the document's.
+
+The run summary agrees on the wire too, over the WHOLE answer: the store's
+blocks are placed into the answer the surface built, every field the store
+does not carry (identity, version, provenance, schema, cache, warnings,
+failures, drift, hints, the interpreter keys of ``baseline``, the
+inventory's ``entity_counts`` branch, the presentation keys of
+``security_surfaces``) stays the surface's, and the store's answer is
+served only when the two answers are the same bytes.  A disagreement names
+every field it found in ``serving.detail``, so a divergence on the desk
+says WHICH fields, not merely that one exists.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
-from typing import TypeVar
+from typing import Final, TypeVar
 
 from ...api.run_store_serving import (
     MEMORY_BY_DESIGN_REASONS,
@@ -56,11 +67,14 @@ from ...api.run_store_serving import (
     RunStoreServingOutcome,
     ServedAuthorityCandidates,
     ServedRunSlices,
+    ServedRunSummary,
     ServedUnitLocation,
     read_run_store_authority_candidates,
     read_run_store_slices,
+    read_run_store_summary,
 )
 from ...observability import record_counter
+from ...utils.coerce import as_mapping
 from ._authority_candidates import authority_candidate_items
 from ._session_shared import MCPRunRecord
 
@@ -164,9 +178,176 @@ def served_authority_candidates(
     )
 
 
+#: ``baseline`` keys the surface states beside the stored witness: the
+#: interpreter that ran, an execution fact.
+EXECUTION_BASELINE_KEYS: Final[tuple[str, ...]] = (
+    "runtime_python_tag",
+    "interpreter_provenance",
+)
+#: ``security_surfaces`` keys that are the surface's presentation.
+PRESENTATION_SECURITY_KEYS: Final[tuple[str, ...]] = ("report_only", "note")
+#: The inventory refusal the surface states instead of ``functions`` /
+#: ``classes`` when the report's inventory scope is not the analysis root.
+ENTITY_COUNTS_KEY: Final = "entity_counts"
+#: The inventory counts the store states on both inventory branches.
+_INVENTORY_POPULATION_KEYS: Final[tuple[str, ...]] = ("files", "lines")
+
+
+def _kept(block: object, keys: tuple[str, ...]) -> dict[str, object]:
+    mapping = as_mapping(block)
+    return {key: mapping[key] for key in keys if key in mapping}
+
+
+def _inventory_block(
+    memory_inventory: Mapping[str, object], stored: Mapping[str, object]
+) -> dict[str, object]:
+    """The stored counts, on the inventory branch the surface took."""
+    if ENTITY_COUNTS_KEY not in memory_inventory:
+        return dict(stored)
+    return {
+        **_kept(stored, _INVENTORY_POPULATION_KEYS),
+        ENTITY_COUNTS_KEY: memory_inventory[ENTITY_COUNTS_KEY],
+    }
+
+
+def _security_block(
+    memory_block: object, stored: Mapping[str, object]
+) -> dict[str, object]:
+    """The stored counts with the surface's presentation keys, or the stored
+    metrics-skipped word as it stands."""
+    if stored.get("available") is False:
+        return dict(stored)
+    return {**stored, **_kept(memory_block, PRESENTATION_SECURITY_KEYS)}
+
+
+def _place(payload: dict[str, object], key: str, block: Mapping[str, object]) -> None:
+    """A block the surface omits when it has nothing to say."""
+    if block:
+        payload[key] = dict(block)
+    else:
+        payload.pop(key, None)
+
+
+def store_summary_payload(
+    memory: Mapping[str, object], stored: ServedRunSummary
+) -> dict[str, object]:
+    """The run summary built from the store's blocks.
+
+    Every field the store does not carry is the surface's own answer, so
+    the two payloads can differ only where the store and the memory do.
+    """
+    payload = dict(memory)
+    payload["mode"] = stored.mode
+    payload["baseline"] = {
+        **stored.baseline,
+        **_kept(memory.get("baseline"), EXECUTION_BASELINE_KEYS),
+    }
+    payload["metrics_baseline"] = dict(stored.metrics_baseline)
+    payload["inventory"] = _inventory_block(
+        as_mapping(memory.get("inventory")), stored.inventory
+    )
+    payload["health"] = dict(stored.health)
+    payload["findings"] = dict(stored.findings)
+    payload["diff"] = dict(stored.diff)
+    _place(payload, "analysis_profile", stored.analysis_profile)
+    _place(payload, "dead_code", stored.dead_code)
+    _place(payload, "coverage_join", stored.coverage_join)
+    _place(
+        payload,
+        "security_surfaces",
+        _security_block(memory.get("security_surfaces"), stored.security_surfaces),
+    )
+    return payload
+
+
+def _summary_wire(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _summary_agrees(stored: dict[str, object], memory: dict[str, object]) -> bool:
+    """Byte for byte on the wire: every field, its key order, its JSON type."""
+    return _summary_wire(stored) == _summary_wire(memory)
+
+
+def _keys_of(first: Mapping[str, object], second: Mapping[str, object]) -> list[str]:
+    return [*first, *(key for key in second if key not in first)]
+
+
+def _same_field(
+    stored: Mapping[str, object], memory: Mapping[str, object], key: str
+) -> bool:
+    if (key in stored) != (key in memory):
+        return False
+    return _summary_wire(stored.get(key)) == _summary_wire(memory.get(key))
+
+
+def summary_divergence(
+    stored: Mapping[str, object], memory: Mapping[str, object]
+) -> tuple[str, ...]:
+    """The fields where the two answers differ: a block by its differing
+    keys, and the block itself when only its key order differs."""
+    fields: list[str] = []
+    for key in _keys_of(memory, stored):
+        if _same_field(stored, memory, key):
+            continue
+        stored_block, memory_block = stored.get(key), memory.get(key)
+        if isinstance(stored_block, Mapping) and isinstance(memory_block, Mapping):
+            inner = [
+                f"{key}.{name}"
+                for name in _keys_of(memory_block, stored_block)
+                if not _same_field(stored_block, memory_block, name)
+            ]
+            fields.extend(inner or [key])
+        else:
+            fields.append(key)
+    if not fields and _summary_wire(stored) != _summary_wire(memory):
+        fields.append("<field order>")
+    return tuple(fields)
+
+
+def _named_divergence(
+    outcome: RunStoreServingOutcome,
+    candidate: Mapping[str, object] | None,
+    memory: Mapping[str, object],
+) -> RunStoreServingOutcome:
+    """A divergent outcome with the fields that diverged joined to the
+    door's own detail; any other outcome as it stands."""
+    if outcome.reason != SERVING_REASON_DIVERGENT or candidate is None:
+        return outcome
+    named = "diverging: " + ", ".join(summary_divergence(candidate, memory))
+    return replace(
+        outcome, detail="; ".join(part for part in (outcome.detail, named) if part)
+    )
+
+
+def served_run_summary(
+    record: MCPRunRecord, memory: Mapping[str, object]
+) -> tuple[dict[str, object], RunStoreServingOutcome]:
+    """The run summary to answer for one record, and where it came from.
+
+    ``memory`` is the answer the surface built from the record; the store's
+    is built from it and the store's blocks, and served only when the two
+    are the same bytes.
+    """
+    stored, outcome = read_run_store_summary(
+        root=record.root, link=record.execution.run_snapshot_link
+    )
+    candidate = None if stored is None else store_summary_payload(memory, stored)
+    payload, served = _shadow_read(
+        dict(memory), (candidate, outcome), agrees=_summary_agrees
+    )
+    return payload, _named_divergence(served, candidate, memory)
+
+
 __all__ = [
+    "ENTITY_COUNTS_KEY",
+    "EXECUTION_BASELINE_KEYS",
+    "PRESENTATION_SECURITY_KEYS",
     "memory_authority_candidates",
     "memory_slices",
     "served_authority_candidates",
+    "served_run_summary",
     "served_slices",
+    "store_summary_payload",
+    "summary_divergence",
 ]

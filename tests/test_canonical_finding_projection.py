@@ -159,6 +159,9 @@ _MEMORY_ONLY_SUMMARY_KEYS: Mapping[str, str] = {
     "failures": "execution",
     "drifted_files": "execution",
     "next_tool": "presentation",
+    # Consumer migration C1: where the answer itself came from, stated by the
+    # serving edge on every answer -- provenance, not a field of either source.
+    "serving": "provenance of the answer",
 }
 
 #: Attached by the surface only when it has something to say (the hygiene
