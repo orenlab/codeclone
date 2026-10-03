@@ -469,11 +469,27 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     cached_segments.extend(
                         _segment_to_group_item(segment) for segment in neutral.segments
                     )
-                    cached_semantic_events.extend(neutral.semantic_facts.events)
-                    cached_function_contract_summaries.extend(
-                        neutral.semantic_facts.function_contract_summaries
-                    )
+                    # A cached row becomes this run's facts only where this
+                    # run's own walk would have produced them: the cold path
+                    # keeps every metrics-walk fact -- the semantic events,
+                    # the contract summaries, the relationship facts beside
+                    # the metrics -- only when the metrics run
+                    # (``parallelism.process``), so a metrics-skipping run
+                    # over a warm cache may not take them back from a row an
+                    # earlier run wrote.  Taken anyway, they published an
+                    # authority tier and a call graph beside a population
+                    # that says the metrics were disabled, under a store run
+                    # id the same run on a cold cache never gets.
                     if not boot.args.skip_metrics:
+                        cached_semantic_events.extend(neutral.semantic_facts.events)
+                        cached_function_contract_summaries.extend(
+                            neutral.semantic_facts.function_contract_summaries
+                        )
+                        cached_relationship_facts.extend(
+                            _decode_cached_function_relationship_facts(
+                                cached.module_dependent.function_relationship_facts
+                            )
+                        )
                         (
                             class_metrics,
                             module_deps,
@@ -520,11 +536,6 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                         )
                         for group_dict in (
                             cached.module_dependent.structural_findings or ()
-                        )
-                    )
-                    cached_relationship_facts.extend(
-                        _decode_cached_function_relationship_facts(
-                            cached.module_dependent.function_relationship_facts
                         )
                     )
                     continue
