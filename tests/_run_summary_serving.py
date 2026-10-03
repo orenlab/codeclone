@@ -32,7 +32,7 @@ store beside the surface (the Phase 39S test-import law binds
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -46,8 +46,8 @@ from codeclone.api.run_store_serving import (
     ServedRunSummary,
     read_run_store_summary,
 )
+from codeclone.canonical import store as store_module
 from codeclone.canonical.model import CanonicalModel
-from codeclone.canonical.store import RunStore
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests import conftest as corpora
@@ -308,88 +308,68 @@ class SummaryPopulations:
 
 # -- one store row replaced: the carrier perturbations ----------------------
 #
-# Each perturbation replaces ONE stored row (or record) of a run as the
-# store hands it back, so a pin can show the field that row carries moves --
-# and only through the store: the memory answer of the execution is untouched.
+# Each perturbation replaces ONE stored row (or record) of a run as the store
+# decodes it -- between the member decoder and the model assembly, so the
+# whole read and the bounded read meet the same replaced row -- and a pin can
+# show the field that row carries moves, and only through the store: the
+# memory answer of the execution is untouched.
 
-_Perturb = Callable[[CanonicalModel], CanonicalModel]
-
-
-def _analysis(model: CanonicalModel, **changes: Any) -> CanonicalModel:
-    facts = replace(model.facts, analysis=replace(model.facts.analysis, **changes))
-    return replace(model, facts=facts)
+_Rows = dict[str, list[object]]
+_Perturb = Callable[[_Rows], None]
 
 
-def _comparison(model: CanonicalModel, **changes: Any) -> CanonicalModel:
-    facts = replace(model.facts, comparison=replace(model.facts.comparison, **changes))
-    return replace(model, facts=facts)
+def _first(rows: list[object], match: Callable[[Any], bool]) -> int:
+    """The index of the first matching row, in a content-derived order."""
+    ordered = sorted(range(len(rows)), key=lambda index: repr(rows[index]))
+    return next(index for index in ordered if match(rows[index]))
 
 
-def _evaluation(model: CanonicalModel, **changes: Any) -> CanonicalModel:
-    facts = replace(model.facts, evaluation=replace(model.facts.evaluation, **changes))
-    return replace(model, facts=facts)
+def _edited(
+    family: str,
+    edit: Callable[[Any], object],
+    match: Callable[[Any], bool] = lambda _row: True,
+) -> _Perturb:
+    def perturb(collected: _Rows) -> None:
+        rows = collected.get(family)
+        if rows is not None:  # a family a bounded read did not read
+            index = _first(rows, match)
+            rows[index] = edit(rows[index])
+
+    return perturb
 
 
-def _bumped(record: object, name: str) -> object:
-    return replace(record, **{name: getattr(record, name) + 1})  # type: ignore[type-var]
+def _dropped(family: str) -> _Perturb:
+    def perturb(collected: _Rows) -> None:
+        rows = collected.get(family)
+        if rows is not None:  # a family a bounded read did not read
+            del rows[_first(rows, lambda _row: True)]
+
+    return perturb
 
 
-def _first_replaced(
-    rows: Iterable[object],
-    match: Callable[[object], bool],
-    edit: Callable[[object], object],
-) -> frozenset[object]:
-    """The rows with the first matching one (in their sorted order) edited."""
-    ordered = sorted(rows, key=repr)
-    target = next(row for row in ordered if match(row))
-    return frozenset(edit(row) if row is target else row for row in ordered)
+def _bumped(name: str) -> Callable[[Any], object]:
+    return lambda row: replace(row, **{name: getattr(row, name) + 1})
 
 
-def _without_first(rows: Iterable[object]) -> frozenset[object]:
-    ordered = sorted(rows, key=repr)
-    return frozenset(ordered[1:])
-
-
-def _population(model: CanonicalModel, **changes: Any) -> CanonicalModel:
-    record = model.facts.analysis.analysis_population
-    return _analysis(model, analysis_population=replace(record, **changes))  # type: ignore[type-var]
-
-
-def _raised_profile(model: CanonicalModel) -> CanonicalModel:
-    record = model.facts.analysis.analysis_population
-    assert record is not None
-    raised = tuple((name, value + 1) for name, value in record.analysis_profile)
-    return _population(model, analysis_profile=raised)
-
-
-def _scalars(name: str) -> _Perturb:
-    return lambda model: _analysis(
-        model, run_scalars=_bumped(model.facts.analysis.run_scalars, name)
+def _raised_profile(row: Any) -> object:
+    return replace(
+        row,
+        analysis_profile=tuple(
+            (name, value + 1) for name, value in row.analysis_profile
+        ),
     )
 
 
 def _delta(family: str, term: str) -> _Perturb:
-    def perturb(model: CanonicalModel) -> CanonicalModel:
-        rows = _first_replaced(
-            getattr(model.facts.comparison, family),
-            lambda row: getattr(row, "delta", None) == term,
-            lambda row: _bumped(row, "value"),
-        )
-        return _comparison(model, **{family: rows})
-
-    return perturb
+    return _edited(family, _bumped("value"), lambda row: row.delta == term)
 
 
 def _novelty(family: str, word: str, becomes: str) -> _Perturb:
-    def perturb(model: CanonicalModel) -> CanonicalModel:
-        rows = _first_replaced(
-            getattr(model.facts.comparison, family),
-            lambda row: getattr(row, "novelty", None) == word,
-            lambda row: replace(row, novelty=becomes),  # type: ignore[type-var]
-        )
-        return _comparison(model, **{family: rows})
-
-    return perturb
+    return _edited(
+        family,
+        lambda row: replace(row, novelty=becomes),
+        lambda row: row.novelty == word,
+    )
 
 
 #: Each carrier: (population, one stored row replaced, the answer fields the
@@ -398,47 +378,53 @@ def _novelty(family: str, word: str, becomes: str) -> _Perturb:
 STORE_ROW_PERTURBATIONS: dict[str, tuple[str, _Perturb, tuple[str, ...]]] = {
     "analysis_mode": (
         "trusted",
-        lambda model: _population(model, analysis_mode="full_perturbed"),
+        _edited(
+            "analysis_population",
+            lambda row: replace(row, analysis_mode="full_perturbed"),
+        ),
         ("mode",),
     ),
-    "analysis_profile": ("trusted", _raised_profile, ("analysis_profile.min_loc",)),
+    "analysis_profile": (
+        "trusted",
+        _edited("analysis_population", _raised_profile),
+        ("analysis_profile.min_loc",),
+    ),
     "baseline_witness": (
         "trusted",
-        lambda model: _comparison(
-            model,
-            baseline_witness=replace(
-                model.facts.comparison.baseline_witness,  # type: ignore[type-var]
-                python_tag="cp399",
-            ),
-        ),
+        _edited("baseline_witness", lambda row: replace(row, python_tag="cp399")),
         ("baseline.baseline_python_tag",),
     ),
     "metrics_baseline_witness": (
         "trusted",
-        lambda model: _comparison(
-            model,
-            metrics_baseline_witness=replace(
-                model.facts.comparison.metrics_baseline_witness,  # type: ignore[type-var]
-                loaded=False,
-                status="missing",
-            ),
+        _edited(
+            "metrics_baseline_witness",
+            lambda row: replace(row, loaded=False, status="missing"),
         ),
         ("metrics_baseline.loaded", "metrics_baseline.status"),
     ),
-    "run_scalars_files": ("trusted", _scalars("files_found"), ("inventory.files",)),
-    "run_scalars_lines": ("trusted", _scalars("parsed_lines"), ("inventory.lines",)),
+    "run_scalars_files": (
+        "trusted",
+        _edited("run_scalar", _bumped("files_found")),
+        ("inventory.files",),
+    ),
+    "run_scalars_lines": (
+        "trusted",
+        _edited("run_scalar", _bumped("parsed_lines")),
+        ("inventory.lines",),
+    ),
     "run_scalars_functions": (
         "trusted",
-        _scalars("functions"),
+        _edited("run_scalar", _bumped("functions")),
         ("inventory.functions",),
     ),
-    "run_scalars_classes": ("trusted", _scalars("classes"), ("inventory.classes",)),
+    "run_scalars_classes": (
+        "trusted",
+        _edited("run_scalar", _bumped("classes")),
+        ("inventory.classes",),
+    ),
     "health_result": (
         "trusted",
-        lambda model: _evaluation(
-            model,
-            health_result=_bumped(model.facts.evaluation.health_result, "score"),
-        ),
+        _edited("health_result", _bumped("score")),
         ("health.score",),
     ),
     "health_delta": (
@@ -448,10 +434,7 @@ STORE_ROW_PERTURBATIONS: dict[str, tuple[str, _Perturb, tuple[str, ...]]] = {
     ),
     "dead_symbol_group": (
         "trusted",
-        lambda model: _analysis(
-            model,
-            dead_symbol_groups=_without_first(model.facts.analysis.dead_symbol_groups),
-        ),
+        _dropped("dead_symbol_group"),
         ("findings.total", "findings.by_family", "dead_code.total"),
     ),
     "dead_symbol_novelty": (
@@ -476,47 +459,47 @@ STORE_ROW_PERTURBATIONS: dict[str, tuple[str, _Perturb, tuple[str, ...]]] = {
     ),
     "dead_code_summary": (
         "trusted",
-        lambda model: _analysis(
-            model,
-            dead_code_summary=_bumped(
-                model.facts.analysis.dead_code_summary, "suppressed"
-            ),
-        ),
+        _edited("dead_code_summary", _bumped("suppressed")),
         ("dead_code.suppressed",),
     ),
     "coverage_join": (
         "coverage_ok",
-        lambda model: _analysis(
-            model,
-            coverage_join=_bumped(
-                model.facts.analysis.coverage_join, "hotspot_threshold_percent"
-            ),
-        ),
+        _edited("coverage_join", _bumped("hotspot_threshold_percent")),
         ("coverage_join.hotspot_threshold_percent",),
     ),
     "security_surface": (
         "projection_corpus",
-        lambda model: _analysis(
-            model,
-            security_surfaces=_without_first(model.facts.analysis.security_surfaces),
-        ),
+        _dropped("security_surface"),
         ("security_surfaces.items",),
     ),
+}
+
+#: Rows of families the run summary does NOT read, replaced the same way:
+#: the answer must not move (the population carries each family's rows).
+UNREAD_ROW_PERTURBATIONS: dict[str, tuple[str, _Perturb]] = {
+    "unit_span": ("trusted", _dropped("unit_span")),
+    "relationship_observation": ("trusted", _dropped("relationship_observation")),
+    "dead_code_observation": ("trusted", _dropped("dead_code_observation")),
+    "candidate": ("projection_corpus", _dropped("candidate")),
 }
 
 
 @contextmanager
 def store_row_replaced(perturb: _Perturb) -> Iterator[None]:
-    """Every whole-run read of the store hands back the run with one row
-    replaced, for as long as the context lasts."""
-    original = RunStore.read_run
+    """Every model the store assembles -- whole or bounded -- is assembled
+    with one decoded row replaced, for as long as the context lasts."""
+    original = store_module._collected_model
     patch = pytest.MonkeyPatch()
 
-    def _read_run(store: RunStore, run_id: str) -> CanonicalModel:
-        return perturb(original(store, run_id))
+    def _assembled(
+        collected: Mapping[str, list[object]], loaded: frozenset[str] | None = None
+    ) -> CanonicalModel:
+        rows = {family: list(found) for family, found in collected.items()}
+        perturb(rows)
+        return original(rows, loaded)
 
     try:
-        patch.setattr(RunStore, "read_run", _read_run)
+        patch.setattr(store_module, "_collected_model", _assembled)
         yield
     finally:
         patch.undo()
@@ -541,6 +524,7 @@ def shared_populations(factory: pytest.TempPathFactory) -> SummaryPopulations:
 __all__ = [
     "STORE_ROW_PERTURBATIONS",
     "SUMMARY_POPULATIONS",
+    "UNREAD_ROW_PERTURBATIONS",
     "SummaryPopulation",
     "SummaryPopulations",
     "serving_environment",

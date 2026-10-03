@@ -52,11 +52,19 @@ third reading.  Its fields are owned by the three tier projections
 (``summary_projection``, ``comparison_projection``,
 ``evaluation_projection``); this module only arranges their answers into the
 blocks the surface publishes, in the surface's key order, so the surface
-compares and never computes.  It is the one reading here that is NOT
-bounded: the tier projections take a whole model, so the run is read with
-:meth:`RunStore.read_run`, which also proves the run whole (membership,
-scope receipt, identity) -- the cost is measured and stated in the C1 wave
-report rather than hidden.
+compares and never computes.  The tier projections take a model, so the
+run is read with :func:`~codeclone.canonical.store.read_named_families`:
+the families the projections read, and no other -- every other family of
+that model is a typed absence, so a projection reaching past the
+declaration refuses instead of reading "empty".
+
+**Every reading declares its families.**  Each of the three readings here
+names the families it reads in one constant beside it
+(:data:`SERVED_SLICE_FAMILIES`, :data:`SERVED_AUTHORITY_CANDIDATE_FAMILIES`,
+:data:`RUN_SUMMARY_FAMILIES`), and each declaration is held equal to what
+the reading actually reads -- complete, and with nothing it could do
+without (``tests/test_run_summary_declared_families.py``).  A consumer
+that moves onto the store next declares its own the same way.
 """
 
 from __future__ import annotations
@@ -102,15 +110,44 @@ from codeclone.canonical.model import (
     relationship_resolution_status,
 )
 from codeclone.canonical.store import (
+    FAMILY_ADOPTION_DELTA,
     FAMILY_ANALYSIS_POPULATION,
+    FAMILY_API_SURFACE_DELTA,
+    FAMILY_BASELINE_WITNESS,
     FAMILY_CANDIDATE,
+    FAMILY_CLONE_GROUP,
+    FAMILY_CLONE_NOVELTY,
+    FAMILY_COHESION_HOTSPOT,
+    FAMILY_COMPARISON_AVAILABILITY,
+    FAMILY_COMPLEXITY_HOTSPOT,
+    FAMILY_COMPLEXITY_NOVELTY,
+    FAMILY_COUPLING_HOTSPOT,
+    FAMILY_COUPLING_NOVELTY,
+    FAMILY_COVERAGE_JOIN,
+    FAMILY_COVERAGE_UNIT,
+    FAMILY_DEAD_CODE_SUMMARY,
+    FAMILY_DEAD_SYMBOL_GROUP,
+    FAMILY_DEAD_SYMBOL_NOVELTY,
+    FAMILY_DEPENDENCY_CYCLE,
+    FAMILY_DEPENDENCY_CYCLE_NOVELTY,
     FAMILY_FILE_MODULE,
     FAMILY_GRAPH_NODE,
+    FAMILY_HEALTH_DELTA,
+    FAMILY_HEALTH_RESULT,
     FAMILY_IMPORT_OBSERVATION,
+    FAMILY_METRICS_BASELINE_WITNESS,
     FAMILY_RELATIONSHIP_OBSERVATION,
+    FAMILY_RISK_OBSERVATION,
+    FAMILY_RUN_SCALAR,
+    FAMILY_SECURITY_SURFACE,
     FAMILY_SEMANTIC_EDGE,
+    FAMILY_STRUCTURAL_GROUP,
+    FAMILY_SUPPRESSED_CLONE_GROUP,
     FAMILY_UNIT_SPAN,
+    FAMILY_UNREACHABLE_STATEMENT_GROUP,
+    FAMILY_VIOLATION,
     RunStore,
+    read_named_families,
 )
 from codeclone.canonical.summary_projection import (
     analysis_mode,
@@ -286,6 +323,15 @@ def _relationship_facts(
     )
 
 
+#: The families :func:`read_served_run_slices` reads.
+SERVED_SLICE_FAMILIES: Final = (
+    FAMILY_FILE_MODULE,
+    FAMILY_IMPORT_OBSERVATION,
+    FAMILY_RELATIONSHIP_OBSERVATION,
+    FAMILY_UNIT_SPAN,
+)
+
+
 def read_served_run_slices(
     store: RunStore, run_id: str, *, root: Path
 ) -> ServedRunSlices:
@@ -377,6 +423,17 @@ def _require_measured_authority(store: RunStore, run_id: str) -> None:
             f"run {run_id[:12]} carries no measured authority candidate "
             f"population: producer {AUTHORITY_PRODUCER_FAMILY} is {state}"
         )
+
+
+#: The families :func:`read_served_authority_candidates` reads: the
+#: execution witness, then the four the reconstruction needs.
+SERVED_AUTHORITY_CANDIDATE_FAMILIES: Final = (
+    FAMILY_ANALYSIS_POPULATION,
+    FAMILY_CANDIDATE,
+    FAMILY_FILE_MODULE,
+    FAMILY_GRAPH_NODE,
+    FAMILY_SEMANTIC_EDGE,
+)
 
 
 def read_served_authority_candidates(
@@ -513,19 +570,66 @@ def run_summary_from_model(model: CanonicalModel, *, run_id: str) -> ServedRunSu
     )
 
 
-def read_served_run_summary(store: RunStore, run_id: str) -> ServedRunSummary:
-    """Read one published run whole and arrange its summary blocks.
+#: The families the run summary's projections read -- every one, and none
+#: they could do without (``tests/test_run_summary_declared_families.py``).
+#: Measured 2026-10-03 on the sixteen served populations, flask and the
+#: self-repository: 32 of the store's 56 families.
+RUN_SUMMARY_FAMILIES: Final = (
+    FAMILY_ADOPTION_DELTA,
+    FAMILY_ANALYSIS_POPULATION,
+    FAMILY_API_SURFACE_DELTA,
+    FAMILY_BASELINE_WITNESS,
+    FAMILY_CLONE_GROUP,
+    FAMILY_CLONE_NOVELTY,
+    FAMILY_COHESION_HOTSPOT,
+    FAMILY_COMPARISON_AVAILABILITY,
+    FAMILY_COMPLEXITY_HOTSPOT,
+    FAMILY_COMPLEXITY_NOVELTY,
+    FAMILY_COUPLING_HOTSPOT,
+    FAMILY_COUPLING_NOVELTY,
+    FAMILY_COVERAGE_JOIN,
+    FAMILY_COVERAGE_UNIT,
+    FAMILY_DEAD_CODE_SUMMARY,
+    FAMILY_DEAD_SYMBOL_GROUP,
+    FAMILY_DEAD_SYMBOL_NOVELTY,
+    FAMILY_DEPENDENCY_CYCLE,
+    FAMILY_DEPENDENCY_CYCLE_NOVELTY,
+    FAMILY_FILE_MODULE,
+    FAMILY_GRAPH_NODE,
+    FAMILY_HEALTH_DELTA,
+    FAMILY_HEALTH_RESULT,
+    FAMILY_METRICS_BASELINE_WITNESS,
+    FAMILY_RISK_OBSERVATION,
+    FAMILY_RUN_SCALAR,
+    FAMILY_SECURITY_SURFACE,
+    FAMILY_SEMANTIC_EDGE,
+    FAMILY_STRUCTURAL_GROUP,
+    FAMILY_SUPPRESSED_CLONE_GROUP,
+    FAMILY_UNREACHABLE_STATEMENT_GROUP,
+    FAMILY_VIOLATION,
+)
 
-    :meth:`RunStore.read_run`, not a family read: the tier projections take
-    a model (see the module docstring).  A run the store does not hold
-    refuses typed (``UnknownRunError``), as every reading here does.
+
+def read_served_run_summary(store: RunStore, run_id: str) -> ServedRunSummary:
+    """Read the declared families of one published run and arrange its
+    summary blocks.
+
+    Bounded: :data:`RUN_SUMMARY_FAMILIES` only, each row proven against its
+    content address; a projection that reached past the declaration would
+    refuse typed (``UnreadFamilyError``, a stored answer the projection
+    cannot express), never read an empty family.  A run the store does not
+    hold refuses typed (``UnknownRunError``), as every reading here does.
     """
-    return run_summary_from_model(store.read_run(run_id), run_id=run_id)
+    model = read_named_families(store, run_id, RUN_SUMMARY_FAMILIES)
+    return run_summary_from_model(model, run_id=run_id)
 
 
 __all__ = [
     "AUTHORITY_PRODUCER_FAMILY",
+    "RUN_SUMMARY_FAMILIES",
     "SECURITY_SURFACE_COUNT_KEYS",
+    "SERVED_AUTHORITY_CANDIDATE_FAMILIES",
+    "SERVED_SLICE_FAMILIES",
     "ServedAuthorityCandidates",
     "ServedRunSlices",
     "ServedRunSummary",
