@@ -6,11 +6,13 @@
 
 """Paths an analysed repository chooses for itself stay inside it.
 
-Security review 2026-10 (A-01, A-02, A-05, D-02), rebuilt from the
+Security review 2026-10 (A-01, A-02, A-04, A-05, D-02), rebuilt from the
 reviewer's reproductions. A repository whose ``pyproject.toml`` named report
 or baseline files outside itself made a plain ``codeclone .`` overwrite files
 the user owns and create directories next to them; a report path that was a
-symbolic link inside the repository reached a file of any name.
+symbolic link inside the repository reached a file of any name; a committed
+link in place of the cache database turned a file outside the repository into
+a cache store.
 
 The model these tests pin: a path from the repository's own configuration is
 the repository author's word and must resolve inside the repository; a path
@@ -349,3 +351,25 @@ def test_service_path_from_pyproject_outside_repository_is_refused(
     assert code == 2, out
     assert _tree(box.victim) == before
     assert _squash(f"tool.codeclone.{key} = '{outside}' must stay under") in out
+
+
+# -- A-04: the cache database behind a committed symbolic link ---------------
+
+
+def test_cache_database_behind_a_committed_symlink_is_not_opened(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    box = _sandbox(tmp_path, monkeypatch)
+    victim_db = box.victim / "important.dat"
+    victim_db.write_bytes(b"")
+    (box.repo / ".codeclone" / "db").mkdir(parents=True)
+    (box.repo / ".codeclone" / "db" / "cache.sqlite3").symlink_to(victim_db)
+    before = _tree(box.victim)
+
+    code, out = _codeclone(monkeypatch, capsys)
+
+    assert code == 0, out
+    assert _tree(box.victim) == before
+    assert (box.repo / ".codeclone" / "db" / "cache.sqlite3").is_symlink()

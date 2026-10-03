@@ -440,6 +440,7 @@ Configuration is validated when CodeClone initializes:
 - **Unknown keys**: any key outside the documented set is a contract error
 - **Type mismatch**: key value does not match declared type → error
 - **Path validation**: `baseline`, `audit_path`, `intent_registry_path` must be writable or creatable; every path-valued key set in `pyproject.toml` (report outputs, `baseline`, `cache_path`, `coverage_xml`, memory and analytics state paths) must stay under the repository root after symbolic links are followed (for default memory store paths in a linked worktree, that root is the main checkout)
+- **Service databases**: CodeClone's own SQLite stores are opened only as regular files; a database file that is a symbolic link, or a linked directory inside `.codeclone/`, is refused (`.codeclone/` itself may be a link)
 - **Range validation**: `fail_health` must be 0–100; retention days must be positive
 - **Retention policy**: audit and intent records respect `*_retention_days` settings; records older than the configured age are automatically purged on cleanup
 - **Setup safety**: `codeclone setup apply` refuses filesystem writes without explicit `--yes` confirmation or `--dry-run` preview; `--plan-id` binding prevents stale plans from applying

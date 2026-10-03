@@ -22,6 +22,55 @@ _SQLITE_BUSY_TIMEOUT_MS = 5000
 _SYNCHRONOUS_LEVELS = ("NORMAL", "FULL", "EXTRA", "OFF")
 _AUTO_VACUUM_LEVELS = ("NONE", "FULL", "INCREMENTAL")
 
+#: The repository workspace directory, spelled as ``paths.workspace`` spells
+#: it (``WORKSPACE_DIR_NAME``); this ring cannot import that owner, and a test
+#: pins the two together. The workspace directory itself may be a link -- then
+#: every store moves with it -- but nothing below it may be.
+_WORKSPACE_DIR_NAME = ".codeclone"
+
+
+class UnsafeDatabasePathError(OSError):
+    """A service database path that is a symbolic link or not a regular file.
+
+    An ``OSError`` on purpose: every store already treats a database it cannot
+    open as an operating-system failure and degrades or refuses in its own
+    typed way, so this refusal reaches each of them by the route they have.
+    """
+
+
+def _refuse_unsafe_database_path(path: Path) -> None:
+    """Refuse a database file reached through a link, or one that is no file.
+
+    A repository can commit the cache database in its workspace directory as
+    a symbolic link to any file the user owns; opening it turned an empty
+    file into a cache store and added cache tables to somebody else's SQLite
+    database (security review 2026-10, A-04). The database file is checked, and so is
+    every directory between it and the workspace directory when the path lies
+    in one. Directories above the workspace are the user's own layout and are
+    not judged here: a temporary directory behind ``/var -> /private/var`` is
+    an ordinary place for a store.
+    """
+
+    inside_workspace: list[Path] = []
+    for parent in path.parents:
+        if parent.name == _WORKSPACE_DIR_NAME:
+            break
+        inside_workspace.append(parent)
+    else:
+        inside_workspace = []
+    for component in (path, *inside_workspace):
+        if component.is_symlink():
+            raise UnsafeDatabasePathError(
+                f"The CodeClone database path {component} is a symbolic link, "
+                "and CodeClone never opens its databases through one; remove "
+                "the link and run again."
+            )
+    if path.exists() and not path.is_file():
+        raise UnsafeDatabasePathError(
+            f"The CodeClone database path {path} is not a regular file; "
+            "remove what is there and run again."
+        )
+
 
 def _pragma_choice(name: str, value: str, allowed: tuple[str, ...]) -> str:
     """One optional pragma value, refused by name unless it is one of *allowed*.
@@ -63,7 +112,12 @@ def open_sqlite_db(
     that on the only occasion the question is still open.  A store that does
     not pass it keeps SQLite's default (``NONE``): freed pages stay on the
     freelist and are reused, never returned.
+
+    A path that is a symbolic link, or that runs through one inside the
+    workspace directory, is refused before any directory is created or any
+    file is opened (:func:`_refuse_unsafe_database_path`).
     """
+    _refuse_unsafe_database_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     # Only pass ``factory`` when supplied so the default path stays byte-identical
     # to a bare ``sqlite3.connect`` (some callers and test doubles replace
@@ -119,6 +173,7 @@ def open_sqlite_db_readonly(
 ) -> sqlite3.Connection:
     """Open an existing SQLite database without allowing writes or creation."""
 
+    _refuse_unsafe_database_path(path)
     resolved = path.resolve(strict=True)
     uri = f"file:{quote(str(resolved), safe='/')}?mode=ro"
     if factory is None:
@@ -174,6 +229,7 @@ def initialize_schema_v1(
 
 
 __all__ = [
+    "UnsafeDatabasePathError",
     "get_meta_value",
     "initialize_schema_v1",
     "open_sqlite_db",
