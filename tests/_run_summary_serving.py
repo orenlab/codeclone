@@ -32,10 +32,11 @@ store beside the surface (the Phase 39S test-import law binds
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -45,6 +46,8 @@ from codeclone.api.run_store_serving import (
     ServedRunSummary,
     read_run_store_summary,
 )
+from codeclone.canonical.model import CanonicalModel
+from codeclone.canonical.store import RunStore
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests import conftest as corpora
@@ -303,6 +306,222 @@ class SummaryPopulations:
         return population
 
 
+# -- one store row replaced: the carrier perturbations ----------------------
+#
+# Each perturbation replaces ONE stored row (or record) of a run as the
+# store hands it back, so a pin can show the field that row carries moves --
+# and only through the store: the memory answer of the execution is untouched.
+
+_Perturb = Callable[[CanonicalModel], CanonicalModel]
+
+
+def _analysis(model: CanonicalModel, **changes: Any) -> CanonicalModel:
+    facts = replace(model.facts, analysis=replace(model.facts.analysis, **changes))
+    return replace(model, facts=facts)
+
+
+def _comparison(model: CanonicalModel, **changes: Any) -> CanonicalModel:
+    facts = replace(model.facts, comparison=replace(model.facts.comparison, **changes))
+    return replace(model, facts=facts)
+
+
+def _evaluation(model: CanonicalModel, **changes: Any) -> CanonicalModel:
+    facts = replace(model.facts, evaluation=replace(model.facts.evaluation, **changes))
+    return replace(model, facts=facts)
+
+
+def _bumped(record: object, name: str) -> object:
+    return replace(record, **{name: getattr(record, name) + 1})  # type: ignore[type-var]
+
+
+def _first_replaced(
+    rows: Iterable[object],
+    match: Callable[[object], bool],
+    edit: Callable[[object], object],
+) -> frozenset[object]:
+    """The rows with the first matching one (in their sorted order) edited."""
+    ordered = sorted(rows, key=repr)
+    target = next(row for row in ordered if match(row))
+    return frozenset(edit(row) if row is target else row for row in ordered)
+
+
+def _without_first(rows: Iterable[object]) -> frozenset[object]:
+    ordered = sorted(rows, key=repr)
+    return frozenset(ordered[1:])
+
+
+def _population(model: CanonicalModel, **changes: Any) -> CanonicalModel:
+    record = model.facts.analysis.analysis_population
+    return _analysis(model, analysis_population=replace(record, **changes))  # type: ignore[type-var]
+
+
+def _raised_profile(model: CanonicalModel) -> CanonicalModel:
+    record = model.facts.analysis.analysis_population
+    assert record is not None
+    raised = tuple((name, value + 1) for name, value in record.analysis_profile)
+    return _population(model, analysis_profile=raised)
+
+
+def _scalars(name: str) -> _Perturb:
+    return lambda model: _analysis(
+        model, run_scalars=_bumped(model.facts.analysis.run_scalars, name)
+    )
+
+
+def _delta(family: str, term: str) -> _Perturb:
+    def perturb(model: CanonicalModel) -> CanonicalModel:
+        rows = _first_replaced(
+            getattr(model.facts.comparison, family),
+            lambda row: getattr(row, "delta", None) == term,
+            lambda row: _bumped(row, "value"),
+        )
+        return _comparison(model, **{family: rows})
+
+    return perturb
+
+
+def _novelty(family: str, word: str, becomes: str) -> _Perturb:
+    def perturb(model: CanonicalModel) -> CanonicalModel:
+        rows = _first_replaced(
+            getattr(model.facts.comparison, family),
+            lambda row: getattr(row, "novelty", None) == word,
+            lambda row: replace(row, novelty=becomes),  # type: ignore[type-var]
+        )
+        return _comparison(model, **{family: rows})
+
+    return perturb
+
+
+#: Each carrier: (population, one stored row replaced, the answer fields the
+#: replacement must move).  The fields are a floor -- a row may carry more
+#: than one field -- and the pin holds the floor, never "something moved".
+STORE_ROW_PERTURBATIONS: dict[str, tuple[str, _Perturb, tuple[str, ...]]] = {
+    "analysis_mode": (
+        "trusted",
+        lambda model: _population(model, analysis_mode="full_perturbed"),
+        ("mode",),
+    ),
+    "analysis_profile": ("trusted", _raised_profile, ("analysis_profile.min_loc",)),
+    "baseline_witness": (
+        "trusted",
+        lambda model: _comparison(
+            model,
+            baseline_witness=replace(
+                model.facts.comparison.baseline_witness,  # type: ignore[type-var]
+                python_tag="cp399",
+            ),
+        ),
+        ("baseline.baseline_python_tag",),
+    ),
+    "metrics_baseline_witness": (
+        "trusted",
+        lambda model: _comparison(
+            model,
+            metrics_baseline_witness=replace(
+                model.facts.comparison.metrics_baseline_witness,  # type: ignore[type-var]
+                loaded=False,
+                status="missing",
+            ),
+        ),
+        ("metrics_baseline.loaded", "metrics_baseline.status"),
+    ),
+    "run_scalars_files": ("trusted", _scalars("files_found"), ("inventory.files",)),
+    "run_scalars_lines": ("trusted", _scalars("parsed_lines"), ("inventory.lines",)),
+    "run_scalars_functions": (
+        "trusted",
+        _scalars("functions"),
+        ("inventory.functions",),
+    ),
+    "run_scalars_classes": ("trusted", _scalars("classes"), ("inventory.classes",)),
+    "health_result": (
+        "trusted",
+        lambda model: _evaluation(
+            model,
+            health_result=_bumped(model.facts.evaluation.health_result, "score"),
+        ),
+        ("health.score",),
+    ),
+    "health_delta": (
+        "trusted",
+        _delta("health_delta", "health_delta"),
+        ("health.delta", "diff.health_delta"),
+    ),
+    "dead_symbol_group": (
+        "trusted",
+        lambda model: _analysis(
+            model,
+            dead_symbol_groups=_without_first(model.facts.analysis.dead_symbol_groups),
+        ),
+        ("findings.total", "findings.by_family", "dead_code.total"),
+    ),
+    "dead_symbol_novelty": (
+        "trusted",
+        _novelty("dead_symbol_novelty", "known", "new"),
+        ("findings.new", "findings.known", "findings.new_by_source_kind"),
+    ),
+    "clone_novelty": (
+        "trusted",
+        _novelty("clone_novelty", "new", "known"),
+        ("diff.new_clones", "findings.new", "findings.known"),
+    ),
+    "adoption_delta": (
+        "trusted",
+        _delta("adoption_delta", "docstring_permille_delta"),
+        ("diff.docstring_permille_delta",),
+    ),
+    "api_surface_delta": (
+        "trusted",
+        _delta("api_surface_delta", "new_api_symbols"),
+        ("diff.new_api_symbols",),
+    ),
+    "dead_code_summary": (
+        "trusted",
+        lambda model: _analysis(
+            model,
+            dead_code_summary=_bumped(
+                model.facts.analysis.dead_code_summary, "suppressed"
+            ),
+        ),
+        ("dead_code.suppressed",),
+    ),
+    "coverage_join": (
+        "coverage_ok",
+        lambda model: _analysis(
+            model,
+            coverage_join=_bumped(
+                model.facts.analysis.coverage_join, "hotspot_threshold_percent"
+            ),
+        ),
+        ("coverage_join.hotspot_threshold_percent",),
+    ),
+    "security_surface": (
+        "projection_corpus",
+        lambda model: _analysis(
+            model,
+            security_surfaces=_without_first(model.facts.analysis.security_surfaces),
+        ),
+        ("security_surfaces.items",),
+    ),
+}
+
+
+@contextmanager
+def store_row_replaced(perturb: _Perturb) -> Iterator[None]:
+    """Every whole-run read of the store hands back the run with one row
+    replaced, for as long as the context lasts."""
+    original = RunStore.read_run
+    patch = pytest.MonkeyPatch()
+
+    def _read_run(store: RunStore, run_id: str) -> CanonicalModel:
+        return perturb(original(store, run_id))
+
+    try:
+        patch.setattr(RunStore, "read_run", _read_run)
+        yield
+    finally:
+        patch.undo()
+
+
 #: One set of populations per pytest session, whichever module asks first:
 #: the trees and the executions are the expensive part, and a module-scoped
 #: fixture would build them once per module.
@@ -320,10 +539,12 @@ def shared_populations(factory: pytest.TempPathFactory) -> SummaryPopulations:
 
 
 __all__ = [
+    "STORE_ROW_PERTURBATIONS",
     "SUMMARY_POPULATIONS",
     "SummaryPopulation",
     "SummaryPopulations",
     "serving_environment",
     "shared_populations",
+    "store_row_replaced",
     "stored_blocks",
 ]
