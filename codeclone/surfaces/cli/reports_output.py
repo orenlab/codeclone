@@ -10,7 +10,7 @@ import sys
 import webbrowser
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 from ... import ui_messages as ui
 from ...contracts import ExitCode
@@ -159,6 +159,24 @@ def write_report_outputs(
     return html_report_path
 
 
+#: Why a report is not written to a path whose last component is a link.
+_REASON_OUTPUT_IS_SYMLINK = (
+    "it is a symbolic link, and a report is never written through one"
+)
+
+
+class _OutputPathIsSymlinkError(OSError):
+    """A report path whose last component is a symbolic link."""
+
+
+def _resolve_report_target(out: Path) -> Path:
+    """The path a report would be written to, unless *out* is itself a link."""
+
+    if out.is_symlink():
+        raise _OutputPathIsSymlinkError(_REASON_OUTPUT_IS_SYMLINK)
+    return out.resolve()
+
+
 def _validate_output_path(
     path: str,
     *,
@@ -168,23 +186,38 @@ def _validate_output_path(
     invalid_message: Callable[..., str],
     invalid_path_message: Callable[..., str],
 ) -> Path:
+    """Resolve a report path first, then decide whether it may be written.
+
+    The suffix used to be checked on the path as spelled and the write went
+    to the path as resolved, so ``reports/out.txt`` committed as a link to a
+    dotfile passed the ``.txt`` check and overwrote the dotfile (security
+    review 2026-10, A-02). A path whose last component is a symbolic link is
+    refused outright, whether the repository's configuration or the user's
+    command line named it: the user typed a path inside their checkout, not
+    the link's target. The suffix is then checked on the resolved path, the
+    one the report is actually written to.
+    """
+
     out = Path(path).expanduser()
-    if out.suffix.lower() != expected_suffix:
-        console.print(
-            ui.fmt_contract_error(
-                invalid_message(label=label, path=out, expected_suffix=expected_suffix)
-            )
-        )
-        sys.exit(ExitCode.CONTRACT_ERROR)
     try:
-        return out.resolve()
+        resolved = _resolve_report_target(out)
     except OSError as exc:
-        console.print(
-            ui.fmt_contract_error(
-                invalid_path_message(label=label, path=out, error=exc)
-            )
+        _exit_contract_error(
+            console, invalid_path_message(label=label, path=out, error=exc)
         )
-        sys.exit(ExitCode.CONTRACT_ERROR)
+    if resolved.suffix.lower() != expected_suffix:
+        _exit_contract_error(
+            console,
+            invalid_message(label=label, path=out, expected_suffix=expected_suffix),
+        )
+    return resolved
+
+
+def _exit_contract_error(console: PrinterLike, message: str) -> NoReturn:
+    """Print *message* as a contract error and exit with its code."""
+
+    console.print(ui.fmt_contract_error(message))
+    sys.exit(ExitCode.CONTRACT_ERROR)
 
 
 def _report_path_origins(argv: Sequence[str]) -> dict[str, ReportPathOrigin | None]:

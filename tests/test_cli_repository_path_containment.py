@@ -6,16 +6,18 @@
 
 """Paths an analysed repository chooses for itself stay inside it.
 
-Security review 2026-10 (A-01, A-05, D-02), rebuilt from the reviewer's
-reproductions. A repository whose ``pyproject.toml`` named report or baseline
-files outside itself made a plain ``codeclone .`` overwrite files the user
-owns and create directories next to them.
+Security review 2026-10 (A-01, A-02, A-05, D-02), rebuilt from the
+reviewer's reproductions. A repository whose ``pyproject.toml`` named report
+or baseline files outside itself made a plain ``codeclone .`` overwrite files
+the user owns and create directories next to them; a report path that was a
+symbolic link inside the repository reached a file of any name.
 
 The model these tests pin: a path from the repository's own configuration is
 the repository author's word and must resolve inside the repository; a path
-typed on the command line is the user's word and may point anywhere. Every
-victim is a plain file under the test's temporary directory, and ``HOME``
-points there too, so the ``~`` spelling has a victim of its own.
+typed on the command line is the user's word and may point anywhere; a report
+is never written through a symbolic link, whoever named it. Every victim is a
+plain file under the test's temporary directory, and ``HOME`` points there
+too, so the ``~`` spelling has a victim of its own.
 """
 
 from __future__ import annotations
@@ -240,6 +242,34 @@ def test_report_path_from_pyproject_under_symlinked_directory_is_refused(
     assert code == 2, out
     assert _tree(box.victim) == before
     assert _squash("tool.codeclone.text_out = 'reports/out.txt' must stay under") in out
+
+
+@pytest.mark.parametrize(
+    ("target", "said"),
+    [
+        ("Documents/todo.txt", ("Invalid text output path", "it is a symbolic link")),
+        ("dotrc", ()),
+    ],
+    ids=["allowed-suffix", "no-suffix"],
+)
+def test_report_path_on_the_command_line_through_planted_symlink_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    target: str,
+    said: tuple[str, ...],
+) -> None:
+    box = _sandbox(tmp_path, monkeypatch)
+    (box.repo / "reports").mkdir()
+    (box.repo / "reports" / "out.txt").symlink_to(box.victim / target)
+    before = _tree(box.victim)
+
+    code, out = _codeclone(monkeypatch, capsys, "--text", "reports/out.txt")
+
+    assert code == 2, out
+    assert _tree(box.victim) == before
+    for sentence in said:
+        assert _squash(sentence) in out
 
 
 # -- A-05: the baseline path from the repository's pyproject -----------------

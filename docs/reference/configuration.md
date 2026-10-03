@@ -68,6 +68,10 @@ command-line flag (`--html`, `--json`, `--md`, `--sarif`, `--text`,
 `--baseline`, `--coverage`, `--cache-path`); a path given on the command line is
 accepted wherever it points.
 
+A report is never written through a symbolic link: if the last component of a
+report path is a link, the run stops with a contract error whether the path
+came from `pyproject.toml` or from the command line.
+
 ## Keys
 
 ### Analysis scope and clone thresholds
