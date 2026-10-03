@@ -588,6 +588,7 @@ def _dead_code_rows(
         DeadCodeObservationRow(
             entity=parse_dead_code_entity(index, row.entity),
             observation_kind=row.observation_kind,
+            start_line=row.start_line,
             candidate_kind=row.candidate_kind,
             reference_count=row.reference_count,
             reachable=row.reachable,

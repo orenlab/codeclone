@@ -751,8 +751,10 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             wire=True,
         ),
     ),
-    # F4 (wave 4, slice K3): key (entity, observation_kind); the entity is
-    # the ratified tagged reference — the variant is identity (§2).
+    # F4 (wave 4, slice K3): key (entity, observation_kind, start_line); the
+    # entity is the ratified tagged reference — the variant is identity (§2)
+    # — and the declaration site joined the key by ruling 2026-09-28 (the F1
+    # precedent): two declarations sharing one qualname are two facts.
     "dead_code_observations": (
         FieldDeclaration(
             "abstained",
@@ -831,6 +833,16 @@ FACT_FAMILY_FIELDS: Final[dict[str, tuple[FieldDeclaration, ...]]] = {
             ANALYSIS_FACT,
             "dead_code_producer",
             "sorted unique (key, value) evidence pairs; payload, never key",
+            stored=True,
+            wire=True,
+        ),
+        FieldDeclaration(
+            "start_line",
+            ANALYSIS_FACT,
+            "dead_code_producer",
+            "declaration-site discriminator; key component (ruling "
+            "2026-09-28, the F1 precedent) — different declarations sharing "
+            "one qualname are different facts",
             stored=True,
             wire=True,
         ),

@@ -438,6 +438,36 @@ def _required_scope_id(
         return None
 
 
+def _print_metrics_baseline_required(
+    console: _PrinterLike,
+    *,
+    metrics_baseline_exists: bool,
+    scope_id: UUID | None,
+    clone_baseline_state: CloneBaselineState,
+) -> None:
+    """Say a metrics gate has no metrics baseline -- unless the clone
+    resolver has already refused this very file.
+
+    One container holds the clone and the metrics lanes, so a file the clone
+    resolver refused (with a scope id present, the refusal is about the file
+    itself -- a lane recorded under an older schema, a broken digest) is
+    refused for the metrics lanes by the same cause, and that cause is already
+    on screen in one plain sentence.  A second error sending the operator to
+    ``--baseline <path>`` would point at the file they passed (maintainer rule
+    2026-10-03: one plain sentence, no technical mud).  A problem of the
+    metrics baseline's own -- no file at all, no scope id -- keeps the line.
+    The exit code is the caller's and does not move.
+    """
+
+    same_file_already_refused = (
+        metrics_baseline_exists
+        and scope_id is not None
+        and not clone_baseline_state.trusted_for_diff
+    )
+    if not same_file_already_refused:
+        console.print(ui.fmt_contract_error(ui.ERR_METRICS_BASELINE_REQUIRED_FOR_GATES))
+
+
 def resolve_metrics_baseline_state(
     *,
     args: _BaselineArgs,
@@ -479,8 +509,11 @@ def resolve_metrics_baseline_state(
             state.status = MetricsBaselineStatus.MISMATCH_SCOPE_ID
         if _metrics_baseline_gate_requested(args) and not args.update_baseline:
             state.failure_code = ExitCode.CONTRACT_ERROR
-            console.print(
-                ui.fmt_contract_error(ui.ERR_METRICS_BASELINE_REQUIRED_FOR_GATES)
+            _print_metrics_baseline_required(
+                console,
+                metrics_baseline_exists=metrics_baseline_exists,
+                scope_id=scope_id,
+                clone_baseline_state=clone_baseline_state,
             )
     else:
         try:

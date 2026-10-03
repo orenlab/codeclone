@@ -204,6 +204,7 @@ def decode_dead_code_lane(
                     _DEAD_CODE_KINDS,
                     "dead-code candidate kind",
                 ),
+                start_line=payload.start_line[row],
                 reference_count=payload.reference_count[row],
                 reachable=row in reachable,
                 runtime_marker_count=(

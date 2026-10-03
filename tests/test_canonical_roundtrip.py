@@ -375,6 +375,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         DeadCodeObservationRow(
             entity=ModuleSymbol(md, "Exported.helper"),
             observation_kind="symbol",
+            start_line=21,
             candidate_kind="method",
             reference_count=1,
             reachable=False,
@@ -386,6 +387,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         DeadCodeObservationRow(
             entity=ModuleSymbol(md, "Exported.helper"),
             observation_kind="unreachable_statement",
+            start_line=21,
             candidate_kind="function",
             reference_count=0,
             reachable=False,
@@ -397,6 +399,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         DeadCodeObservationRow(
             entity=sz,
             observation_kind="symbol",
+            start_line=3,
             candidate_kind="function",
             reference_count=0,
             reachable=True,
@@ -408,6 +411,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         DeadCodeObservationRow(
             entity=SymbolId(fa, "A.maybe"),
             observation_kind="symbol",
+            start_line=7,
             candidate_kind="method",
             reference_count=0,
             reachable=False,
@@ -419,6 +423,7 @@ def fixture_model(reverse_insertion: bool = False) -> CanonicalModel:
         DeadCodeObservationRow(
             entity=OpaqueEntity("ext.vendor.mod", "Shim.call"),
             observation_kind="symbol",
+            start_line=1,
             candidate_kind="import",
             reference_count=2,
             reachable=False,
@@ -1440,12 +1445,18 @@ def test_known_answer_bytes_pin_the_wire_revision_0_contract() -> None:
     constant bump that closed the boundary (``canonical_model`` "3",
     ``wire`` "2") moved the digest once more and not the length, exactly as
     measured on 2026-09-05 (f37dc2c0… → d2f84c85…, 11925 bytes).
+
+    The dead-code declaration key (2026-09-28, reason: dead-code key /
+    generation bump) replaced it once more (11925 → 11952 bytes, d2f84c85…
+    → 33eea502…): ``dead_code_observations`` gained its ``start_line``
+    column, 27 bytes for the fixture's five rows; the two pins beside this
+    one moved by the same 27 bytes.
     """
     payload = encode_canonical_json(fixture_model())
-    assert len(payload) == 11925
+    assert len(payload) == 11952
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "d2f84c85cc223c14d061b415c3856de17a9e09adb551c3ba1fddab04e4416f60"
+        == "33eea50274009860bd21f1323fb71734c7f65a1dd46051cef83bf2966e4530c5"
     )
 
 
@@ -1456,10 +1467,10 @@ def test_the_comparison_house_moves_the_known_answer_bytes() -> None:
     from E4 its comparison house rides the ``comparison`` member, so it is a
     second literal -- 5044 bytes more than the unwitnessed fixture's."""
     payload = encode_canonical_json(comparison_fixture_model())
-    assert len(payload) == 16969
+    assert len(payload) == 16996
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "b024a8e84287296dba72d0222056ba93cf1e7283eb107eed90cf8ebd1f623113"
+        == "87558d2fbf97f1cf0db04599dfa2858c7574f335cefa4ae9764454fe628b903d"
     )
     assert payload != encode_canonical_json(fixture_model())
 
@@ -1470,10 +1481,10 @@ def test_the_evaluation_house_moves_the_known_answer_bytes() -> None:
     evaluated — every evaluation family and the health delta populated —
     carries both houses on the wire, a third literal."""
     payload = encode_canonical_json(evaluated_fixture_model())
-    assert len(payload) == 19298
+    assert len(payload) == 19325
     assert (
         hashlib.sha256(payload).hexdigest()
-        == "cb6d825afca5a92309f0aec5fd753a2ee702524e7c38575049e0b3af580c0cc1"
+        == "5634f5514e25f2d6581c5ea64079d6952071626c1530e3a926465d1511082da2"
     )
     assert payload != encode_canonical_json(comparison_fixture_model())
 
@@ -2332,6 +2343,7 @@ def _dead_row(
     values: dict[str, object] = {
         "entity": entity,
         "observation_kind": observation_kind,
+        "start_line": 1,
         "candidate_kind": "function",
         "reference_count": 0,
         "reachable": False,
@@ -2344,10 +2356,10 @@ def _dead_row(
     return DeadCodeObservationRow(**values)  # type: ignore[arg-type]
 
 
-def test_model_refuses_two_dead_rows_under_one_entity_and_kind() -> None:
-    """F4 key law: (entity, observation_kind) names at most one fact; two
-    DIFFERING rows under one key are refused (the one measured
-    byte-identical duplicate merges losslessly instead)."""
+def test_model_refuses_two_dead_rows_under_one_declaration() -> None:
+    """F4 key law (ruling 2026-09-28): (entity, observation_kind,
+    start_line) names at most one fact; two DIFFERING rows of one
+    declaration are refused."""
     entity = ModuleSymbol(ModuleId("pkg.m"), "f")
     model = CanonicalModel(
         facts=analysis_facts(
@@ -2361,6 +2373,30 @@ def test_model_refuses_two_dead_rows_under_one_entity_and_kind() -> None:
     )
     with pytest.raises(CanonicalModelError, match=r"dead_code_observations\.key"):
         model.normalize()
+
+
+def test_two_declarations_of_one_name_are_two_dead_code_facts() -> None:
+    """Ruling 2026-09-28: the declaration line joins the key, as F1 did for
+    risks.  A hybrid property and its same-named comparator class are two
+    declarations -- two lines, two candidate kinds -- and the model keeps
+    both; the site-blind key refused them, and 301 such groups on the
+    sqlalchemy corpus took the whole publication down."""
+    entity = ModuleSymbol(ModuleId("pkg.polymorphic"), "Property.value")
+    model = CanonicalModel(
+        facts=analysis_facts(
+            dead_code_observations=frozenset(
+                {
+                    _dead_row(entity, start_line=12, candidate_kind="method"),
+                    _dead_row(entity, start_line=16, candidate_kind="class"),
+                }
+            )
+        )
+    )
+    rows = model.normalize().facts.analysis.dead_code_observations
+    assert sorted((row.start_line, row.candidate_kind) for row in rows) == [
+        (12, "method"),
+        (16, "class"),
+    ]
 
 
 def test_one_qualname_under_two_entity_variants_is_two_facts() -> None:
@@ -2400,6 +2436,8 @@ def test_dead_row_refuses_vocabulary_and_contract_violations() -> None:
     entity = ModuleSymbol(ModuleId("pkg.m"), "f")
     with pytest.raises(CanonicalModelError, match="observation kind"):
         _dead_row(entity, "banana")
+    with pytest.raises(CanonicalModelError, match="declaration site"):
+        _dead_row(entity, start_line=0)
     with pytest.raises(CanonicalModelError, match="candidate kind"):
         _dead_row(entity, candidate_kind="banana")
     with pytest.raises(CanonicalModelError, match="non-negative"):

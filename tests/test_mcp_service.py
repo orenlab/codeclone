@@ -20525,6 +20525,62 @@ def test_mcp_never_calls_a_clone_known_without_a_comparison(
     assert warnings == [sentence], warnings
 
 
+def test_mcp_answers_an_old_dead_code_lane_with_its_one_sentence(
+    settlement_tree: Path,
+    settlement_baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """Ruling 2026-09-28, the MCP half: a baseline recorded before the
+    declaration site joined the dead-code key -- its lane in the authentic
+    schema-3 shape -- is answered with the one plain sentence in
+    ``warnings[]``, the dead-code comparison withheld, the clone comparison
+    kept, and the baseline file left byte for byte as it was."""
+
+    target = tmp_path / "old-dead-code.baseline.json"
+    target.write_bytes(settlement_baseline_without_clone.read_bytes())
+    lane_degradation.downgrade_lane_to_its_pre_migration_shape(
+        target,
+        lane_name="dead_code",
+        published_schema="4",
+        stored_schema="3",
+        dropped_column="start_line",
+    )
+    before = target.read_bytes()
+
+    document, summary = _settlement_mcp_document(settlement_tree, baseline=target)
+
+    sentence = lane_degradation.outdated_lane_sentence("dead_code", "3")
+    assert cast("list[str]", summary["warnings"]) == [sentence]
+    metrics = _mapping_child(_mapping_child(document, "metrics"), "summary")
+    dead_code = _mapping_child(metrics, "dead_code")
+    assert dead_code["baseline_diff_available"] is False
+    assert _mapping_child(summary, "diff")["new_clones"] == 1
+    assert target.read_bytes() == before
+
+
+def test_mcp_keeps_every_other_untrusted_reason_in_its_own_words(
+    settlement_tree: Path,
+    settlement_baseline_without_clone: Path,
+    tmp_path: Path,
+) -> None:
+    """The outdated lane's sentence is for the outdated lane only: a lane
+    recorded under another algorithm revision keeps the opacity line with
+    its reason code in ``warnings[]``."""
+
+    target = tmp_path / "retagged.baseline.json"
+    target.write_bytes(settlement_baseline_without_clone.read_bytes())
+    lane_degradation.retag_lane_descriptor(
+        target, lane_name="api_surface", algorithm_revision="0"
+    )
+
+    _document, summary = _settlement_mcp_document(settlement_tree, baseline=target)
+
+    (warning,) = cast("list[str]", summary["warnings"])
+    assert warning.startswith(
+        "Baseline lanes are opaque for this run: api_surface:algorithm_revision."
+    ), warning
+
+
 def test_mcp_clone_absent_from_an_intact_baseline_is_new(
     settlement_tree: Path,
     settlement_baseline_without_clone: Path,

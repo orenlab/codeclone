@@ -915,7 +915,8 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'{"abstained":false,"candidate_kind":"function",'
             b'"entity":["module","pkg.m"],"live_root_reason":null,'
             b'"observation_kind":"symbol","reachable":false,'
-            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[]}',
+            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[],'
+            b'"start_line":1}',
             "tag, head, qualname",
         ),
         # F4 shape guard: an unknown entity tag
@@ -924,7 +925,8 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'{"abstained":false,"candidate_kind":"function",'
             b'"entity":["banana","pkg.m","f"],"live_root_reason":null,'
             b'"observation_kind":"symbol","reachable":false,'
-            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[]}',
+            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[],'
+            b'"start_line":1}',
             "unknown dead-code entity tag",
         ),
         # F4 model law through the store wrapper: abstention with a root
@@ -933,8 +935,28 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
             b'{"abstained":true,"candidate_kind":"function",'
             b'"entity":["module","pkg.m","f"],"live_root_reason":"export_root",'
             b'"observation_kind":"symbol","reachable":false,'
-            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[]}',
+            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[],'
+            b'"start_line":1}',
             "mutually exclusive",
+        ),
+        # F4 shape guard: a row without its declaration site (2026-09-28)
+        (
+            "dead_code_observation",
+            b'{"abstained":false,"candidate_kind":"function",'
+            b'"entity":["module","pkg.m","f"],"live_root_reason":null,'
+            b'"observation_kind":"symbol","reachable":false,'
+            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[]}',
+            "missing 'start_line'",
+        ),
+        # F4 model law through the store wrapper: a site below the line floor
+        (
+            "dead_code_observation",
+            b'{"abstained":false,"candidate_kind":"function",'
+            b'"entity":["module","pkg.m","f"],"live_root_reason":null,'
+            b'"observation_kind":"symbol","reachable":false,'
+            b'"reference_count":0,"runtime_marker_count":0,"source_markers":[],'
+            b'"start_line":0}',
+            "declaration site",
         ),
         # F3 shape guard: a non-int count is refused by the store
         (
@@ -1069,6 +1091,8 @@ def test_corrupted_payload_byte_is_a_typed_refusal(tmp_path: Path) -> None:
         "dead-entity-not-a-triple-shape-guard",
         "dead-entity-unknown-tag-shape-guard",
         "dead-abstained-with-root-model-law",
+        "dead-missing-declaration-site-shape-guard",
+        "dead-zero-declaration-site-model-law",
         "adoption-non-int-count-shape-guard",
         "adoption-unknown-scope-tag-shape-guard",
         "adoption-zero-denominator-model-law",

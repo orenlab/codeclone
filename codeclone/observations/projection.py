@@ -221,6 +221,12 @@ def _api_surface_observations(
     )
 
 
+def _dead_code_row_order(row: DeadCodeObservation) -> tuple[str, str, int]:
+    """The lane's row order: the entity, then the candidate kind, then the
+    declaration site that tells two declarations of one name apart."""
+    return (row.entity, row.candidate_kind, row.start_line)
+
+
 def _dead_code_observations(
     candidates: Sequence[DeadCandidate | NestedDefinition],
     *,
@@ -234,6 +240,7 @@ def _dead_code_observations(
         DeadCodeObservation(
             entity=candidate.qualname,
             candidate_kind=candidate.kind,
+            start_line=candidate.start_line,
             reference_count=int(
                 candidate.local_name in referenced_names
                 or candidate.qualname in referenced_qualnames
@@ -251,7 +258,7 @@ def _dead_code_observations(
         )
         for candidate in candidates
     )
-    return tuple(sorted(rows, key=lambda row: (row.entity, row.candidate_kind)))
+    return tuple(sorted(rows, key=_dead_code_row_order))
 
 
 def _unreachable_statement_observations(
@@ -274,6 +281,7 @@ def _unreachable_statement_observations(
             DeadCodeObservation(
                 entity=f"{qualname}#{fact.start_line}-{fact.end_line}",
                 candidate_kind="function",
+                start_line=fact.start_line,
                 # A region is proven dead by control flow, so the reference
                 # count that decides a symbol's fate says nothing here.
                 reference_count=0,
@@ -285,7 +293,7 @@ def _unreachable_statement_observations(
             for fact in facts
             if isinstance(fact, UnreachableStatementItem)
         )
-    return tuple(sorted(rows, key=lambda row: (row.entity, row.candidate_kind)))
+    return tuple(sorted(rows, key=_dead_code_row_order))
 
 
 def _risk_observations(
@@ -473,7 +481,7 @@ def build_observation_bundle(
                         abstained_qualnames=abstained_qualnames,
                     )
                     + _unreachable_statement_observations(units),
-                    key=lambda row: (row.entity, row.candidate_kind),
+                    key=_dead_code_row_order,
                 )
             )
             if collect_dead_code

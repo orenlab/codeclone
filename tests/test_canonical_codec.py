@@ -383,6 +383,26 @@ _REFUSALS: list[tuple[str, str, str, str]] = [
         '"observation_kind":["symbol","symbol"',
     ),
     (
+        "W07",
+        "dead-code declaration site below the line floor",
+        '"start_line":[21,21,1,7,3]',
+        '"start_line":[0,21,1,7,3]',
+    ),
+    (
+        "W12",
+        "two declarations of one name out of line order",
+        '"observation_kind":["symbol","unreachable_statement","symbol","symbol",'
+        '"symbol"],"reachable":[4],"reference_count":[1,0,2,0,0],'
+        '"runtime_marker_count":[0,0,0,0,3],"source_markers":[[],'
+        '[["unreachable_reason","after_terminator"]],[],[],[["aa","bb"],'
+        '["cc","dd"]]],"start_line":[21,21',
+        '"observation_kind":["symbol","symbol","symbol","symbol",'
+        '"symbol"],"reachable":[4],"reference_count":[1,0,2,0,0],'
+        '"runtime_marker_count":[0,0,0,0,3],"source_markers":[[],'
+        '[["unreachable_reason","after_terminator"]],[],[],[["aa","bb"],'
+        '["cc","dd"]]],"start_line":[22,21',
+    ),
+    (
         "W12",
         "dead-code markers out of order",
         '[["aa","bb"],["cc","dd"]]',

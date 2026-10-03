@@ -570,10 +570,15 @@ def test_the_real_wire_population_passes_the_gate() -> None:
     traded its parsed/cached split (``files_analyzed``, ``files_cached``)
     for the one ``files_observed`` sum, so one family lost one field and no
     family was added or removed.
+
+    197 -> 198 fields with the dead-code declaration key (ruling
+    2026-09-28, canonical epoch E4): ``dead_code_observations`` gained
+    ``start_line``, the declaration site that joined its key, so one family
+    gained one field and no family was added or removed.
     """
     families = _wire_field_names()
     assert len(families) == 33
-    assert sum(len(fields) for fields in families.values()) == 118 + 80 - 1
+    assert sum(len(fields) for fields in families.values()) == 118 + 80 - 1 + 1
     require_analysis_wire_families(families)
 
 

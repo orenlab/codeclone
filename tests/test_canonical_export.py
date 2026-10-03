@@ -240,8 +240,13 @@ _TARGET = "worktree-a"
 # witness layer of the run-id preimage and the namespace of the families it
 # owns (65f9a170… → 5841ce9e…), and wire "2" is in the artifact domain and the
 # document bytes (990f2011… → 604fb3e5…).
-_FIXTURE_RUN_ID = "5841ce9efac9db2224a4bf1a4a90adfc0fc55591988cabd178efb33ef4628a13"
-_FIXTURE_ARTIFACT = "604fb3e551c7439da84e654c97035ba5dc062cf985044e57681be091be9de6ad"
+# Moved deliberately on 2026-09-28 (reason: dead-code key / generation bump):
+# every dead-code row carries its declaration site, which joined the family's
+# key, so the row payloads, their content addresses, the membership and the
+# run id moved (5841ce9e… → 93acdcdb…), and the wire gained the column
+# (604fb3e5… → 44557cf3…).
+_FIXTURE_RUN_ID = "93acdcdb9c87560335b88a1cb8054ec6877d3bbd006777b66ee899979133bb07"
+_FIXTURE_ARTIFACT = "44557cf3ac4e8580cf888cba6d3bda0f00f6ff8ee5632e5373da8236a0524491"
 # The generation this fixture answered under before policy v5, and the identity
 # it answered with: the previous line of the history above, kept executable.
 _RETIRED_LIVENESS_GENERATION = "4"

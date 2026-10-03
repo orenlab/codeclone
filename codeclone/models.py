@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
@@ -641,7 +641,16 @@ class DeadCodeLiveRootException:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DeadCodeColumnarPayload:
-    """Wire form of the dead-code lane (payload schema 3)."""
+    """Wire form of the dead-code lane.
+
+    The declared payload schema lives in ``observations/contracts.py``
+    ("4"), never here.  ``start_line`` is the declaration site and part of
+    each row's identity (ruling 2026-09-28, the F1 precedent): two
+    declarations sharing one qualname -- a hybrid property and its
+    same-named comparator class, a property and its setter -- are two
+    facts.  The site completes the key ``(entity, observation_kind,
+    start_line)``, so a duplicate key is a producer defect the wire refuses.
+    """
 
     prefixes: tuple[str, ...]
     kinds: tuple[str, ...]
@@ -651,6 +660,7 @@ class DeadCodeColumnarPayload:
     kind: tuple[int, ...]
     observation_kind: tuple[int, ...]
     reference_count: tuple[int, ...]
+    start_line: tuple[int, ...]
     reachable_true: tuple[int, ...] = ()
     abstained: tuple[int, ...] = ()
     live_roots: tuple[DeadCodeLiveRootException, ...] = ()
@@ -669,6 +679,7 @@ class DeadCodeColumnarPayload:
                 "kind": len(self.kind),
                 "observation_kind": len(self.observation_kind),
                 "reference_count": len(self.reference_count),
+                "start_line": len(self.start_line),
             },
             references={
                 "prefix": (self.prefix, len(self.prefixes)),
@@ -681,6 +692,7 @@ class DeadCodeColumnarPayload:
         )
         if any(value < 0 for value in self.reference_count):
             raise ValueError("dead-code observation counts must be non-negative")
+        _require_dead_code_declaration_sites(self.start_line)
         _validate_ascending_indices(self.reachable_true, rows, "reachable_true")
         _validate_ascending_indices(self.abstained, rows, "abstained")
         _validate_ascending_indices(
@@ -694,11 +706,41 @@ class DeadCodeColumnarPayload:
                 self.prefixes[self.prefix[row]],
                 self.qualname[row],
                 self.kinds[self.kind[row]],
+                self.start_line[row],
             )
             for row in range(rows)
         )
         if order != tuple(sorted(order)):
             raise ValueError("columnar rows must be sorted")
+        _require_unique_dead_code_declarations(
+            self.prefix, self.qualname, self.observation_kind, self.start_line
+        )
+
+
+def _require_dead_code_declaration_sites(start_lines: Iterable[int]) -> None:
+    """A dead-code row names its declaration by a real source line."""
+    if any(value < 1 for value in start_lines):
+        raise ValueError(
+            "dead-code observations require a positive declaration site "
+            "(start_line is identity, not evidence)"
+        )
+
+
+def _require_unique_dead_code_declarations(
+    prefix: tuple[int, ...],
+    qualname: tuple[str, ...],
+    observation_kind: tuple[int, ...],
+    start_line: tuple[int, ...],
+) -> None:
+    """One declaration is one row: the key ``(entity, observation_kind,
+    start_line)`` -- its prefix and qualname columns spell the entity -- is
+    total on this wire."""
+    seen = tuple(zip(prefix, qualname, observation_kind, start_line, strict=True))
+    if len(set(seen)) != len(seen):
+        raise ValueError(
+            "two dead-code rows share one declaration key "
+            "(entity, observation_kind, start_line)"
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -4061,6 +4103,10 @@ class ApiSymbolObservation:
 class DeadCodeObservation:
     entity: str
     candidate_kind: DeadCodeCandidateKind
+    #: The declaration site -- identity, not evidence (ruling 2026-09-28, the
+    #: F1 precedent): two declarations sharing one qualname are two facts,
+    #: and the report's ``source_fact_families.dead_code`` rows carry it.
+    start_line: int
     reference_count: int
     reachable: bool
     runtime_marker_count: int
@@ -4075,6 +4121,7 @@ class DeadCodeObservation:
     def __post_init__(self) -> None:
         if self.reference_count < 0 or self.runtime_marker_count < 0:
             raise ValueError("dead-code observation counts must be non-negative")
+        _require_dead_code_declaration_sites((self.start_line,))
         if self.source_markers != tuple(sorted(set(self.source_markers))):
             raise ValueError("dead-code source markers must be sorted and unique")
         if self.abstained and self.live_root_reason is not None:

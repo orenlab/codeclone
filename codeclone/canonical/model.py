@@ -590,30 +590,30 @@ class CloneGroupRow:
             )
 
 
+def _require_declaration_site(start_line: int, family: str) -> None:
+    """A declaration site is a real source line: a positive int."""
+    if isinstance(start_line, bool) or start_line < 1:
+        raise CanonicalModelError(
+            f"{family} declaration site must be a positive int: {start_line!r}"
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class DeadCodeObservationRow:
     """F4 dead-code observation fact (wave 4, slice K3).
 
-    Logical key: ``(entity, observation_kind)`` — and it is NOT total on
-    this lane.  Measured on the self-repo corpus (14 826/14 827 @ 95e4210b,
-    2026-08-30; a dated observation of one corpus at one revision, never an
-    invariant): the ingest ``frozenset`` collapses one repeat, so the model
-    carries one row fewer than the report the same run emitted.
-
-    That collapse is NOT "one fact stated twice".  The two colliding rows
-    are the getter and the setter of ``MCPSession._agent_label`` — two
-    declarations, at source lines 191 and 197 — and they arrive
-    byte-identical only because this lane's row shape carries no
-    declaration site.  The producer is not uniform about that: it emits ONE
-    row for an ``@overload`` family (the stubs are dropped upstream) and
-    TWO for a property/setter pair, while the F1 lane, which does carry
-    ``start_line``, emits both declarations.  So a real declaration is
-    lost, silently, before any model guard can see it.
-
-    What a byte-identical repeat SHOULD be — a refusal, a counted
-    multiplicity, or a collapse with a receipt — decides wire and identity
-    semantics and is an open ruling; this docstring states the measurement,
-    not a resolution.  Two DIFFERING rows under one key stay refused.
+    Logical key: ``(entity, observation_kind, start_line)`` -- the
+    declaration site joined the key by ruling 2026-09-28, the F1 precedent
+    for risks.  The site-blind key ``(entity, observation_kind)`` was NOT
+    total: two declarations sharing one qualname -- the getter and the
+    setter of a property, a hybrid property and its same-named comparator
+    class -- arrived under one key.  Byte-identical pairs collapsed silently
+    in the ingest ``frozenset`` (a real declaration lost), and differing
+    pairs were refused, which took the whole publication down: measured on
+    the sqlalchemy corpus, 301 such groups in one run.  ``start_line`` is the
+    producer-native discriminator (every group measured is different
+    declarations at different lines), so it is identity here, not evidence.
+    Two DIFFERING rows of one declaration stay refused.
 
     The entity is the RATIFIED tagged reference (ruling 2026-08-24 §2):
     the variant is part of the identity, and an unclassifiable reference
@@ -626,6 +626,7 @@ class DeadCodeObservationRow:
 
     entity: DeadCodeEntity
     observation_kind: str
+    start_line: int
     candidate_kind: str
     reference_count: int
     reachable: bool
@@ -643,6 +644,7 @@ class DeadCodeObservationRow:
             raise CanonicalModelError(
                 f"unknown dead-code candidate kind: {self.candidate_kind!r}"
             )
+        _require_declaration_site(self.start_line, "dead-code")
         for count in (self.reference_count, self.runtime_marker_count):
             if isinstance(count, bool) or count < 0:
                 raise CanonicalModelError(
@@ -1460,12 +1462,12 @@ def _unique_by_key(
     The branch is kept, not deleted, and the reason is a boundary, not
     taste: deleting it would make a byte-identical repeat a REFUSAL, and
     what such a repeat IS — refusal, counted multiplicity, or a collapse
-    with a receipt — is the open wire/identity ruling that
-    ``DeadCodeObservationRow`` documents.  Read it as a hazard, not as
-    tolerance: the day a family becomes a SEQUENCE (a list or tuple, keyed
-    the same way), this branch silently accepts a duplicated row — measured
-    directly, not reasoned — and would mask exactly the loss class the F4
-    lane already exhibits at ingest.  Whoever makes a family a sequence
+    with a receipt — is an open wire/identity ruling.  Read it as a hazard,
+    not as tolerance: the day a family becomes a SEQUENCE (a list or tuple,
+    keyed the same way), this branch silently accepts a duplicated row —
+    measured directly, not reasoned — and would mask exactly the loss class
+    the F4 lane exhibited at ingest until the declaration site joined its
+    key (``DeadCodeObservationRow``).  Whoever makes a family a sequence
     must decide this branch first.
     """
     seen: dict[object, object] = {}
@@ -1567,7 +1569,7 @@ def _clone_group_natural_key(row: CloneGroupRow) -> tuple[object, ...]:
 
 
 def _dead_code_observation_key(row: DeadCodeObservationRow) -> tuple[object, ...]:
-    return (*dead_code_entity_key(row.entity), row.observation_kind)
+    return (*dead_code_entity_key(row.entity), row.observation_kind, row.start_line)
 
 
 def _api_symbol_natural_key(row: ApiSymbolRow) -> tuple[object, ...]:

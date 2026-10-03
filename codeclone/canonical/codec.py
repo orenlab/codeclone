@@ -801,15 +801,20 @@ def _dead_code_observation_rows(
             "reference_count": row.reference_count,
             "runtime_marker_count": row.runtime_marker_count,
             "source_markers": [list(pair) for pair in row.source_markers],
+            "start_line": row.start_line,
         }
-        for row in sorted(
-            facts.dead_code_observations,
-            key=lambda row: (
-                *dead_code_entity_key(row.entity),
-                row.observation_kind.encode("utf-8"),
-            ),
-        )
+        for row in sorted(facts.dead_code_observations, key=_dead_code_wire_key)
     ]
+
+
+def _dead_code_wire_key(row: DeadCodeObservationRow) -> tuple[object, ...]:
+    """The row order of the family on the wire: its key, byte-ordered --
+    ``(entity, observation_kind, start_line)`` (ruling 2026-09-28)."""
+    return (
+        *dead_code_entity_key(row.entity),
+        row.observation_kind.encode("utf-8"),
+        row.start_line,
+    )
 
 
 def _clone_group_rows(facts: AnalysisFacts, plan: WirePlan) -> list[dict[str, object]]:
@@ -2678,6 +2683,9 @@ def _decode_dead_code_row(
             columns["entity"][index], symbols, modules, f"{prefix}.entity[{index}]"
         ),
         observation_kind=observation_kind,
+        start_line=_decode_declaration_site(
+            columns["start_line"][index], f"{prefix}.start_line[{index}]"
+        ),
         candidate_kind=candidate_kind,
         reference_count=_expect_wire_int(
             columns["reference_count"][index], f"{prefix}.reference_count[{index}]"
@@ -2695,6 +2703,19 @@ def _decode_dead_code_row(
     )
 
 
+def _decode_declaration_site(value: object, where: str) -> int:
+    """A declaration site on the wire: an int in ``[1, 2**31-1]``."""
+    start_line = _expect_wire_int(value, where)
+    if start_line < 1:
+        raise _refuse(
+            "W07",
+            f"{where} is {start_line}, outside the declaration-site domain "
+            "[1, 2**31-1] (a zero site would spell no declaration as a "
+            "declaration)",
+        )
+    return start_line
+
+
 def _decode_dead_code_observations(
     facts: Mapping[str, object],
     symbols: Sequence[SymbolId],
@@ -2703,15 +2724,13 @@ def _decode_dead_code_observations(
     columns, flags, row_count = _decode_columns(
         "dead_code_observations", facts["dead_code_observations"]
     )
-    rows = []
-    keys = []
-    for index in range(row_count):
-        row = _decode_dead_code_row(columns, flags, index, symbols, modules)
-        rows.append(row)
-        keys.append(
-            (*dead_code_entity_key(row.entity), row.observation_kind.encode("utf-8"))
-        )
-    _expect_strictly_increasing(keys, "facts.dead_code_observations")
+    rows = [
+        _decode_dead_code_row(columns, flags, index, symbols, modules)
+        for index in range(row_count)
+    ]
+    _expect_strictly_increasing(
+        list(map(_dead_code_wire_key, rows)), "facts.dead_code_observations"
+    )
     return frozenset(rows)
 
 

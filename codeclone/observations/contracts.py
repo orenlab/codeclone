@@ -69,7 +69,18 @@ _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     # carrying rule-3 abstentions, live-root reasons, and the observation-kind
     # discriminator Y9 extends. Independent of the mount-dimension bump above,
     # which this lane does not embed.
-    "dead_code": "3",
+    #
+    # "4" (ruling 2026-09-28, the F1 precedent) changes the bytes: rows gain
+    # ``start_line``, the declaration site, as a KEY column. The "3" key
+    # (entity, observation_kind) could not tell two declarations of one name
+    # apart -- a hybrid property and its same-named comparator class, a
+    # property and its setter -- and the canonical model refused the pair:
+    # measured on the sqlalchemy corpus, 301 groups and 455 surplus rows of
+    # 39 589, and every one of those runs failed to publish. A stored "3" lane
+    # cannot answer a "4" reader's identity question, so it reads
+    # payload_schema_outdated / unavailable until the baseline is recorded
+    # again -- never a silent comparison.
+    "dead_code": "4",
     # Cycle-honesty wave: dependency rows now carry binding time
     # (import_time / deferred_function / deferred_getattr / type_checking /
     # lazy_syntax) plus the PEP 810 ``is_lazy`` marker — the G4 observation

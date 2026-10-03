@@ -876,7 +876,11 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
         )
     for dead_observation in sorted(
         facts.dead_code_observations,
-        key=lambda row: (*dead_code_entity_key(row.entity), row.observation_kind),
+        key=lambda row: (
+            *dead_code_entity_key(row.entity),
+            row.observation_kind,
+            row.start_line,
+        ),
     ):
         yield (
             "dead_code_observation",
@@ -892,6 +896,7 @@ def _model_rows(model: CanonicalModel) -> Iterator[tuple[str, dict[str, object]]
                 "source_markers": [
                     list(pair) for pair in dead_observation.source_markers
                 ],
+                "start_line": dead_observation.start_line,
             },
         )
     for violation in sorted(
@@ -1409,6 +1414,7 @@ def _decode_dead_code_observation_row(
             _require_field(row, "entity", where), where
         ),
         observation_kind=_require_str(row, "observation_kind", where),
+        start_line=_require_line(row, "start_line", where),
         candidate_kind=_require_str(row, "candidate_kind", where),
         reference_count=_require_line(row, "reference_count", where),
         reachable=_require_bool(row, "reachable", where),

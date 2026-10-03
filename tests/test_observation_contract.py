@@ -116,7 +116,13 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     # under ONE coordinated payload_schema bump ("2" -> "3") rather than three.
     # Pre-bump digest was
     # 4cfcfa0b0c02d3b12d890b8a12e4b4dc0673bc50f4574ff05060629765d462f9.
-    "dead_code": ("2cce4c84f810d1268df814702938b38c9652a27a2f72c15cf164b1e83be8a0cf"),
+    #
+    # SANCTIONED golden change, ruling 2026-09-28 (reason: dead-code key /
+    # generation bump): the declaration site joins the dead-code key, so the
+    # wire gains its ``start_line`` column under ONE payload_schema bump
+    # ("3" -> "4"). The "3" digest was
+    # 2cce4c84f810d1268df814702938b38c9652a27a2f72c15cf164b1e83be8a0cf.
+    "dead_code": ("8139ea7642f8188c52ef3225bb6bd6bc46aa74e400887d7d0f62e5c26e7e909a"),
     # SANCTIONED golden change, cycle-honesty wave. Dependency rows gained
     # binding time and the PEP 810 ``is_lazy`` marker under ONE coordinated
     # payload_schema bump ("5" -> "6") together with the G4 observation
@@ -214,8 +220,10 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
         "adoption_counts": "2",
         "api_surface": "3",
         "coupling_cohesion_observations": "4",
-        # 39Y cycle 2b: the single consolidated bump this phase owes.
-        "dead_code": "3",
+        # 39Y cycle 2b: the single consolidated bump this phase owes; "4"
+        # adds the declaration-site KEY column (start_line), ruling
+        # 2026-09-28, the F1 precedent.
+        "dead_code": "4",
         # Cycle-honesty wave: edge binding time + PEP 810 laziness ride the
         # dependency rows — one coordinated bump with the G4 observation field.
         # "7" is the cycle-policy split's reader bump: the wire form did NOT
@@ -486,6 +494,7 @@ def test_a_live_root_is_never_also_recorded_as_an_abstention() -> None:
         DeadCodeObservation(
             entity="pkg.mod:rooted",
             candidate_kind="function",
+            start_line=1,
             reference_count=0,
             reachable=False,
             runtime_marker_count=0,
@@ -631,6 +640,7 @@ def test_observation_models_reject_invalid_counts_and_evaluation_contracts() -> 
         DeadCodeObservation(
             entity="pkg.mod:run",
             candidate_kind="function",
+            start_line=1,
             reference_count=-1,
             reachable=False,
             runtime_marker_count=0,
@@ -639,6 +649,7 @@ def test_observation_models_reject_invalid_counts_and_evaluation_contracts() -> 
         DeadCodeObservation(
             entity="pkg.mod:run",
             candidate_kind="function",
+            start_line=1,
             reference_count=0,
             reachable=False,
             runtime_marker_count=0,

@@ -820,6 +820,7 @@ def _dead_code_observation(
     return DeadCodeObservationRow(
         entity=parse_dead_code_entity(index, _string(row, "entity", where)),
         observation_kind=_string(row, "observation_kind", where),
+        start_line=_lane_int(row, "start_line", where),
         candidate_kind=_string(row, "candidate_kind", where),
         reference_count=_lane_int(row, "reference_count", where),
         reachable=reachable,

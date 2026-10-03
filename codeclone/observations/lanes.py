@@ -175,6 +175,13 @@ def _encode_adoption_lane(
     )
 
 
+def _declaration_sites(
+    rows: Sequence[tuple[str, str, DeadCodeObservation]],
+) -> tuple[int, ...]:
+    """The ``start_line`` column, in the lane's row order."""
+    return tuple(item.start_line for _prefix, _qualname, item in rows)
+
+
 def _encode_dead_code_lane(
     candidates: Sequence[DeadCodeObservation],
 ) -> DeadCodeColumnarPayload:
@@ -192,7 +199,10 @@ def _encode_dead_code_lane(
     observation_kind_index = {
         value: position for position, value in enumerate(observation_kinds)
     }
-    rows = sorted(split, key=lambda row: (row[0], row[1], row[2].candidate_kind))
+    rows = sorted(
+        split,
+        key=lambda row: (row[0], row[1], row[2].candidate_kind, row[2].start_line),
+    )
     return DeadCodeColumnarPayload(
         prefixes=prefixes,
         kinds=kinds,
@@ -209,6 +219,7 @@ def _encode_dead_code_lane(
         reference_count=tuple(
             item.reference_count for _prefix, _qualname, item in rows
         ),
+        start_line=_declaration_sites(rows),
         reachable_true=tuple(
             position
             for position, (_prefix, _qualname, item) in enumerate(rows)

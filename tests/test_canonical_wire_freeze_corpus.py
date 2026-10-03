@@ -238,6 +238,7 @@ def test_dead_code_canonical_family_carries_the_tagged_variants(
         DeadCodeObservationRow(
             entity=ModuleSymbol(ModuleId("pkg.external_shim"), "ShimOverExternal"),
             observation_kind="symbol",
+            start_line=12,
             candidate_kind="class",
             reference_count=0,
             reachable=False,

@@ -43,6 +43,7 @@ from codeclone.models import (
     DeadCandidate,
     DeadCodeColumnarPayload,
     DeadCodeMarkerException,
+    DeadCodeObservation,
     DependencyColumnarPayload,
     DigestObject,
     DynamicLoadArgument,
@@ -503,15 +504,28 @@ _PRE_F6_LANE_DIGESTS = {
 }
 
 
+#: sha256 of the dead-code lane's canonical bytes for :func:`_bundle` once
+#: the declaration site joined its key (ruling 2026-09-28, payload schema
+#: "4"; reason: dead-code key / generation bump).
+_DEAD_CODE_SITE_LANE_DIGEST = (
+    "d288ed5e6d1bad8391c5a6b3bf8b429fe0a365ca41c69adfe4115b6166944ac0"
+)
+
+
 def test_the_f6_site_column_moves_the_dependency_wire_and_nothing_else() -> None:
     """Two verdicts one assertion apart, and both are load-bearing.
 
     The first is the one the rolled-back F5 bump lacked: the dependency
     lane's BYTES really change, so declaring a new payload_schema is a
     statement about the wire and not a label over an identical artifact.
-    The second is its confinement: eight sibling lanes are byte-identical
-    to their pre-F6 values, so no other baseline is invalidated by this
+    The second is its confinement: the sibling lanes are byte-identical to
+    their pre-F6 values, so no other baseline is invalidated by this
     migration.
+
+    Since 2026-09-28 one more lane has moved, by its own migration: the
+    dead-code wire gained its declaration-site column ("4") and is pinned
+    at its new value.  The set of lanes that moved is exactly the two
+    migrations, so neither can hide a third.
     """
 
     digests = {
@@ -519,14 +533,11 @@ def test_the_f6_site_column_moves_the_dependency_wire_and_nothing_else() -> None
         for name, raw in _lane_bytes(_bundle()).items()
     }
 
-    assert digests["dependencies"] != _PRE_F6_LANE_DIGESTS["dependencies"]
-    assert {
-        name: digest for name, digest in digests.items() if name != "dependencies"
-    } == {
-        name: digest
-        for name, digest in _PRE_F6_LANE_DIGESTS.items()
-        if name != "dependencies"
+    moved = {
+        name for name, digest in digests.items() if digest != _PRE_F6_LANE_DIGESTS[name]
     }
+    assert moved == {"dead_code", "dependencies"}
+    assert digests["dead_code"] == _DEAD_CODE_SITE_LANE_DIGEST
 
 
 def test_columnar_lanes_are_input_order_independent_and_stable() -> None:
@@ -683,6 +694,7 @@ def test_columnar_canonical_form_rejects_each_malformed_shape() -> None:
             kind=(0, 0),
             observation_kind=(0, 0),
             reference_count=(0, 0),
+            start_line=(1, 2),
             reachable_true=(1, 0),
         )
     with pytest.raises(ValueError, match="digest values require"):
@@ -857,6 +869,7 @@ def test_columnar_models_reject_the_remaining_malformed_shapes() -> None:
             kind=(0,),
             observation_kind=(0,),
             reference_count=(-1,),
+            start_line=(1,),
         )
     with pytest.raises(ValueError, match="must be sorted"):
         DeadCodeColumnarPayload(
@@ -868,6 +881,7 @@ def test_columnar_models_reject_the_remaining_malformed_shapes() -> None:
             kind=(0, 0),
             observation_kind=(0, 0),
             reference_count=(0, 0),
+            start_line=(1, 2),
         )
     with pytest.raises(ValueError, match="non-negative"):
         DeadCodeMarkerException(row=0, runtime_marker_count=-1, source_markers=())
@@ -944,6 +958,54 @@ def _api_payload(
     )
 
 
+def _dead_payload(**overrides: object) -> DeadCodeColumnarPayload:
+    """A hybrid property and its same-named comparator class: one name, two
+    declarations, as the sqlalchemy corpus has them 301 times over."""
+    fields: dict[str, object] = {
+        "prefixes": ("pkg.polymorphic",),
+        "kinds": ("class", "method"),
+        "observation_kinds": ("symbol",),
+        "prefix": (0, 0),
+        "qualname": ("Property.value", "Property.value"),
+        "kind": (0, 1),
+        "observation_kind": (0, 0),
+        "reference_count": (0, 0),
+        "start_line": (16, 12),
+    }
+    fields.update(overrides)
+    return DeadCodeColumnarPayload(**fields)  # type: ignore[arg-type]
+
+
+def test_the_dead_code_wire_keys_each_declaration_by_its_site() -> None:
+    """Ruling 2026-09-28 (payload schema "4"): ``start_line`` is a KEY
+    column of the dead-code lane, as it is of the F1 risk lane.  Two
+    declarations of one name are two rows and decode as two candidates,
+    each with its site; one declaration stated twice is refused; a site
+    that names no line is refused."""
+    decoded = decode_dead_code_lane(_dead_payload()).candidates
+    assert [
+        (item.entity, item.candidate_kind, item.start_line) for item in decoded
+    ] == [
+        ("pkg.polymorphic:Property.value", "class", 16),
+        ("pkg.polymorphic:Property.value", "method", 12),
+    ]
+    with pytest.raises(ValueError, match="declaration key"):
+        _dead_payload(kinds=("method",), kind=(0, 0), start_line=(12, 12))
+    with pytest.raises(ValueError, match="positive declaration site"):
+        _dead_payload(start_line=(16, 0))
+    with pytest.raises(ValueError, match="equal column lengths"):
+        _dead_payload(start_line=(16,))
+    with pytest.raises(ValueError, match="positive declaration site"):
+        DeadCodeObservation(
+            entity="pkg.polymorphic:Property.value",
+            candidate_kind="method",
+            reference_count=0,
+            reachable=False,
+            runtime_marker_count=0,
+            start_line=0,
+        )
+
+
 def test_decoder_rejects_values_outside_a_closed_vocabulary() -> None:
     with pytest.raises(BaselineLaneValidationError, match="unknown dead-code"):
         decode_dead_code_lane(
@@ -956,6 +1018,7 @@ def test_decoder_rejects_values_outside_a_closed_vocabulary() -> None:
                 kind=(0,),
                 observation_kind=(0,),
                 reference_count=(0,),
+                start_line=(1,),
             )
         )
 

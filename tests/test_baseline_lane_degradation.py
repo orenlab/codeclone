@@ -130,6 +130,13 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+#: The metrics-baseline refusal as the CLI words it today.
+_METRICS_REQUIRED = (
+    "Metrics baseline file is required for metrics baseline-aware gates. "
+    "Run codeclone <root> --update-baseline --baseline <path> first."
+)
+
+
 def outdated_lane_sentence(lane_name: ObservationLaneName, stored: str) -> str:
     """The one plain sentence every surface says for a lane recorded under an
     older payload schema (ruling 2026-09-28): the lane, both schema numbers
@@ -177,27 +184,25 @@ def _rewrite_container(
     baseline_path.write_bytes(canonical_container_bytes(changed) + b"\n")
 
 
-def downgrade_lane_payload_schema(
+def retag_lane_descriptor(
     baseline_path: Path,
     *,
     lane_name: ObservationLaneName,
-    payload_schema: str,
+    **terms: str,
 ) -> None:
-    """Move one lane's recorded payload schema, re-authenticating the container.
+    """Move terms of one lane's recorded descriptor, re-authenticating the
+    container.
 
-    Generalised from the api_surface case below so that a lane feeding *health*
-    can be made opaque by the same technique. Only the schema label moves: the
-    payload bytes and the observation digest stay exactly as the publisher wrote
-    them, so the reader keeps the bytes authenticated and reports the lane
-    opaque rather than failing integrity (`B5`, `B6`).
+    Only the named descriptor terms move: the payload bytes and the
+    observation digest stay exactly as the publisher wrote them, so the
+    reader keeps the bytes authenticated and reports the lane untrusted for
+    the moved term rather than failing integrity (`B5`, `B6`).
     """
 
     def _mutate(container: BaselineContainerV3) -> BaselineContainerV3:
-        assert container.lanes[lane_name].descriptor.payload_schema != payload_schema
-        descriptor = replace(
-            container.lanes[lane_name].descriptor,
-            payload_schema=payload_schema,
-        )
+        recorded = container.lanes[lane_name].descriptor
+        descriptor = replace(recorded, **terms)  # type: ignore[arg-type]
+        assert descriptor != recorded
         lane = replace(container.lanes[lane_name], descriptor=descriptor)
         lane = replace(lane, digest=compute_lane_digest(lane))
         changed = replace(
@@ -221,6 +226,23 @@ def downgrade_lane_payload_schema(
         )
 
     _rewrite_container(baseline_path, _mutate)
+
+
+def downgrade_lane_payload_schema(
+    baseline_path: Path,
+    *,
+    lane_name: ObservationLaneName,
+    payload_schema: str,
+) -> None:
+    """Move one lane's recorded payload schema, re-authenticating the container.
+
+    Generalised from the api_surface case below so that a lane feeding *health*
+    can be made opaque by the same technique.
+    """
+
+    retag_lane_descriptor(
+        baseline_path, lane_name=lane_name, payload_schema=payload_schema
+    )
 
 
 def downgrade_api_surface_lane(baseline_path: Path) -> None:
@@ -363,6 +385,41 @@ def test_without_a_container_every_lane_keeps_its_own_words() -> None:
     assert outdated_lane_sentences(None, (lane,)) == ((), (lane,))
 
 
+def test_every_other_untrusted_reason_keeps_its_own_words(tmp_path: Path) -> None:
+    """Ruling 2026-09-28 gives the OUTDATED lane its plain sentence and
+    leaves every other reason in its own words: a lane recorded under
+    another algorithm revision is still named with its reason code in the
+    opacity block, and never in the outdated lane's sentence."""
+
+    root = _write_repo(tmp_path)
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    published = _run_cli(
+        str(root),
+        "--baseline",
+        str(baseline_path),
+        "--api-surface",
+        "--update-baseline",
+        "--no-progress",
+    )
+    assert published.returncode == 0, published.stdout + published.stderr
+    retag_lane_descriptor(
+        baseline_path, lane_name="api_surface", algorithm_revision="0"
+    )
+
+    result = _run_cli(
+        str(root),
+        "--baseline",
+        str(baseline_path),
+        "--api-surface",
+        "--no-progress",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    said = _said(result.stdout)
+    assert said.count("api_surface:algorithm_revision") == 1, said
+    assert _present(said, "Baseline not trusted", "lane schema") == ()
+
+
 def test_ci_on_an_outdated_dead_code_lane_says_one_plain_sentence(
     tmp_path: Path,
 ) -> None:
@@ -387,9 +444,15 @@ def test_ci_on_an_outdated_dead_code_lane_says_one_plain_sentence(
         "--no-progress",
     )
     assert published.returncode == 0, published.stdout + published.stderr
-    stored = str(int(lane_payload_schema("dead_code")) - 1)
-    downgrade_lane_payload_schema(
-        baseline_path, lane_name="dead_code", payload_schema=stored
+    # The authentic old baseline: the dead-code lane exactly as the build
+    # before the declaration key wrote it -- schema "3", no site column.
+    stored = "3"
+    downgrade_lane_to_its_pre_migration_shape(
+        baseline_path,
+        lane_name="dead_code",
+        published_schema=lane_payload_schema("dead_code"),
+        stored_schema=stored,
+        dropped_column="start_line",
     )
     before = baseline_path.read_bytes()
 
@@ -411,8 +474,57 @@ def test_ci_on_an_outdated_dead_code_lane_says_one_plain_sentence(
         if "Create it: " in line
     )
     assert f"Run `{handed_over}` once" in sentence
-    assert "payload_schema_outdated" not in result.stdout
+    # One cause, one sentence: the metrics lanes live in the same refused
+    # file, so no second error sends the operator to ``--baseline <path>``.
+    assert _present(result.stdout, "payload_schema_outdated", _METRICS_REQUIRED) == ()
     assert baseline_path.read_bytes() == before
+
+
+def test_a_baseline_without_its_scope_id_still_says_the_metrics_line(
+    tmp_path: Path,
+) -> None:
+    """The scope id is the other problem of the metrics baseline's own: with
+    no ``baseline_scope_id`` configured, the file is not refused for what it
+    holds, and the metrics line still appears beside the scope-id refusal."""
+
+    root = _write_repo(tmp_path)
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    published = _run_cli(
+        str(root),
+        "--baseline",
+        str(baseline_path),
+        "--update-baseline",
+        "--no-progress",
+    )
+    assert published.returncode == 0, published.stdout + published.stderr
+    (root / "pyproject.toml").write_text("[tool.codeclone]\n", "utf-8")
+
+    result = _run_cli(
+        str(root), "--baseline", str(baseline_path), "--ci", "--no-progress"
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert _said(result.stdout).count(_METRICS_REQUIRED) == 1, result.stdout
+
+
+def test_a_missing_baseline_still_says_the_metrics_baseline_is_required(
+    tmp_path: Path,
+) -> None:
+    """The other direction: a metrics-baseline problem of its own -- here,
+    no baseline file at all under a metrics gate -- keeps its line exactly
+    as before; only a file the run has already refused is spared it."""
+
+    root = _write_repo(tmp_path)
+    result = _run_cli(
+        str(root),
+        "--baseline",
+        str(tmp_path / "absent.baseline.json"),
+        "--fail-on-new-metrics",
+        "--no-progress",
+    )
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert _said(result.stdout).count(_METRICS_REQUIRED) == 1, result.stdout
 
 
 def test_verify_compatibility_still_condemns_any_untrusted_lane(
@@ -1454,6 +1566,27 @@ def test_schema4_risk_lane_degrades_to_unavailable_with_novelty_reason(
     for group in complexity_findings:
         assert group["novelty"] == "unavailable"
         assert group["novelty_reason"] == "lane_unavailable"
+
+
+def test_schema3_dead_code_lane_degrades_to_unavailable_not_silently(
+    tmp_path: Path,
+) -> None:
+    """Ruling 2026-09-28: a baseline recorded before the declaration site
+    joined the dead-code key -- its lane in the authentic schema-3 shape,
+    no ``start_line`` column -- is a typed absence: the run completes, the
+    lane is named once in its plain sentence, and dead code and health lose
+    their baseline comparison instead of comparing site-blind rows."""
+
+    assert_pre_migration_lane_is_a_typed_absence(
+        tmp_path,
+        root=_write_complex_repo(tmp_path),
+        lane_name="dead_code",
+        published_schema="4",
+        stored_schema="3",
+        dropped_column="start_line",
+        withheld_families=("dead_code", "health"),
+        compared_families=("complexity", "coupling", "dependencies"),
+    )
 
 
 _IMPORT_MODULE_SOURCE = '''"""A module that defers one import at two different sites."""

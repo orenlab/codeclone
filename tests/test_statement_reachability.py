@@ -684,8 +684,10 @@ def test_findings_join_the_dead_code_family_with_the_new_kind(
     ]
     assert len(lane_rows) == len(rows)
     # The discriminator is the whole extension: the lane keeps one payload
-    # schema and tells the two row types apart by kind alone.
-    assert lane_payload_schema("dead_code") == "3"
+    # schema and tells the two row types apart by kind alone ("4" since the
+    # declaration site joined the key, ruling 2026-09-28 -- one schema for
+    # both kinds still).
+    assert lane_payload_schema("dead_code") == "4"
     assert {row.entity for row in lane_rows} == {
         f"{row['qualname']}#{row['start_line']}-{row['end_line']}" for row in rows
     }

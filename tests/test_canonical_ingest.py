@@ -373,6 +373,7 @@ def legacy_document() -> dict[str, Any]:
                     {
                         "entity": "pkg.mod:make",
                         "candidate_kind": "function",
+                        "start_line": 10,
                         "reference_count": 1,
                         "reachable": False,
                         "runtime_marker_count": 0,
@@ -384,6 +385,7 @@ def legacy_document() -> dict[str, Any]:
                     {
                         "entity": "pkg.mod:make#12-15",
                         "candidate_kind": "function",
+                        "start_line": 12,
                         "reference_count": 0,
                         "reachable": False,
                         "runtime_marker_count": 0,
@@ -395,6 +397,7 @@ def legacy_document() -> dict[str, Any]:
                     {
                         "entity": "scripts/tool.py:run",
                         "candidate_kind": "function",
+                        "start_line": 4,
                         "reference_count": 0,
                         "reachable": True,
                         "runtime_marker_count": 2,
@@ -406,6 +409,7 @@ def legacy_document() -> dict[str, Any]:
                     {
                         "entity": "ext.vendor:Shim.call",
                         "candidate_kind": "method",
+                        "start_line": 7,
                         "reference_count": 0,
                         "reachable": False,
                         "runtime_marker_count": 0,
@@ -1247,15 +1251,20 @@ def test_ingest_refuses_a_document_missing_the_clone_container() -> None:
 def test_ingest_maps_dead_entities_onto_the_tagged_union() -> None:
     """The §2 union executed against the document's own registry: a module
     head KEEPS its MODULE variant, an analyzed path is the FILE-headed
-    SYMBOL, and a head outside both rides opaque — verbatim, no guessing."""
+    SYMBOL, and a head outside both rides opaque — verbatim, no guessing.
+    Each row keeps the declaration site the producer stated (ruling
+    2026-09-28: it is part of the key)."""
     model = canonical_model_from_legacy_document(legacy_document())
     assert len(model.facts.analysis.dead_code_observations) == 4
-    entities = {row.entity for row in model.facts.analysis.dead_code_observations}
+    entities = {
+        (row.entity, row.start_line)
+        for row in model.facts.analysis.dead_code_observations
+    }
     assert entities == {
-        ModuleSymbol(ModuleId("pkg.mod"), "make"),
-        ModuleSymbol(ModuleId("pkg.mod"), "make#12-15"),
-        SymbolId(FileId("scripts/tool.py"), "run"),
-        OpaqueEntity("ext.vendor", "Shim.call"),
+        (ModuleSymbol(ModuleId("pkg.mod"), "make"), 10),
+        (ModuleSymbol(ModuleId("pkg.mod"), "make#12-15"), 12),
+        (SymbolId(FileId("scripts/tool.py"), "run"), 4),
+        (OpaqueEntity("ext.vendor", "Shim.call"), 7),
     }
     abstained = next(
         row
