@@ -17,7 +17,9 @@ import pytest
 import codeclone.config.pyproject_loader as loader_mod
 import codeclone.config.resolver as resolver_mod
 import codeclone.config.spec as spec_mod
+from codeclone.config.analytics_specs import ANALYTICS_PATH_CONFIG_KEYS
 from codeclone.config.argparse_builder import build_parser
+from codeclone.config.memory_specs import MEMORY_PATH_CONFIG_KEYS
 from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.models import AuthorityRegistry, ConfigKeySpec
 
@@ -259,11 +261,11 @@ def test_load_pyproject_config_normalizes_relative_and_absolute_paths(
 ) -> None:
     _write_pyproject(
         tmp_path / "pyproject.toml",
-        """
+        f"""
 [tool.codeclone]
 min_loc = 5
 cache_path = ".codeclone/cache.json"
-json_out = "/tmp/report.json"
+json_out = "{tmp_path}/out/report.json"
 md_out = "reports/report.md"
 sarif_out = "reports/report.sarif"
 """.strip(),
@@ -271,9 +273,97 @@ sarif_out = "reports/report.sarif"
     loaded = loader_mod.load_pyproject_config(tmp_path)
     assert loaded["min_loc"] == 5
     assert loaded["cache_path"] == str(tmp_path / ".codeclone/cache.json")
-    assert loaded["json_out"] == "/tmp/report.json"
+    assert loaded["json_out"] == f"{tmp_path}/out/report.json"
     assert loaded["md_out"] == str(tmp_path / "reports/report.md")
     assert loaded["sarif_out"] == str(tmp_path / "reports/report.sarif")
+
+
+_OUTSIDE_REASON = (
+    "must stay under the repository root, because a path in the repository's "
+    "own pyproject.toml may only point inside the repository; choose a path "
+    "inside the repository"
+)
+_CLI_REMEDY = ", or pass the outside path on the command line with {flag}."
+
+
+@pytest.mark.parametrize(
+    ("table", "key", "value", "remedy"),
+    [
+        ("", "md_out", "../outside/notes.md", _CLI_REMEDY.format(flag="--md")),
+        ("", "baseline", "{outside}/b.json", _CLI_REMEDY.format(flag="--baseline")),
+        ("", "cache_path", "~/c.sqlite3", _CLI_REMEDY.format(flag="--cache-path")),
+        ("", "coverage_xml", "{outside}/c.xml", _CLI_REMEDY.format(flag="--coverage")),
+        ("memory", "db_path", "{outside}/m.sqlite3", "."),
+        ("analytics", "vectors_path", "../v.lance", "."),
+    ],
+    ids=["md_out", "baseline", "cache_path", "coverage_xml", "memory", "analytics"],
+)
+def test_load_pyproject_config_refuses_a_path_outside_the_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    table: str,
+    key: str,
+    value: str,
+    remedy: str,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    spelled = value.format(outside=tmp_path / "outside")
+    section = f"tool.codeclone.{table}" if table else "tool.codeclone"
+    _write_pyproject(root / "pyproject.toml", f'[{section}]\n{key} = "{spelled}"\n')
+
+    with pytest.raises(ConfigValidationError) as refused:
+        loader_mod.load_pyproject_config(root)
+
+    assert (
+        str(refused.value) == f"{section}.{key} = {spelled!r} {_OUTSIDE_REASON}{remedy}"
+    )
+
+
+def test_load_pyproject_config_checks_the_resolved_path(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    (root / "reports").mkdir(parents=True)
+    (tmp_path / "outside").mkdir()
+    (root / "reports" / "escape").symlink_to(
+        tmp_path / "outside", target_is_directory=True
+    )
+    (root / "reports" / "inside.md").symlink_to(root / "README.md")
+    _write_pyproject(
+        root / "pyproject.toml",
+        '[tool.codeclone]\nmd_out = "reports/inside.md"\n'
+        'json_out = "reports/escape/r.json"\n',
+    )
+
+    with pytest.raises(ConfigValidationError, match="json_out = 'reports/escape"):
+        loader_mod.load_pyproject_config(root)
+
+    _write_pyproject(
+        root / "pyproject.toml", '[tool.codeclone]\nmd_out = "reports/inside.md"\n'
+    )
+    assert loader_mod.load_pyproject_config(root)["md_out"] == str(
+        root / "reports/inside.md"
+    )
+
+
+def test_normalize_path_config_value_types_a_root_it_cannot_resolve(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(
+        ConfigValidationError,
+        match=r"Invalid value for tool\.codeclone\.md_out: cannot resolve repository",
+    ):
+        loader_mod.normalize_path_config_value(
+            key="md_out", value="r.md", root_path=tmp_path / "missing"
+        )
+
+
+def test_refusal_flags_belong_to_top_level_path_keys_only() -> None:
+    """The remedy is looked up by bare key, so nested names must not collide."""
+
+    flags = loader_mod._PATH_KEY_FLAGS
+    assert set(flags) == set(spec_mod.PATH_CONFIG_KEYS)
+    assert not set(flags) & (MEMORY_PATH_CONFIG_KEYS | ANALYTICS_PATH_CONFIG_KEYS)
 
 
 def test_apply_pyproject_config_overrides_respects_explicit_cli_flags() -> None:
@@ -506,10 +596,10 @@ def test_normalize_path_config_value_behaviour(tmp_path: Path) -> None:
     assert (
         loader_mod.normalize_path_config_value(
             key="cache_path",
-            value="/tmp/absolute-cache.json",
+            value=f"{tmp_path}/absolute-cache.json",
             root_path=tmp_path,
         )
-        == "/tmp/absolute-cache.json"
+        == f"{tmp_path}/absolute-cache.json"
     )
     patterns = ("tests/fixtures/golden_*",)
     assert (

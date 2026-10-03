@@ -9,7 +9,7 @@ import importlib
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO
+from typing import TYPE_CHECKING, BinaryIO, Final
 from uuid import uuid4
 
 from ..contracts.errors import DiagnosedUserError
@@ -19,6 +19,12 @@ from ..findings.clones.golden_fixtures import (
 )
 from ..models import ConfigKeySpec, FoundationConfig, FoundationConfigInput
 from ..semantics.registry import AuthorityRegistryError, parse_authority_registry
+from ..utils.repo_paths import (
+    PathOutsideRepoError,
+    RepoPathError,
+    RepoPathPolicy,
+    resolve_under_repo_root,
+)
 from .analytics_specs import (
     ANALYTICS_NESTED_TABLE_KEY,
     ANALYTICS_PATH_CONFIG_KEYS,
@@ -31,7 +37,7 @@ from .memory_specs import (
     SEMANTIC_NESTED_TABLE_KEY,
 )
 from .resolver import normalize_source_roots
-from .spec import CONFIG_KEY_SPECS, PATH_CONFIG_KEYS
+from .spec import CONFIG_KEY_SPECS, OPTIONS, PATH_CONFIG_KEYS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Set
@@ -151,6 +157,7 @@ def load_pyproject_config(
         unknown_error_prefix="Unknown key(s) in tool.codeclone: ",
         root_path=root_path,
         path_config_keys=path_config_keys,
+        table_name="tool.codeclone",
     )
 
     _apply_foundation_config_boundary(validated, config_path=config_path)
@@ -306,6 +313,7 @@ def _validate_nested_analytics_table(
                 value=value,
                 root_path=root_path,
                 path_config_keys=ANALYTICS_PATH_CONFIG_KEYS,
+                table="tool.codeclone.analytics",
             )
         else:
             normalized[key] = value
@@ -335,6 +343,7 @@ def _validate_nested_memory_table(
         unknown_error_prefix="Unknown key(s) in tool.codeclone.memory: ",
         root_path=root_path,
         path_config_keys=MEMORY_PATH_CONFIG_KEYS,
+        table_name="tool.codeclone.memory",
     )
     semantic_obj = memory_table.get(SEMANTIC_NESTED_TABLE_KEY)
     if semantic_obj is not None:
@@ -359,6 +368,7 @@ def _validate_known_config_table(
     unknown_error_prefix: str,
     root_path: Path,
     path_config_keys: Set[str] | frozenset[str],
+    table_name: str,
 ) -> dict[str, object]:
     unknown = sorted(set(table) - set(config_key_specs) - nested_keys)
     if unknown:
@@ -378,6 +388,7 @@ def _validate_known_config_table(
             value=value,
             root_path=root_path,
             path_config_keys=path_config_keys,
+            table=table_name,
         )
     return validated
 
@@ -419,22 +430,95 @@ def _validate_nested_semantic_table(
     )
 
 
+#: Why a path the repository's own ``pyproject.toml`` names may not leave it,
+#: and what the user can do instead. One sentence, said in the words the
+#: memory and analytics stores already used for the same refusal.
+_ERR_PATH_OUTSIDE_REPOSITORY = (
+    "{table}.{key} = {value!r} must stay under the repository root, because a "
+    "path in the repository's own pyproject.toml may only point inside the "
+    "repository; choose a path inside the repository{remedy}."
+)
+_REMEDY_COMMAND_LINE_FLAG = ", or pass the outside path on the command line with {flag}"
+
+#: The command-line flag that carries each top-level path key: the user's own
+#: word, which is the only way a path outside the repository is accepted.
+#: Read from the option table rather than restated, so the remedy names the
+#: spelling ``--help`` documents.
+_PATH_KEY_FLAGS: Final[Mapping[str, str]] = {
+    spec.pyproject_key: spec.flags[0]
+    for spec in OPTIONS
+    if spec.path_value and spec.pyproject_key is not None and spec.flags
+}
+
+
 def normalize_path_config_value(
     *,
     key: str,
     value: object,
     root_path: Path,
     path_config_keys: Set[str] | frozenset[str] = PATH_CONFIG_KEYS,
+    table: str = "tool.codeclone",
 ) -> object:
+    """Anchor a path from ``pyproject.toml`` at the repository and keep it there.
+
+    The value is the repository author's word, not the user's: a repository
+    that named ``../victim/notes.md`` or ``~/.claude/CLAUDE.md`` here made a
+    plain ``codeclone .`` overwrite that file (security review 2026-10, A-01,
+    A-05, D-02). So the path is resolved first -- every existing component,
+    symbolic links included -- and refused unless the result lies under the
+    repository root, through the same containment owner the audit, intent,
+    memory and analytics paths already use. The refusal happens while the
+    configuration is read, before anything is written or created. A path
+    outside the repository is still accepted from the command line, which
+    never passes through here.
+
+    The returned spelling is unchanged (the root joined to the value, not the
+    resolved path), so a consumer that refuses a symbolic link at the final
+    component still sees it.
+    """
+
     if key not in path_config_keys:
         return value
     if not isinstance(value, str):
         return value
 
     path = Path(value).expanduser()
+    _refuse_path_outside_repository(
+        path, root_path=root_path, table=table, key=key, value=value
+    )
     if path.is_absolute():
         return str(path)
     return str(root_path / path)
+
+
+def _refuse_path_outside_repository(
+    path: Path, *, root_path: Path, table: str, key: str, value: str
+) -> None:
+    """Resolve *path* under the repository root, or refuse the key by name."""
+
+    try:
+        resolve_under_repo_root(
+            root_path, path, policy=RepoPathPolicy(allow_absolute=True)
+        )
+    except PathOutsideRepoError as exc:
+        raise ConfigValidationError(
+            _ERR_PATH_OUTSIDE_REPOSITORY.format(
+                table=table, key=key, value=value, remedy=_outside_path_remedy(key)
+            )
+        ) from exc
+    except RepoPathError as exc:
+        raise ConfigValidationError(f"Invalid value for {table}.{key}: {exc}") from exc
+
+
+def _outside_path_remedy(key: str) -> str:
+    """The command-line flag that carries *key* outside, when there is one.
+
+    Only top-level keys have a flag, and no nested path key shares a name
+    with one (pinned by test), so the bare key finds the right row.
+    """
+
+    flag = _PATH_KEY_FLAGS.get(key)
+    return _REMEDY_COMMAND_LINE_FLAG.format(flag=flag) if flag else ""
 
 
 def _validated_config_instance(

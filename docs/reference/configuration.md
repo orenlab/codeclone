@@ -58,6 +58,16 @@ can only be set in `pyproject.toml`.
 `~` is expanded, and a relative path is resolved against the repository root,
 not the current working directory.
 
+A path set in `pyproject.toml` must stay inside the repository. It is checked
+after symbolic links are followed, so `../notes.md`, an absolute path elsewhere,
+`~/...`, and a path through a linked directory that leads out of the repository
+are all refused with a contract error (exit 2) before anything is written. The
+same rule covers `memory.db_path` and the `analytics` path keys. To write a
+report or a baseline outside the repository, pass the path with the
+command-line flag (`--html`, `--json`, `--md`, `--sarif`, `--text`,
+`--baseline`, `--coverage`, `--cache-path`); a path given on the command line is
+accepted wherever it points.
+
 ## Keys
 
 ### Analysis scope and clone thresholds
@@ -425,7 +435,7 @@ Configuration is validated when CodeClone initializes:
 
 - **Unknown keys**: any key outside the documented set is a contract error
 - **Type mismatch**: key value does not match declared type → error
-- **Path validation**: `baseline`, `audit_path`, `intent_registry_path` must be writable or creatable; memory and analytics state paths must stay under the repository root (for default memory store paths in a linked worktree, that root is the main checkout)
+- **Path validation**: `baseline`, `audit_path`, `intent_registry_path` must be writable or creatable; every path-valued key set in `pyproject.toml` (report outputs, `baseline`, `cache_path`, `coverage_xml`, memory and analytics state paths) must stay under the repository root after symbolic links are followed (for default memory store paths in a linked worktree, that root is the main checkout)
 - **Range validation**: `fail_health` must be 0–100; retention days must be positive
 - **Retention policy**: audit and intent records respect `*_retention_days` settings; records older than the configured age are automatically purged on cleanup
 - **Setup safety**: `codeclone setup apply` refuses filesystem writes without explicit `--yes` confirmation or `--dry-run` preview; `--plan-id` binding prevents stale plans from applying
