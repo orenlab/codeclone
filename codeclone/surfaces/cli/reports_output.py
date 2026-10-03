@@ -6,16 +6,19 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import webbrowser
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from pathlib import Path
-from typing import NoReturn, Protocol
+from typing import NamedTuple, NoReturn, Protocol
 
 from ... import ui_messages as ui
-from ...contracts import ExitCode
+from ...contracts import DEFAULT_ROOT, ExitCode
 from . import state as cli_state
-from .attrs import bool_attr, optional_text_attr
+from .attrs import bool_attr, optional_text_attr, text_attr
+from .startup import resolve_root_path
 from .types import (
     CLIArgsLike,
     OutputPaths,
@@ -165,16 +168,74 @@ _REASON_OUTPUT_IS_SYMLINK = (
 )
 
 
+#: Why a report is not written to a path spelled inside the repository that a
+#: linked directory leads out of it, and what the user can do instead.
+_REASON_OUTPUT_LEAVES_REPOSITORY = (
+    "a directory on the way to it is a symbolic link that leads outside the "
+    "repository; pass the real outside path explicitly, or remove the link"
+)
+
+
 class _OutputPathIsSymlinkError(OSError):
     """A report path whose last component is a symbolic link."""
 
 
-def _resolve_report_target(out: Path) -> Path:
-    """The path a report would be written to, unless *out* is itself a link."""
+class _OutputPathLeavesRepositoryError(OSError):
+    """A report path spelled inside the repository that resolves outside it."""
+
+
+class _RepositoryRoots(NamedTuple):
+    """The repository root as the user spelled it and as it resolves."""
+
+    spelled: Path
+    resolved: Path
+
+
+def _repository_roots(args: object) -> _RepositoryRoots:
+    """Both forms of the root, so each spelling is compared with its own kind.
+
+    ``os.path.abspath`` anchors and normalises without following links; the
+    resolved form is the scan root's one owner, so a checkout that itself sits
+    behind a linked ``/var`` or ``/tmp`` is judged against its real location.
+    """
+
+    return _RepositoryRoots(
+        spelled=Path(os.path.abspath(text_attr(args, "root", DEFAULT_ROOT))),
+        resolved=resolve_root_path(args),
+    )
+
+
+def _spelled_inside(out: Path, roots: _RepositoryRoots) -> bool:
+    """Whether the user spelled *out* inside the repository, links unfollowed."""
+
+    spelled = Path(os.path.abspath(out))
+    return spelled.is_relative_to(roots.spelled) or spelled.is_relative_to(
+        roots.resolved
+    )
+
+
+def _refuse_link_leading_outside(
+    out: Path, resolved: Path, roots: _RepositoryRoots
+) -> None:
+    """Refuse a path spelled inside the repository that resolves outside it.
+
+    A path the user spelled outside the repository is their own word and is
+    left alone, linked ancestors included; one spelled inside it that still
+    lands outside went through a directory link the repository planted.
+    """
+
+    if _spelled_inside(out, roots) and not resolved.is_relative_to(roots.resolved):
+        raise _OutputPathLeavesRepositoryError(_REASON_OUTPUT_LEAVES_REPOSITORY)
+
+
+def _resolve_report_target(out: Path, roots: _RepositoryRoots) -> Path:
+    """The path a report would be written to, unless a link would redirect it."""
 
     if out.is_symlink():
         raise _OutputPathIsSymlinkError(_REASON_OUTPUT_IS_SYMLINK)
-    return out.resolve()
+    resolved = out.resolve()
+    _refuse_link_leading_outside(out, resolved, roots)
+    return resolved
 
 
 def _validate_output_path(
@@ -185,6 +246,7 @@ def _validate_output_path(
     console: PrinterLike,
     invalid_message: Callable[..., str],
     invalid_path_message: Callable[..., str],
+    roots: _RepositoryRoots,
 ) -> Path:
     """Resolve a report path first, then decide whether it may be written.
 
@@ -194,13 +256,15 @@ def _validate_output_path(
     review 2026-10, A-02). A path whose last component is a symbolic link is
     refused outright, whether the repository's configuration or the user's
     command line named it: the user typed a path inside their checkout, not
-    the link's target. The suffix is then checked on the resolved path, the
-    one the report is actually written to.
+    the link's target. A path spelled inside the repository that a linked
+    directory leads out of it is refused for the same reason. The suffix is
+    then checked on the resolved path, the one the report is actually written
+    to.
     """
 
     out = Path(path).expanduser()
     try:
-        resolved = _resolve_report_target(out)
+        resolved = _resolve_report_target(out, roots)
     except OSError as exc:
         _exit_contract_error(
             console, invalid_path_message(label=label, path=out, error=exc)
@@ -295,25 +359,33 @@ def _resolve_output_paths(
         ("text", "text_out", ".txt", "text"),
     )
 
+    roots = _repository_roots(args)
     for field_name, arg_name, expected_suffix, label in output_specs:
         raw_value = optional_text_attr(args, arg_name)
         if not raw_value:
             continue
-        path = _validate_output_path(
-            raw_value,
+        validate = partial(
+            _validate_output_path,
             expected_suffix=expected_suffix,
             label=label,
             console=printer,
             invalid_message=ui.fmt_invalid_output_extension,
             invalid_path_message=ui.fmt_invalid_output_path,
+            roots=roots,
         )
+        path = validate(raw_value)
         if (
             args.timestamped_report_paths
             and report_path_origins.get(field_name) == "default"
         ):
-            path = _timestamped_report_path(
-                path,
-                report_generated_at_utc=report_generated_at_utc,
+            # The timestamped name is a new last component: judged the same way.
+            path = validate(
+                str(
+                    _timestamped_report_path(
+                        path,
+                        report_generated_at_utc=report_generated_at_utc,
+                    )
+                )
             )
         resolved[field_name] = path
 

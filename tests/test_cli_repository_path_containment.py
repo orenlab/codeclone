@@ -16,7 +16,8 @@ a cache store.
 
 The model these tests pin: a path from the repository's own configuration is
 the repository author's word and must resolve inside the repository; a path
-typed on the command line is the user's word and may point anywhere; a report
+typed on the command line is the user's word and may point anywhere, unless it
+is spelled inside the repository and a linked directory leads it out; a report
 is never written through a symbolic link, whoever named it. Every victim is a
 plain file under the test's temporary directory, and ``HOME`` points there
 too, so the ``~`` spelling has a victim of its own.
@@ -30,6 +31,7 @@ from pathlib import Path
 
 import pytest
 
+import codeclone.surfaces.cli.report_meta as cli_meta
 import codeclone.surfaces.cli.workflow as cli
 from tests._assertions import strip_ansi
 
@@ -89,8 +91,9 @@ def _codeclone(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     *flags: str,
+    root: str = ".",
 ) -> tuple[int, str]:
-    monkeypatch.setattr(sys, "argv", ["codeclone", ".", "--no-progress", *flags])
+    monkeypatch.setattr(sys, "argv", ["codeclone", root, "--no-progress", *flags])
     try:
         cli.main()
     except SystemExit as exc:
@@ -272,6 +275,138 @@ def test_report_path_on_the_command_line_through_planted_symlink_is_refused(
     assert _tree(box.victim) == before
     for sentence in said:
         assert _squash(sentence) in out
+
+
+# -- a linked directory inside the repository that leads out of it ----------
+
+_THROUGH_A_LINK = (
+    "a directory on the way to it is a symbolic link that leads outside the "
+    "repository; pass the real outside path explicitly, or remove the link"
+)
+
+
+@pytest.mark.parametrize(
+    ("root", "target"),
+    [
+        (".", "reports/out.txt"),
+        (".", "{repo}/reports/out.txt"),
+        ("{linked}", "{linked}/reports/out.txt"),
+        ("{linked}", "{repo}/reports/out.txt"),
+    ],
+    ids=["relative", "absolute", "through-linked-root", "real-path-linked-root"],
+)
+def test_report_path_on_the_command_line_through_planted_directory_link_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    root: str,
+    target: str,
+) -> None:
+    box = _sandbox(tmp_path, monkeypatch)
+    (box.repo / "reports").symlink_to(
+        box.victim / "Documents", target_is_directory=True
+    )
+    (tmp_path / "linked_root").symlink_to(box.repo, target_is_directory=True)
+    names = {"repo": box.repo, "linked": tmp_path / "linked_root"}
+    root, target = root.format(**names), target.format(**names)
+    before = _tree(box.victim)
+
+    code, out = _codeclone(monkeypatch, capsys, "--text", target, root=root)
+
+    assert code == 2, out
+    assert _tree(box.victim) == before
+    assert _squash(f"Invalid text output path: {target} ({_THROUGH_A_LINK}).") in out
+
+
+def test_report_path_on_the_command_line_through_a_link_to_a_repository_file_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The last-component rule on its own: the link's target is inside."""
+
+    box = _sandbox(tmp_path, monkeypatch)
+    (box.repo / "notes").mkdir()
+    keep = box.repo / "notes" / "keep.txt"
+    keep.write_text("keep me\n", "utf-8")
+    (box.repo / "reports").mkdir()
+    (box.repo / "reports" / "out.txt").symlink_to(keep)
+
+    code, out = _codeclone(monkeypatch, capsys, "--text", "reports/out.txt")
+
+    assert code == 2, out
+    assert keep.read_text("utf-8") == "keep me\n"
+    assert (
+        _squash(
+            "Invalid text output path: reports/out.txt (it is a symbolic link, "
+            "and a report is never written through one)."
+        )
+        in out
+    )
+
+
+def test_report_path_through_a_linked_directory_inside_the_repository_is_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    box = _sandbox(tmp_path, monkeypatch)
+    (box.repo / "real_reports").mkdir()
+    (box.repo / "reports").symlink_to(
+        box.repo / "real_reports", target_is_directory=True
+    )
+
+    code, out = _codeclone(monkeypatch, capsys, "--text", "reports/out.txt")
+
+    assert code == 0, out
+    assert (box.repo / "real_reports" / "out.txt").is_file()
+
+
+def test_report_path_in_a_repository_reached_through_a_linked_ancestor_is_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    box = _sandbox(tmp_path / "real_parent", monkeypatch)
+    (tmp_path / "linked_parent").symlink_to(
+        tmp_path / "real_parent", target_is_directory=True
+    )
+    spelled_root = tmp_path / "linked_parent" / "repo"
+
+    code, out = _codeclone(
+        monkeypatch,
+        capsys,
+        "--md",
+        str(spelled_root / "reports" / "r.md"),
+        root=str(spelled_root),
+    )
+
+    assert code == 0, out
+    assert (box.repo / "reports" / "r.md").is_file()
+
+
+def test_timestamped_report_name_through_a_planted_link_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    box = _sandbox(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        cli_meta, "_current_report_timestamp_utc", lambda: "2026-10-03T12:00:00Z"
+    )
+    (box.repo / ".codeclone").mkdir()
+    (box.repo / ".codeclone" / "report-20261003T120000Z.md").symlink_to(
+        box.victim / "Documents" / "notes.md"
+    )
+    before = _tree(box.victim)
+
+    code, out = _codeclone(monkeypatch, capsys, "--md", "--timestamped-report-paths")
+
+    assert code == 2, out
+    assert _tree(box.victim) == before
+    assert (
+        _squash("it is a symbolic link, and a report is never written through") in out
+    )
 
 
 # -- A-05: the baseline path from the repository's pyproject -----------------
