@@ -39,7 +39,12 @@ from pathlib import Path
 
 import pytest
 
-from codeclone.api.run_store_serving import ENV_SERVE_FROM
+from codeclone.api.run_store_serving import (
+    ENV_SERVE_FROM,
+    SERVE_FROM_RUN_STORE,
+    ServedRunSummary,
+    read_run_store_summary,
+)
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests import conftest as corpora
@@ -106,6 +111,18 @@ def serving_environment(store_path: Path, *, serve_from: str | None) -> Iterator
         yield
     finally:
         patch.undo()
+
+
+def stored_blocks(population: SummaryPopulation) -> ServedRunSummary:
+    """The store's blocks of one execution's run, read through the door the
+    surface reads through -- never a reading of the test's own."""
+    record = population.record
+    with serving_environment(population.store_path, serve_from=SERVE_FROM_RUN_STORE):
+        stored, outcome = read_run_store_summary(
+            root=record.root, link=record.execution.run_snapshot_link
+        )
+    assert stored is not None, outcome
+    return stored
 
 
 def _declare_gates(root: Path) -> None:
@@ -235,10 +252,13 @@ class SummaryPopulations:
         return root, {"api_surface": True}, 1
 
     def _gated(self) -> tuple[Path, dict[str, object], int]:
+        """The evaluation carrier under two declared gates, analysed at a
+        lower unit floor -- the one population whose analysis profile is not
+        the default, so the profile is not a constant over the population."""
         root = self._comparison_tree("gated", "trusted")
         corpora._write_tree(root, corpora.EVALUATION_CARRIER)
         _declare_gates(root)
-        return root, {"api_surface": True}, 1
+        return root, {"api_surface": True, "min_loc": 3, "min_stmt": 2}, 1
 
     def _clones_only(self, *, analyses: int) -> tuple[Path, dict[str, object], int]:
         name = "clones_only_warm" if analyses > 1 else "clones_only"
@@ -305,4 +325,5 @@ __all__ = [
     "SummaryPopulations",
     "serving_environment",
     "shared_populations",
+    "stored_blocks",
 ]
