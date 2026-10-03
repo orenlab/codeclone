@@ -70,12 +70,19 @@ import hmac
 import json
 import sqlite3
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import closing, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from types import TracebackType
-from typing import Final, Generic, Protocol, TypeVar
+from typing import (
+    Final,
+    Generic,
+    Protocol,
+    TypeVar,
+    get_args,
+    get_type_hints,
+)
 from urllib.parse import quote
 
 from codeclone.canonical.analysis_rows import (
@@ -1892,6 +1899,9 @@ class _FamilyEntry(Protocol):
     @property
     def namespace(self) -> str: ...
 
+    @property
+    def row_type(self) -> type[object]: ...
+
     def decode_into(
         self, into: dict[str, list[object]], row: Mapping[str, object], where: str
     ) -> None: ...
@@ -2527,110 +2537,276 @@ def _single_record(
     return rows[0] if rows else None
 
 
-def _collected_model(collected: Mapping[str, list[object]]) -> CanonicalModel:
-    """Assemble decoded family rows into one canonical model."""
-    return CanonicalModel(
-        files=frozenset(FAMILY_FILE.rows(collected)),
-        modules=frozenset(FAMILY_MODULE.rows(collected)),
-        analyzed_files=frozenset(FAMILY_ANALYZED_FILE.rows(collected)),
-        file_modules=frozenset(FAMILY_FILE_MODULE.rows(collected)),
+class UnreadFamilyError(CanonicalModelError):
+    """A bounded read was asked about a family it did not read.
+
+    The four-state law in one refusal: a family the read never loaded is
+    neither "measured, empty" nor "measured, absent" -- it was not looked
+    at, and the only honest answer about it is this one, naming it.
+    """
+
+    def __init__(self, family: str) -> None:
+        super().__init__(
+            f"family {family!r} was not read by this bounded read; an unread "
+            "family is not an empty one"
+        )
+        self.family = family
+
+
+class _UnreadRows(frozenset[_RowT]):
+    """The value a bounded house holds for a set family it did not read.
+
+    An honest (empty) ``frozenset`` that carries its family's name, and that
+    a bounded house never hands out: :class:`_RefusingHouse` refuses the
+    attribute that holds it.  The refusal is on the HOUSE, not on this
+    value, because CPython's set constructors and set algebra read a set's
+    own table without asking it -- a value that refused on its own would
+    still be read as empty by ``set(rows)`` or ``rows | other``.
+    """
+
+    __slots__ = ("family",)
+
+    family: str
+
+    def __new__(cls, family: str) -> _UnreadRows[_RowT]:
+        rows = super().__new__(cls)
+        rows.family = family
+        return rows
+
+
+class _RefusingHouse:
+    """What makes a bounded house refuse its unread families.
+
+    An attribute holding an unread set family (:class:`_UnreadRows`), or an
+    unread record family (``None`` in the slot, its field named in
+    ``_unread_records``), refuses with :class:`UnreadFamilyError` naming the
+    family -- no attribute of a bounded house answers "empty" or "absent"
+    for a family the read never looked at.
+    """
+
+    __slots__ = ()
+
+    def __getattribute__(self, name: str) -> object:
+        value = object.__getattribute__(self, name)
+        if isinstance(value, _UnreadRows):
+            raise UnreadFamilyError(value.family)
+        if value is None:
+            unread: dict[str, str] = object.__getattribute__(self, "_unread_records")
+            if name in unread:
+                raise UnreadFamilyError(unread[name])
+        return value
+
+
+class _BoundedModel(_RefusingHouse, CanonicalModel):
+    __slots__ = ("_unread_records",)
+
+
+class _BoundedAnalysisFacts(_RefusingHouse, AnalysisFacts):
+    __slots__ = ("_unread_records",)
+
+
+class _BoundedComparisonFacts(_RefusingHouse, ComparisonFacts):
+    __slots__ = ("_unread_records",)
+
+
+class _BoundedEvaluationFacts(_RefusingHouse, EvaluationFacts):
+    __slots__ = ("_unread_records",)
+
+
+def _family_set(
+    entry: StoredFamily[_RowT],
+    collected: Mapping[str, list[object]],
+    loaded: frozenset[str] | None,
+) -> frozenset[_RowT]:
+    """One family's rows, or the value standing for it when the read did
+    not read it."""
+    if loaded is not None and entry.family not in loaded:
+        return _UnreadRows(entry.family)
+    return frozenset(entry.rows(collected))
+
+
+def _record_families(house: type[object]) -> dict[str, str]:
+    """The record fields of one house and the family each is read from,
+    derived from the house's own annotations and the registry's row types
+    (a record family's row type is its own), never restated."""
+    by_type: dict[type[object], list[str]] = {}
+    for entry in _FAMILIES:
+        by_type.setdefault(entry.row_type, []).append(entry.family)
+    records: dict[str, str] = {}
+    for name, hint in get_type_hints(house).items():
+        row_types = [arg for arg in get_args(hint) if arg is not type(None)]
+        if len(row_types) < len(get_args(hint)):
+            (family,) = by_type[row_types[0]]
+            records[name] = family
+    return records
+
+
+#: Every bounded house's record fields and their families, derived once
+#: from the plain house it refines.
+_RECORD_FAMILIES: Final[dict[type[object], dict[str, str]]] = {
+    _BoundedModel: _record_families(CanonicalModel),
+    _BoundedAnalysisFacts: _record_families(AnalysisFacts),
+    _BoundedComparisonFacts: _record_families(ComparisonFacts),
+    _BoundedEvaluationFacts: _record_families(EvaluationFacts),
+}
+
+
+#: Every bounded house's field names, read off the plain house it refines.
+_HOUSE_FIELDS: Final[dict[type[object], tuple[str, ...]]] = {
+    _BoundedModel: tuple(item.name for item in fields(CanonicalModel)),
+    _BoundedAnalysisFacts: tuple(item.name for item in fields(AnalysisFacts)),
+    _BoundedComparisonFacts: tuple(item.name for item in fields(ComparisonFacts)),
+    _BoundedEvaluationFacts: tuple(item.name for item in fields(EvaluationFacts)),
+}
+
+_HouseT = TypeVar("_HouseT")
+
+
+def _bounded(
+    house: _HouseT, kind: type[_HouseT], loaded: frozenset[str] | None
+) -> _HouseT:
+    """``house`` as its refusing ``kind`` when a bounded read built it (the
+    same field values, plus the record fields it did not read), and as it
+    is for the materializing read (``loaded`` ``None``)."""
+    if loaded is None:
+        return house
+    refusing = object.__new__(kind)
+    for name in _HOUSE_FIELDS[kind]:
+        object.__setattr__(refusing, name, object.__getattribute__(house, name))
+    unread = {
+        field: family
+        for field, family in _RECORD_FAMILIES[kind].items()
+        if family not in loaded
+    }
+    object.__setattr__(refusing, "_unread_records", unread)
+    return refusing
+
+
+def _collected_model(
+    collected: Mapping[str, list[object]], loaded: frozenset[str] | None = None
+) -> CanonicalModel:
+    """Assemble decoded family rows into one canonical model.
+
+    ``loaded`` names the families a bounded read read: the model is then
+    built of the refusing houses, and every family it does not name is a
+    typed absence.  ``None`` is the materializing read.
+    """
+    analysis = AnalysisFacts(
+        contracts=_family_set(FAMILY_CONTRACT, collected, loaded),
+        graph_nodes=_family_set(FAMILY_GRAPH_NODE, collected, loaded),
+        sink_roles=_family_set(FAMILY_SINK_ROLE, collected, loaded),
+        candidates=_family_set(FAMILY_CANDIDATE, collected, loaded),
+        semantic_edges=_family_set(FAMILY_SEMANTIC_EDGE, collected, loaded),
+        dependency_relations=_family_set(FAMILY_DEPENDENCY_RELATION, collected, loaded),
+        dependency_occurrences=_family_set(
+            FAMILY_DEPENDENCY_OCCURRENCE, collected, loaded
+        ),
+        dependency_cycles=_family_set(FAMILY_DEPENDENCY_CYCLE, collected, loaded),
+        import_observations=_family_set(FAMILY_IMPORT_OBSERVATION, collected, loaded),
+        relationship_observations=_family_set(
+            FAMILY_RELATIONSHIP_OBSERVATION, collected, loaded
+        ),
+        clone_groups=_family_set(FAMILY_CLONE_GROUP, collected, loaded),
+        dead_code_observations=_family_set(
+            FAMILY_DEAD_CODE_OBSERVATION, collected, loaded
+        ),
+        violations=_family_set(FAMILY_VIOLATION, collected, loaded),
+        coupling_cohesion_observations=_family_set(
+            FAMILY_COUPLING_COHESION, collected, loaded
+        ),
+        api_symbols=_family_set(FAMILY_API_SYMBOL, collected, loaded),
+        risk_observations=_family_set(FAMILY_RISK_OBSERVATION, collected, loaded),
+        unit_spans=_family_set(FAMILY_UNIT_SPAN, collected, loaded),
+        adoption_counts=_family_set(FAMILY_ADOPTION_COUNT, collected, loaded),
+        security_surfaces=_family_set(FAMILY_SECURITY_SURFACE, collected, loaded),
+        suppressed_clone_groups=_family_set(
+            FAMILY_SUPPRESSED_CLONE_GROUP, collected, loaded
+        ),
+        structural_groups=_family_set(FAMILY_STRUCTURAL_GROUP, collected, loaded),
+        dead_symbol_groups=_family_set(FAMILY_DEAD_SYMBOL_GROUP, collected, loaded),
+        unreachable_statement_groups=_family_set(
+            FAMILY_UNREACHABLE_STATEMENT_GROUP, collected, loaded
+        ),
+        complexity_hotspots=_family_set(FAMILY_COMPLEXITY_HOTSPOT, collected, loaded),
+        coupling_hotspots=_family_set(FAMILY_COUPLING_HOTSPOT, collected, loaded),
+        cohesion_hotspots=_family_set(FAMILY_COHESION_HOTSPOT, collected, loaded),
+        overloaded_modules=_family_set(FAMILY_OVERLOADED_MODULE, collected, loaded),
+        coverage_units=_family_set(FAMILY_COVERAGE_UNIT, collected, loaded),
+        run_scalars=_single_record(FAMILY_RUN_SCALAR, collected),
+        analysis_population=_single_record(FAMILY_ANALYSIS_POPULATION, collected),
+        coverage_join=_single_record(FAMILY_COVERAGE_JOIN, collected),
+        dead_code_summary=_single_record(FAMILY_DEAD_CODE_SUMMARY, collected),
+    )
+    model = CanonicalModel(
+        files=_family_set(FAMILY_FILE, collected, loaded),
+        modules=_family_set(FAMILY_MODULE, collected, loaded),
+        analyzed_files=_family_set(FAMILY_ANALYZED_FILE, collected, loaded),
+        file_modules=_family_set(FAMILY_FILE_MODULE, collected, loaded),
         facts=CanonicalFacts(
-            analysis=AnalysisFacts(
-                contracts=frozenset(FAMILY_CONTRACT.rows(collected)),
-                graph_nodes=frozenset(FAMILY_GRAPH_NODE.rows(collected)),
-                sink_roles=frozenset(FAMILY_SINK_ROLE.rows(collected)),
-                candidates=frozenset(FAMILY_CANDIDATE.rows(collected)),
-                semantic_edges=frozenset(FAMILY_SEMANTIC_EDGE.rows(collected)),
-                dependency_relations=frozenset(
-                    FAMILY_DEPENDENCY_RELATION.rows(collected)
-                ),
-                dependency_occurrences=frozenset(
-                    FAMILY_DEPENDENCY_OCCURRENCE.rows(collected)
-                ),
-                dependency_cycles=frozenset(FAMILY_DEPENDENCY_CYCLE.rows(collected)),
-                import_observations=frozenset(
-                    FAMILY_IMPORT_OBSERVATION.rows(collected)
-                ),
-                relationship_observations=frozenset(
-                    FAMILY_RELATIONSHIP_OBSERVATION.rows(collected)
-                ),
-                clone_groups=frozenset(FAMILY_CLONE_GROUP.rows(collected)),
-                dead_code_observations=frozenset(
-                    FAMILY_DEAD_CODE_OBSERVATION.rows(collected)
-                ),
-                violations=frozenset(FAMILY_VIOLATION.rows(collected)),
-                coupling_cohesion_observations=frozenset(
-                    FAMILY_COUPLING_COHESION.rows(collected)
-                ),
-                api_symbols=frozenset(FAMILY_API_SYMBOL.rows(collected)),
-                risk_observations=frozenset(FAMILY_RISK_OBSERVATION.rows(collected)),
-                unit_spans=frozenset(FAMILY_UNIT_SPAN.rows(collected)),
-                adoption_counts=frozenset(FAMILY_ADOPTION_COUNT.rows(collected)),
-                security_surfaces=frozenset(FAMILY_SECURITY_SURFACE.rows(collected)),
-                suppressed_clone_groups=frozenset(
-                    FAMILY_SUPPRESSED_CLONE_GROUP.rows(collected)
-                ),
-                structural_groups=frozenset(FAMILY_STRUCTURAL_GROUP.rows(collected)),
-                dead_symbol_groups=frozenset(FAMILY_DEAD_SYMBOL_GROUP.rows(collected)),
-                unreachable_statement_groups=frozenset(
-                    FAMILY_UNREACHABLE_STATEMENT_GROUP.rows(collected)
-                ),
-                complexity_hotspots=frozenset(
-                    FAMILY_COMPLEXITY_HOTSPOT.rows(collected)
-                ),
-                coupling_hotspots=frozenset(FAMILY_COUPLING_HOTSPOT.rows(collected)),
-                cohesion_hotspots=frozenset(FAMILY_COHESION_HOTSPOT.rows(collected)),
-                overloaded_modules=frozenset(FAMILY_OVERLOADED_MODULE.rows(collected)),
-                coverage_units=frozenset(FAMILY_COVERAGE_UNIT.rows(collected)),
-                run_scalars=_single_record(FAMILY_RUN_SCALAR, collected),
-                analysis_population=_single_record(
-                    FAMILY_ANALYSIS_POPULATION, collected
-                ),
-                coverage_join=_single_record(FAMILY_COVERAGE_JOIN, collected),
-                dead_code_summary=_single_record(FAMILY_DEAD_CODE_SUMMARY, collected),
-            ),
-            comparison=_collected_comparison(collected),
-            evaluation=_collected_evaluation(collected),
+            analysis=_bounded(analysis, _BoundedAnalysisFacts, loaded),
+            comparison=_collected_comparison(collected, loaded),
+            evaluation=_collected_evaluation(collected, loaded),
         ),
-        coupled_sets=frozenset(FAMILY_COUPLED_SET.rows(collected)),
+        coupled_sets=_family_set(FAMILY_COUPLED_SET, collected, loaded),
     )
+    return _bounded(model, _BoundedModel, loaded)
 
 
-def _collected_comparison(collected: Mapping[str, list[object]]) -> ComparisonFacts:
+def _collected_comparison(
+    collected: Mapping[str, list[object]], loaded: frozenset[str] | None = None
+) -> ComparisonFacts:
     """Assemble the comparison house from decoded rows (canonical epoch E2)."""
-    return ComparisonFacts(
-        baseline_witness=_single_record(FAMILY_BASELINE_WITNESS, collected),
-        metrics_baseline_witness=_single_record(
-            FAMILY_METRICS_BASELINE_WITNESS, collected
+    return _bounded(
+        ComparisonFacts(
+            baseline_witness=_single_record(FAMILY_BASELINE_WITNESS, collected),
+            metrics_baseline_witness=_single_record(
+                FAMILY_METRICS_BASELINE_WITNESS, collected
+            ),
+            lane_trust=_family_set(FAMILY_LANE_TRUST, collected, loaded),
+            comparison_availability=_family_set(
+                FAMILY_COMPARISON_AVAILABILITY, collected, loaded
+            ),
+            disabled_capabilities=_family_set(
+                FAMILY_DISABLED_CAPABILITY, collected, loaded
+            ),
+            clone_novelty=_family_set(FAMILY_CLONE_NOVELTY, collected, loaded),
+            complexity_novelty=_family_set(
+                FAMILY_COMPLEXITY_NOVELTY, collected, loaded
+            ),
+            coupling_novelty=_family_set(FAMILY_COUPLING_NOVELTY, collected, loaded),
+            dependency_cycle_novelty=_family_set(
+                FAMILY_DEPENDENCY_CYCLE_NOVELTY, collected, loaded
+            ),
+            dead_symbol_novelty=_family_set(
+                FAMILY_DEAD_SYMBOL_NOVELTY, collected, loaded
+            ),
+            adoption_delta=_family_set(FAMILY_ADOPTION_DELTA, collected, loaded),
+            api_surface_delta=_family_set(FAMILY_API_SURFACE_DELTA, collected, loaded),
+            health_delta=_family_set(FAMILY_HEALTH_DELTA, collected, loaded),
         ),
-        lane_trust=frozenset(FAMILY_LANE_TRUST.rows(collected)),
-        comparison_availability=frozenset(
-            FAMILY_COMPARISON_AVAILABILITY.rows(collected)
-        ),
-        disabled_capabilities=frozenset(FAMILY_DISABLED_CAPABILITY.rows(collected)),
-        clone_novelty=frozenset(FAMILY_CLONE_NOVELTY.rows(collected)),
-        complexity_novelty=frozenset(FAMILY_COMPLEXITY_NOVELTY.rows(collected)),
-        coupling_novelty=frozenset(FAMILY_COUPLING_NOVELTY.rows(collected)),
-        dependency_cycle_novelty=frozenset(
-            FAMILY_DEPENDENCY_CYCLE_NOVELTY.rows(collected)
-        ),
-        dead_symbol_novelty=frozenset(FAMILY_DEAD_SYMBOL_NOVELTY.rows(collected)),
-        adoption_delta=frozenset(FAMILY_ADOPTION_DELTA.rows(collected)),
-        api_surface_delta=frozenset(FAMILY_API_SURFACE_DELTA.rows(collected)),
-        health_delta=frozenset(FAMILY_HEALTH_DELTA.rows(collected)),
+        _BoundedComparisonFacts,
+        loaded,
     )
 
 
-def _collected_evaluation(collected: Mapping[str, list[object]]) -> EvaluationFacts:
+def _collected_evaluation(
+    collected: Mapping[str, list[object]], loaded: frozenset[str] | None = None
+) -> EvaluationFacts:
     """Assemble the evaluation house from decoded rows (canonical epoch E3)."""
-    return EvaluationFacts(
-        evaluation_contract=_single_record(FAMILY_EVALUATION_CONTRACT, collected),
-        evaluation_request=_single_record(FAMILY_EVALUATION_REQUEST, collected),
-        gate_outcome=_single_record(FAMILY_GATE_OUTCOME, collected),
-        health_result=_single_record(FAMILY_HEALTH_RESULT, collected),
-        finding_evaluation=frozenset(FAMILY_FINDING_EVALUATION.rows(collected)),
-        unit_risk_result=frozenset(FAMILY_UNIT_RISK_RESULT.rows(collected)),
-        hotlist_selection=frozenset(FAMILY_HOTLIST_SELECTION.rows(collected)),
+    return _bounded(
+        EvaluationFacts(
+            evaluation_contract=_single_record(FAMILY_EVALUATION_CONTRACT, collected),
+            evaluation_request=_single_record(FAMILY_EVALUATION_REQUEST, collected),
+            gate_outcome=_single_record(FAMILY_GATE_OUTCOME, collected),
+            health_result=_single_record(FAMILY_HEALTH_RESULT, collected),
+            finding_evaluation=_family_set(
+                FAMILY_FINDING_EVALUATION, collected, loaded
+            ),
+            unit_risk_result=_family_set(FAMILY_UNIT_RISK_RESULT, collected, loaded),
+            hotlist_selection=_family_set(FAMILY_HOTLIST_SELECTION, collected, loaded),
+        ),
+        _BoundedEvaluationFacts,
+        loaded,
     )
 
 
@@ -3454,6 +3630,56 @@ def _scan_run_family(
             namespace, stored_id, family, _member_payload(stored_id, payload), into
         )
         object_ids.append(stored_id)
+
+
+def read_named_families(
+    store: RunStore, run_id: str, families: Iterable[_FamilyEntry]
+) -> CanonicalModel:
+    """The NAMED families of ONE published run, as a model.
+
+    The bounded read a projection over several families needs: each named
+    family is read exactly as :meth:`RunStore.read_family` reads one -- the
+    same member scan through ``idx_objects_family`` (:func:`_scan_run_family`),
+    every row proven against its own content address by the one member
+    decoder -- and the families are assembled by the same laws as
+    :meth:`RunStore.read_run`.  Every family NOT named is a typed absence in
+    the model: any use of it refuses with :class:`UnreadFamilyError` naming
+    it, never an empty family, because "not read" is not "measured, empty".
+
+    What it buys and what it does not, stated as ``read_family`` states it:
+    the store's generation is proven at open, every row returned is proven
+    against its address, and the run is the one named (no head is
+    consulted).  The membership digest, the scope receipt, the run identity
+    and the cross-family key laws need the whole run; a caller that needs
+    them calls ``read_run``.  The model is returned as assembled, never
+    normalized: closing its domains would read the families it was asked
+    not to.
+
+    One explicit read transaction, as ``read_family`` holds one: a collector
+    committing between two family scans would otherwise turn a deleted run
+    into an empty family.
+    """
+    names = frozenset(entry.family for entry in families)
+    connection = store._connection
+    with _typed_sqlite_faults(store._path):
+        cursor = connection.cursor()
+        cursor.execute("BEGIN")
+        try:
+            run_pk, namespace, _scope_digest, _membership = _published_run_row(
+                connection, run_id
+            )
+            collected: dict[str, list[object]] = {}
+            object_ids: list[str] = []
+            for family in sorted(names):
+                _scan_run_family(
+                    connection, run_pk, namespace, family, object_ids, collected
+                )
+            model = _collected_model(collected, names)
+            cursor.execute("COMMIT")
+        except BaseException:
+            cursor.execute("ROLLBACK")
+            raise
+    return model
 
 
 def _family_facts(
@@ -4937,6 +5163,7 @@ __all__ = [
     "RunStore",
     "RunStoreGcJob",
     "StoredFamily",
+    "UnreadFamilyError",
     "acquire_run_lease",
     "analysis_scope_digest",
     "collect_garbage",
@@ -4945,6 +5172,7 @@ __all__ = [
     "link_run_report",
     "linked_run",
     "migrate_store_schema",
+    "read_named_families",
     "release_retained_run",
     "release_run_lease",
     "retain_run",
