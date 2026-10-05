@@ -37,9 +37,11 @@ refused rather than approximated.
 
 from __future__ import annotations
 
+import gc
 import hmac
 import os
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, NamedTuple
@@ -75,6 +77,7 @@ from ..canonical.errors import (
 from ..canonical.evaluation_rows import UnitRiskRow
 from ..canonical.identity import (
     UNRESOLVED_IMPORT_RESOLUTIONS,
+    EffectRoot,
     FileId,
     ImportTarget,
     ModuleId,
@@ -1360,6 +1363,51 @@ _EMPTY_SEMANTIC = _SemanticFamilies(
 )
 
 
+class _GrammarParses:
+    """The grammar owner's answers for ONE identity index, each asked once.
+
+    The authority producer glues the same identities into many rows -- on
+    this repository 119 817 symbol parses resolved 19 599 distinct keys and
+    39 198 root-set parses 6 064 distinct sets (publication-cost measurement
+    on 133e7495) -- and every repeat asked the grammar a question it had
+    already answered.  The answer is a function of the index and the text
+    alone (``where`` only names the column in a refusal), so it is kept
+    beside the index it was resolved against and nowhere else: one instance
+    per :func:`_semantic_families` call, dropped with it, so no publication
+    reads an identity another index resolved.  A refusal is never kept --
+    the grammar raises on first contact, with that row's own ``where``, in
+    the same order as before.
+    """
+
+    __slots__ = ("_index", "_root_sets", "_symbol_sets", "_symbols")
+
+    def __init__(self, index: IdentityIndex) -> None:
+        self._index = index
+        self._symbols: dict[str, SymbolId] = {}
+        self._root_sets: dict[tuple[str, ...], frozenset[EffectRoot]] = {}
+        self._symbol_sets: dict[tuple[str, ...], frozenset[SymbolId]] = {}
+
+    def symbol(self, key: str, where: str) -> SymbolId:
+        found = self._symbols.get(key)
+        if found is None:
+            found = self._symbols[key] = parse_symbol(self._index, key, where)
+        return found
+
+    def root_set(self, values: Sequence[str], where: str) -> frozenset[EffectRoot]:
+        key = tuple(values)
+        found = self._root_sets.get(key)
+        if found is None:
+            found = self._root_sets[key] = parse_root_set(self._index, key, where)
+        return found
+
+    def symbol_set(self, values: Sequence[str], where: str) -> frozenset[SymbolId]:
+        key = tuple(values)
+        found = self._symbol_sets.get(key)
+        if found is None:
+            found = self._symbol_sets[key] = parse_symbol_set(self._index, key, where)
+        return found
+
+
 def _semantic_families(
     semantic: SemanticAuthorityResult | None, index: IdentityIndex
 ) -> _SemanticFamilies:
@@ -1370,28 +1418,30 @@ def _semantic_families(
     ``semantic_authority: disabled`` is a measured statement, not a fake
     zero.  When the lane DID run, every row resolves through the shared
     grammar owner, so this path and the ingest oracle cannot end up
-    disagreeing about one identity.
+    disagreeing about one identity; :class:`_GrammarParses` only stops it
+    from asking that owner the same question twice.
     """
 
     if semantic is None:
         return _EMPTY_SEMANTIC
+    parses = _GrammarParses(index)
     return _SemanticFamilies(
         contracts=frozenset(
             ContractRow(
-                function=parse_symbol(index, row.function, "contract_ir.function"),
+                function=parses.symbol(row.function, "contract_ir.function"),
                 effect_signature=row.effect_signature,
-                root_set=parse_root_set(
-                    index, row.provenance_roots, "contract_ir.provenance_roots"
+                root_set=parses.root_set(
+                    row.provenance_roots, "contract_ir.provenance_roots"
                 ),
             )
             for row in semantic.contract_ir.contracts
         ),
         graph_nodes=frozenset(
             GraphNodeRow(
-                function=parse_symbol(index, node.function, "graph.nodes.function"),
+                function=parses.symbol(node.function, "graph.nodes.function"),
                 effect_signature=node.effect_signature,
-                root_set=parse_root_set(
-                    index, node.producer_root_ids, "graph.nodes.producer_root_ids"
+                root_set=parses.root_set(
+                    node.producer_root_ids, "graph.nodes.producer_root_ids"
                 ),
                 output_facts=node.output_facts,
                 resolution_state=node.resolution_state,
@@ -1400,7 +1450,7 @@ def _semantic_families(
         ),
         sink_roles=frozenset(
             SinkRoleRow(
-                symbol=parse_symbol(index, sink.sink_identity, "sinks.sink_identity"),
+                symbol=parses.symbol(sink.sink_identity, "sinks.sink_identity"),
                 authority_status=sink.authority_status,
             )
             for sink in semantic.sinks
@@ -1409,16 +1459,16 @@ def _semantic_families(
             CandidateRow(
                 level=candidate.level,
                 shared_fact=candidate.shared_fact,
-                producer_set=parse_symbol_set(
-                    index, candidate.producers, "candidates.producers"
+                producer_set=parses.symbol_set(
+                    candidate.producers, "candidates.producers"
                 ),
             )
             for candidate in semantic.candidates
         ),
         semantic_edges=frozenset(
             SemanticEdge(
-                source=parse_symbol(index, edge.source, "graph.edges.source"),
-                target=parse_symbol(index, edge.target, "graph.edges.target"),
+                source=parses.symbol(edge.source, "graph.edges.source"),
+                target=parses.symbol(edge.target, "graph.edges.target"),
             )
             for edge in semantic.graph.edges
         ),
@@ -1426,20 +1476,20 @@ def _semantic_families(
             ViolationRow(
                 contract_id=violation.contract_id,
                 kind=violation.kind,
-                sink_identity=parse_symbol(
-                    index, violation.sink_identity, "violation.sink_identity"
+                sink_identity=parses.symbol(
+                    violation.sink_identity, "violation.sink_identity"
                 ),
-                canonical_owner=parse_symbol(
-                    index, violation.canonical_owner, "violation.canonical_owner"
+                canonical_owner=parses.symbol(
+                    violation.canonical_owner, "violation.canonical_owner"
                 ),
                 authority_status=violation.authority_status,
                 effect_signature=violation.effect_signature,
                 resolution_state=violation.resolution_state,
-                root_set=parse_root_set(
-                    index, violation.producer_root_ids, "violation.producer_root_ids"
+                root_set=parses.root_set(
+                    violation.producer_root_ids, "violation.producer_root_ids"
                 ),
-                producer_set=parse_symbol_set(
-                    index, violation.producers, "violation.producers"
+                producer_set=parses.symbol_set(
+                    violation.producers, "violation.producers"
                 ),
                 suppressed=violation.suppressed,
                 # The grammar owner decides placement AND order, so this
@@ -1476,7 +1526,17 @@ def canonical_snapshot_from_producers(
     comparison: ComparisonInputsFactory | None = None,
     evaluation: EvaluationInputsFactory | None = None,
 ) -> CanonicalModel:
-    """Build one normalized model straight from the run's producers.
+    """Build one model straight from the run's producers, NOT normalized.
+
+    Normalization is the store's: ``RunStore.write_full_run`` normalizes
+    every model it is handed, so the one production consumer of this
+    builder (``_publish_enabled``) reaches the gate exactly once.  Closing
+    the domains here as well was a second, identical pass over the whole
+    model -- 0.95-1.16 s per publication on this repository -- whose
+    result the store then recomputed.  A caller that reads the model's
+    domains itself normalizes first; the facts the builder writes are the
+    same either way (``normalize`` closes ``files`` and ``modules`` and
+    proves the key laws; it never rewrites a fact).
 
     ``population`` is taken as an argument rather than derived here, and the
     caller is the reason: ``_publish_enabled`` needs the same record for the
@@ -1583,7 +1643,35 @@ def canonical_snapshot_from_producers(
             evaluation=evaluation_house(evaluation, _unit_risk_rows(payload, index)),
         ),
         coupled_sets=_coupled_sets(payload),
-    ).normalize()
+    )
+
+
+@contextmanager
+def _cyclic_collector_paused() -> Iterator[None]:
+    """Keep Python's cyclic garbage collector out of one publication.
+
+    A publication allocates hundreds of thousands of short-lived row
+    containers and builds no reference cycle it needs collected, so every
+    generation-0 threshold it crosses buys a collection pass over the live
+    model for nothing: about 1.2 s of collector pauses inside one
+    publication of this repository, against 0.44 s for the whole analysis
+    with publication off (publication-cost measurement on 133e7495).
+    Reference counting still frees everything the publication drops; only
+    the cycle detector waits until the publication ends.
+
+    The collector is handed back in the state the caller left it in, on
+    every way out: a caller that had it switched off keeps it off, and a
+    publication that raises does not leave a process without it.
+    ``gc.freeze()`` is deliberately not used -- it moves every live object
+    into the permanent generation, which no publication owns.
+    """
+    was_enabled = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was_enabled:
+            gc.enable()
 
 
 def publish_run_snapshot(
@@ -1691,36 +1779,40 @@ def _publish_enabled(
     of the statements somebody remembered to wrap: build, population read,
     directory creation and the fenced store write are all behind it, and a
     step added here inherits the containment without a second decision.
+    The same region is the one the cyclic collector stays out of
+    (:func:`_cyclic_collector_paused`): the build, the store write and the
+    sweep after it.
     """
 
-    population = producer_execution_population(
-        discovery=discovery,
-        analysis=analysis,
-        report_meta=report_meta,
-    )
-    model = canonical_snapshot_from_producers(
-        discovery=discovery,
-        processing=processing,
-        analysis=analysis,
-        report_meta=report_meta,
-        population=population,
-        # Evaluated inside the build, so inside the containment: a
-        # comparison or an evaluation that cannot be spelled is a contained
-        # publication failure, never an analysis failure.
-        comparison=comparison,
-        evaluation=evaluation,
-    )
-    admissible = population_is_admissible(population)
-    target = profile_head_target(population)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Imported at use, not at module scope: the store is opened only on
-    # the enabled path, so a disabled rollout never touches sqlite.
-    from ..canonical.store import RunStore
-
-    with RunStore(path) as store:
-        receipt, in_flight_lease, collection = _publish_and_collect(
-            store, model, namespace=namespace, target=target
+    with _cyclic_collector_paused():
+        population = producer_execution_population(
+            discovery=discovery,
+            analysis=analysis,
+            report_meta=report_meta,
         )
+        model = canonical_snapshot_from_producers(
+            discovery=discovery,
+            processing=processing,
+            analysis=analysis,
+            report_meta=report_meta,
+            population=population,
+            # Evaluated inside the build, so inside the containment: a
+            # comparison or an evaluation that cannot be spelled is a
+            # contained publication failure, never an analysis failure.
+            comparison=comparison,
+            evaluation=evaluation,
+        )
+        admissible = population_is_admissible(population)
+        target = profile_head_target(population)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Imported at use, not at module scope: the store is opened only on
+        # the enabled path, so a disabled rollout never touches sqlite.
+        from ..canonical.store import RunStore
+
+        with RunStore(path) as store:
+            receipt, in_flight_lease, collection = _publish_and_collect(
+                store, model, namespace=namespace, target=target
+            )
     if receipt.head_advanced:
         outcome = (
             RUN_SNAPSHOT_PUBLICATION_PUBLISHED

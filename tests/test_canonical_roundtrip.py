@@ -3145,8 +3145,12 @@ def test_entity_consistency_gates_every_canonical_model_construction() -> None:
         "store.py::_collected_model",
     }, f"the set of CanonicalModel builders moved: {sorted(builders)}"
     assert gates == {
-        # Chained onto the construction itself.
-        "canonical_snapshot.py::canonical_snapshot_from_producers",
+        # Chained onto the construction itself.  The producer builder is not
+        # here on purpose: its one production consumer hands the model to
+        # the store, whose publish gate below closes it, so a second pass at
+        # the builder was the same proof twice -- and
+        # ``test_a_publication_normalizes_its_model_exactly_once`` holds that
+        # edge, one pass per publication.
         "ingest.py::canonical_model_from_legacy_document",
         # The decoder gates by re-encoding what it built, and the encoder
         # normalizes: bytes that are not the canonical encoding of a PROVEN
