@@ -7,15 +7,22 @@
 """Every serving reading declares its families, and reads exactly those.
 
 The run summary is read with ``read_named_families`` over
-``RUN_SUMMARY_FAMILIES``: every family outside the declaration is a typed
-absence, so the declaration is proven in both directions on the nineteen
-served populations (``tests/_run_summary_serving.py``) --
+``RUN_SUMMARY_FAMILIES`` and the conditions of ``RUN_SUMMARY_READ_WHEN``:
+every family outside the declaration is a typed absence, so the declaration
+is proven in both directions on the nineteen served populations
+(``tests/_run_summary_serving.py``), per branch of each condition --
 
 * complete: the bounded summary never refuses, and it equals the summary of
-  the whole read, block for block, on every population;
-* not excessive: every declared family, declared away, refuses on some
-  population -- a family the projections never touch could not be found
-  this way, so it could not stay declared.
+  the whole read, block for block, on every population -- the populations
+  reach both branches of every condition;
+* not excessive: every family declared on every run, declared away, refuses
+  on some population; every family a condition reads, taken out of its
+  condition, refuses on some population that meets the condition and on
+  none that does not -- a family the projections never touch could not be
+  found this way, so it could not stay declared;
+* exact: on every population the reading scans exactly the families
+  declared for it -- the unconditional ones, and the conditional ones whose
+  decider holds a row of that run.
 
 The two family-read readings (served slices, authority candidates) declare
 theirs too, held equal to the families they actually ask the store for.
@@ -29,7 +36,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +46,7 @@ from codeclone.canonical import store as store_module
 from codeclone.canonical.errors import StoreIntegrityError
 from codeclone.canonical.serving import (
     RUN_SUMMARY_FAMILIES,
+    RUN_SUMMARY_READ_WHEN,
     SERVED_AUTHORITY_CANDIDATE_FAMILIES,
     SERVED_SLICE_FAMILIES,
     read_served_authority_candidates,
@@ -47,6 +55,7 @@ from codeclone.canonical.serving import (
     run_summary_from_model,
 )
 from codeclone.canonical.store import (
+    ReadWhen,
     RunStore,
     UnreadFamilyError,
     read_named_families,
@@ -88,12 +97,79 @@ def stored(populations: SummaryPopulations) -> list[_Stored]:
     return runs
 
 
-def test_the_declaration_names_each_registry_family_once() -> None:
-    names = [entry.family for entry in RUN_SUMMARY_FAMILIES]
+def declaration_is_well_formed(
+    always: tuple[store_module._FamilyEntry, ...], conditions: tuple[ReadWhen, ...]
+) -> None:
+    """Each registry family named once across the whole declaration, the
+    unconditional ones sorted, every decider among them."""
+    names = [entry.family for entry in always]
+    conditional = [entry.family for when in conditions for entry in when.families]
     registry = {entry.family for entry in store_module._FAMILIES}
-    assert len(names) == len(set(names))
-    assert set(names) <= registry
+    assert len([*names, *conditional]) == len({*names, *conditional})
+    assert {*names, *conditional} <= registry
     assert names == sorted(names)
+    assert {when.decider.family for when in conditions} <= set(names)
+
+
+def families_declared_for(
+    always: tuple[store_module._FamilyEntry, ...],
+    conditions: tuple[ReadWhen, ...],
+    store: RunStore,
+    run_id: str,
+) -> frozenset[str]:
+    """What the declaration says a reading of this run reads: the
+    unconditional families, and each condition's families when the run's
+    own decider family holds a row."""
+    declared = {entry.family for entry in always}
+    for when in conditions:
+        if store.read_family(run_id, when.decider):  # type: ignore[arg-type]
+            declared.update(entry.family for entry in when.families)
+    return frozenset(declared)
+
+
+def condition_branches(
+    conditions: tuple[ReadWhen, ...], runs: list[_Stored]
+) -> dict[str, tuple[list[str], list[str]]]:
+    """Per condition (by its decider): the runs that meet it, and the runs
+    that do not."""
+    branches: dict[str, tuple[list[str], list[str]]] = {}
+    for when in conditions:
+        held: list[str] = []
+        empty: list[str] = []
+        for run in runs:
+            with RunStore(run.path, create=False) as store:
+                holds = bool(store.read_family(run.run_id, when.decider))  # type: ignore[arg-type]
+            (held if holds else empty).append(run.name)
+        branches[when.decider.family] = (held, empty)
+    return branches
+
+
+def without(conditions: tuple[ReadWhen, ...], family: str) -> tuple[ReadWhen, ...]:
+    """The conditions with ``family`` taken out -- as a decider (its
+    condition goes with it) and as a family a condition reads."""
+    return tuple(
+        ReadWhen(
+            decider=when.decider,
+            families=tuple(entry for entry in when.families if entry.family != family),
+        )
+        for when in conditions
+        if when.decider.family != family
+    )
+
+
+def test_the_declaration_names_each_registry_family_once() -> None:
+    declaration_is_well_formed(RUN_SUMMARY_FAMILIES, RUN_SUMMARY_READ_WHEN)
+
+
+def test_each_condition_is_met_and_missed_by_the_population(
+    stored: list[_Stored],
+) -> None:
+    """The accounting before the rule: both branches of every condition are
+    reached by a named population, or the rule below proves nothing."""
+    for decider, (held, empty) in condition_branches(
+        RUN_SUMMARY_READ_WHEN, stored
+    ).items():
+        assert held and empty, (decider, held, empty)
 
 
 def test_the_bounded_summary_is_the_whole_reads_on_every_population(
@@ -116,19 +192,77 @@ def test_the_bounded_summary_is_the_whole_reads_on_every_population(
 def test_no_declared_family_can_be_declared_away(
     stored: list[_Stored], declared: store_module._FamilyEntry
 ) -> None:
-    """Not excessive: without this one family, the summary refuses on some
-    population, naming exactly it."""
+    """Not excessive: without this one family -- and without a condition it
+    decides -- the summary refuses on some population, naming exactly it."""
     rest = [entry for entry in RUN_SUMMARY_FAMILIES if entry is not declared]
+    conditions = without(RUN_SUMMARY_READ_WHEN, declared.family)
     refusers: list[str] = []
     for run in stored:
         with RunStore(run.path, create=False) as store:
-            model = read_named_families(store, run.run_id, rest)
+            model = read_named_families(store, run.run_id, rest, read_when=conditions)
         try:
             run_summary_from_model(model, run_id=run.run_id)
         except UnreadFamilyError as refusal:
             assert refusal.family == declared.family
             refusers.append(run.name)
     assert refusers, f"{declared.family} is declared and read by no population"
+
+
+@pytest.mark.parametrize(
+    "conditional",
+    [entry for when in RUN_SUMMARY_READ_WHEN for entry in when.families],
+    ids=lambda entry: entry.family,
+)
+def test_each_conditional_family_is_needed_exactly_when_its_condition_holds(
+    stored: list[_Stored], conditional: store_module._FamilyEntry
+) -> None:
+    """Per branch: taken out of its condition, the family refuses on some
+    population that meets the condition, and on none that does not."""
+    (when,) = [item for item in RUN_SUMMARY_READ_WHEN if conditional in item.families]
+    held, _empty = condition_branches((when,), stored)[when.decider.family]
+    conditions = without(RUN_SUMMARY_READ_WHEN, conditional.family)
+    refusers: list[str] = []
+    for run in stored:
+        with RunStore(run.path, create=False) as store:
+            model = read_named_families(
+                store, run.run_id, RUN_SUMMARY_FAMILIES, read_when=conditions
+            )
+        try:
+            run_summary_from_model(model, run_id=run.run_id)
+        except UnreadFamilyError as refusal:
+            assert refusal.family == conditional.family
+            refusers.append(run.name)
+    assert refusers, f"{conditional.family} is read by no population"
+    assert set(refusers) <= set(held), sorted(set(refusers) - set(held))
+
+
+@pytest.fixture
+def scanned(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
+    """Every family the store scans for a run, empty or not."""
+    seen: list[str] = []
+    original = store_module._scan_run_family
+
+    def _scanning(*args: object) -> None:
+        seen.append(str(args[3]))
+        original(*args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store_module, "_scan_run_family", _scanning)
+    yield seen
+
+
+def test_the_summary_reading_scans_exactly_its_declared_families_per_run(
+    stored: list[_Stored], scanned: list[str]
+) -> None:
+    """Exact, per run: every family scanned is declared for that run, and
+    every family declared for it is scanned once."""
+    for run in stored:
+        with RunStore(run.path, create=False) as store:
+            expected = families_declared_for(
+                RUN_SUMMARY_FAMILIES, RUN_SUMMARY_READ_WHEN, store, run.run_id
+            )
+            scanned.clear()
+            read_served_run_summary(store, run.run_id)
+        assert sorted(scanned) == sorted(expected), run.name
 
 
 def test_the_summary_reading_decodes_only_its_declared_families(
@@ -138,17 +272,35 @@ def test_the_summary_reading_decodes_only_its_declared_families(
     decodes members of declared families only, through the family scan, and
     the whole read measured beside it decodes more."""
     run = next(item for item in stored if item.name == "trusted")
+    reads_only_its_declared_families(
+        run,
+        read_served_run_summary,
+        (RUN_SUMMARY_FAMILIES, RUN_SUMMARY_READ_WHEN),
+        decoded,
+    )
+
+
+def reads_only_its_declared_families(
+    run: _Stored,
+    reading: Callable[[RunStore, str], object],
+    declaration: tuple[tuple[store_module._FamilyEntry, ...], tuple[ReadWhen, ...]],
+    decoded: list[str],
+) -> None:
+    """One reading of one run, against the whole read beside it: it decodes
+    declared families only, one family scan per family declared for the
+    run, never a whole-run scan, and the whole read decodes more."""
     statements: list[str] = []
     with RunStore(run.path, create=False) as store:
+        declared = families_declared_for(*declaration, store, run.run_id)
+        decoded.clear()
         store._connection.set_trace_callback(statements.append)
         try:
-            read_served_run_summary(store, run.run_id)
+            reading(store, run.run_id)
         finally:
             store._connection.set_trace_callback(None)
         bounded = list(decoded)
         decoded.clear()
         store.read_run(run.run_id)
-    declared = {entry.family for entry in RUN_SUMMARY_FAMILIES}
     assert bounded and set(bounded) <= declared
     assert len(decoded) > len(bounded)
     assert not any("FROM run_members m" in sql for sql in statements), statements

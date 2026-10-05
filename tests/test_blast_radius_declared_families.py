@@ -7,16 +7,21 @@
 """The blast radius reads its declared families, all of them, and only them.
 
 Consumer migration C7.  ``read_served_blast_radius_facts`` reads
-``BLAST_RADIUS_FAMILIES`` through ``read_named_families``: every family
-outside the declaration is a typed absence, so the declaration is proven in
-both directions on the populations of ``tests/_blast_radius_serving.py``
-(the measurement that produced it, 2026-10-03, ran the same way):
+``BLAST_RADIUS_FAMILIES`` and the condition of ``BLAST_RADIUS_READ_WHEN``
+through ``read_named_families``: every family outside the declaration is a
+typed absence, so the declaration is proven in both directions on the
+populations of ``tests/_blast_radius_serving.py`` (the measurement that
+produced it, 2026-10-03, ran the same way), per branch of its condition:
 
 * complete: the bounded facts never refuse, and equal the facts of the whole
-  read on every population;
-* not excessive: every declared family, declared away, refuses on some
-  population -- a family the projection never touches could not be found
-  this way, so it could not stay declared.
+  read on every population, on runs that joined coverage and runs that did
+  not;
+* not excessive: every unconditional family, declared away, refuses on some
+  population; the risk observations, taken out of their condition, refuse
+  on some population that joined coverage and on none that did not -- a
+  family the projection never touches could not be found this way, so it
+  could not stay declared;
+* exact: every population scans exactly the families declared for it.
 
 Beside the declaration, the store's facts are held to the document's facts
 FIELD BY FIELD and ORDER BY ORDER on every population: the carrier the
@@ -40,6 +45,7 @@ from codeclone.canonical.blast_radius_projection import blast_radius_facts_from_
 from codeclone.canonical.errors import StoreIntegrityError
 from codeclone.canonical.serving import (
     BLAST_RADIUS_FAMILIES,
+    BLAST_RADIUS_READ_WHEN,
     read_served_blast_radius_facts,
 )
 from codeclone.canonical.store import (
@@ -57,8 +63,19 @@ from tests._blast_radius_serving import (
 )
 from tests._run_summary_serving import store_row_replaced
 from tests.test_run_store_named_family_read import decoded
+from tests.test_run_summary_declared_families import (
+    _Stored as _Run,
+)
+from tests.test_run_summary_declared_families import (
+    condition_branches,
+    declaration_is_well_formed,
+    families_declared_for,
+    reads_only_its_declared_families,
+    scanned,
+    without,
+)
 
-__all__ = ["decoded"]
+__all__ = ["decoded", "scanned"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,12 +118,21 @@ def _bounded(run: _Stored) -> BlastRadiusFacts:
         return read_served_blast_radius_facts(store, run.run_id)
 
 
+def _runs(stored: list[_Stored]) -> list[_Run]:
+    return [_Run(run.name, run.path, run.run_id) for run in stored]
+
+
 def test_the_declaration_names_each_registry_family_once() -> None:
-    names = [entry.family for entry in BLAST_RADIUS_FAMILIES]
-    registry = {entry.family for entry in store_module._FAMILIES}
-    assert len(names) == len(set(names))
-    assert set(names) <= registry
-    assert names == sorted(names)
+    declaration_is_well_formed(BLAST_RADIUS_FAMILIES, BLAST_RADIUS_READ_WHEN)
+
+
+def test_each_condition_is_met_and_missed_by_the_population(
+    stored: list[_Stored],
+) -> None:
+    for decider, (held, empty) in condition_branches(
+        BLAST_RADIUS_READ_WHEN, _runs(stored)
+    ).items():
+        assert held and empty, (decider, held, empty)
 
 
 def test_the_bounded_facts_are_the_whole_reads_on_every_population(
@@ -142,10 +168,11 @@ def test_no_declared_family_can_be_declared_away(
     stored: list[_Stored], declared: store_module._FamilyEntry
 ) -> None:
     rest = [entry for entry in BLAST_RADIUS_FAMILIES if entry is not declared]
+    conditions = without(BLAST_RADIUS_READ_WHEN, declared.family)
     refusers: list[str] = []
     for run in stored:
         with RunStore(run.path, create=False) as store:
-            model = read_named_families(store, run.run_id, rest)
+            model = read_named_families(store, run.run_id, rest, read_when=conditions)
         try:
             blast_radius_facts_from_model(model)
         except UnreadFamilyError as refusal:
@@ -154,25 +181,55 @@ def test_no_declared_family_can_be_declared_away(
     assert refusers, f"{declared.family} is declared and read by no population"
 
 
+@pytest.mark.parametrize(
+    "conditional",
+    [entry for when in BLAST_RADIUS_READ_WHEN for entry in when.families],
+    ids=lambda entry: entry.family,
+)
+def test_each_conditional_family_is_needed_exactly_when_its_condition_holds(
+    stored: list[_Stored], conditional: store_module._FamilyEntry
+) -> None:
+    (when,) = [item for item in BLAST_RADIUS_READ_WHEN if conditional in item.families]
+    held, _empty = condition_branches((when,), _runs(stored))[when.decider.family]
+    conditions = without(BLAST_RADIUS_READ_WHEN, conditional.family)
+    refusers: list[str] = []
+    for run in stored:
+        with RunStore(run.path, create=False) as store:
+            model = read_named_families(
+                store, run.run_id, BLAST_RADIUS_FAMILIES, read_when=conditions
+            )
+        try:
+            blast_radius_facts_from_model(model)
+        except UnreadFamilyError as refusal:
+            assert refusal.family == conditional.family
+            refusers.append(run.name)
+    assert refusers, f"{conditional.family} is read by no population"
+    assert set(refusers) <= set(held), sorted(set(refusers) - set(held))
+
+
+def test_the_reading_scans_exactly_its_declared_families_per_run(
+    stored: list[_Stored], scanned: list[str]
+) -> None:
+    for run in stored:
+        with RunStore(run.path, create=False) as store:
+            expected = families_declared_for(
+                BLAST_RADIUS_FAMILIES, BLAST_RADIUS_READ_WHEN, store, run.run_id
+            )
+            scanned.clear()
+            read_served_blast_radius_facts(store, run.run_id)
+        assert sorted(scanned) == sorted(expected), run.name
+
+
 def test_the_reading_decodes_only_its_declared_families(
     stored: list[_Stored], decoded: list[str]
 ) -> None:
     run = next(item for item in stored if item.name == "fanout")
-    statements: list[str] = []
-    with RunStore(run.path, create=False) as store:
-        store._connection.set_trace_callback(statements.append)
-        try:
-            read_served_blast_radius_facts(store, run.run_id)
-        finally:
-            store._connection.set_trace_callback(None)
-        bounded = list(decoded)
-        decoded.clear()
-        store.read_run(run.run_id)
-    declared = {entry.family for entry in BLAST_RADIUS_FAMILIES}
-    assert bounded and set(bounded) <= declared
-    assert len(decoded) > len(bounded)
-    assert not any("FROM run_members m" in sql for sql in statements), statements
-    assert sum("CROSS JOIN run_members m" in sql for sql in statements) == len(declared)
+    reads_only_its_declared_families(
+        _Run(run.name, run.path, run.run_id),
+        read_served_blast_radius_facts,
+        (BLAST_RADIUS_FAMILIES, BLAST_RADIUS_READ_WHEN),
+        decoded,
+    )
 
 
 def _dropped(family: str) -> Callable[[dict[str, list[object]]], None]:

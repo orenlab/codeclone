@@ -6,15 +6,20 @@
 
 """The patch-contract reading declares its families, and reads exactly those.
 
-``read_served_patch_run`` reads ``PATCH_CONTRACT_FAMILIES`` with
-``read_named_families``: every family outside the declaration is a typed
-absence.  The declaration is held in both directions (consumer migration
-C6), on every run of the patch-contract battery and the sixteen served
-populations of the run summary --
+``read_served_patch_run`` reads ``PATCH_CONTRACT_FAMILIES`` and the
+condition of ``PATCH_CONTRACT_READ_WHEN`` with ``read_named_families``:
+every family outside the declaration is a typed absence.  The declaration
+is held in both directions (consumer migration C6), per branch of its
+condition, on every run of the patch-contract battery and the sixteen
+served populations of the run summary --
 
 * complete: the bounded reading never refuses and equals the reading of
-  the whole run, fact for fact;
-* not excessive: every declared family, declared away, refuses on some run.
+  the whole run, fact for fact, on runs that meet the condition and runs
+  that do not;
+* not excessive: every unconditional family, declared away, refuses on some
+  run; the authority graph, taken out of its condition, refuses on some run
+  that holds a violation row and on none that does not;
+* exact: every run scans exactly the families declared for it.
 
 The positive controls close it from the store side: the reading decodes
 declared families only, and a corrupted member of an undeclared family is
@@ -34,6 +39,7 @@ from codeclone.canonical import store as store_module
 from codeclone.canonical.errors import StoreIntegrityError
 from codeclone.canonical.serving import (
     PATCH_CONTRACT_FAMILIES,
+    PATCH_CONTRACT_READ_WHEN,
     patch_run_from_model,
     read_served_patch_run,
 )
@@ -48,9 +54,17 @@ from tests._patch_contract_serving import (
 )
 from tests._run_summary_serving import SUMMARY_POPULATIONS, shared_populations
 from tests.test_run_store_named_family_read import decoded
-from tests.test_run_summary_declared_families import _Stored, _tampered_copy
+from tests.test_run_summary_declared_families import (
+    _Stored,
+    _tampered_copy,
+    condition_branches,
+    declaration_is_well_formed,
+    families_declared_for,
+    scanned,
+    without,
+)
 
-__all__ = ["decoded"]
+__all__ = ["decoded", "scanned"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,11 +230,16 @@ def test_the_population_is_every_battery_run_and_every_served_one(
 
 
 def test_the_declaration_names_each_registry_family_once() -> None:
-    names = [entry.family for entry in PATCH_CONTRACT_FAMILIES]
-    registry = {entry.family for entry in store_module._FAMILIES}
-    assert len(names) == len(set(names))
-    assert set(names) <= registry
-    assert names == sorted(names)
+    declaration_is_well_formed(PATCH_CONTRACT_FAMILIES, PATCH_CONTRACT_READ_WHEN)
+
+
+def test_each_condition_is_met_and_missed_by_the_population(
+    stored: list[_Stored],
+) -> None:
+    for decider, (held, empty) in condition_branches(
+        PATCH_CONTRACT_READ_WHEN, stored
+    ).items():
+        assert held and empty, (decider, held, empty)
 
 
 def test_the_bounded_reading_is_the_whole_reads_on_every_run(
@@ -240,16 +259,58 @@ def test_no_declared_family_can_be_declared_away(
     stored: list[_Stored], declared: store_module._FamilyEntry
 ) -> None:
     rest = [entry for entry in PATCH_CONTRACT_FAMILIES if entry is not declared]
+    conditions = without(PATCH_CONTRACT_READ_WHEN, declared.family)
     refusers: list[str] = []
     for run in stored:
         with RunStore(run.path, create=False) as store:
-            model = read_named_families(store, run.run_id, rest)
+            model = read_named_families(store, run.run_id, rest, read_when=conditions)
         try:
             patch_run_from_model(model, run_id=run.run_id)
         except UnreadFamilyError as refusal:
             assert declared.family in str(refusal)
             refusers.append(run.name)
     assert refusers, f"{declared.family} is declared and read by no run"
+
+
+@pytest.mark.parametrize(
+    "conditional",
+    [entry for when in PATCH_CONTRACT_READ_WHEN for entry in when.families],
+    ids=lambda entry: entry.family,
+)
+def test_each_conditional_family_is_needed_exactly_when_its_condition_holds(
+    stored: list[_Stored], conditional: store_module._FamilyEntry
+) -> None:
+    (when,) = [
+        item for item in PATCH_CONTRACT_READ_WHEN if conditional in item.families
+    ]
+    held, _empty = condition_branches((when,), stored)[when.decider.family]
+    conditions = without(PATCH_CONTRACT_READ_WHEN, conditional.family)
+    refusers: list[str] = []
+    for run in stored:
+        with RunStore(run.path, create=False) as store:
+            model = read_named_families(
+                store, run.run_id, PATCH_CONTRACT_FAMILIES, read_when=conditions
+            )
+        try:
+            patch_run_from_model(model, run_id=run.run_id)
+        except UnreadFamilyError as refusal:
+            assert refusal.family == conditional.family
+            refusers.append(run.name)
+    assert refusers, f"{conditional.family} is read by no run"
+    assert set(refusers) <= set(held), sorted(set(refusers) - set(held))
+
+
+def test_the_reading_scans_exactly_its_declared_families_per_run(
+    stored: list[_Stored], scanned: list[str]
+) -> None:
+    for run in stored:
+        with RunStore(run.path, create=False) as store:
+            expected = families_declared_for(
+                PATCH_CONTRACT_FAMILIES, PATCH_CONTRACT_READ_WHEN, store, run.run_id
+            )
+            scanned.clear()
+            read_served_patch_run(store, run.run_id)
+        assert sorted(scanned) == sorted(expected), run.name
 
 
 def test_the_reading_decodes_only_its_declared_families(
@@ -261,7 +322,9 @@ def test_the_reading_decodes_only_its_declared_families(
         bounded = list(decoded)
         decoded.clear()
         store.read_run(run.run_id)
-    declared = {entry.family for entry in PATCH_CONTRACT_FAMILIES}
+        declared = families_declared_for(
+            PATCH_CONTRACT_FAMILIES, PATCH_CONTRACT_READ_WHEN, store, run.run_id
+        )
     assert bounded and set(bounded) <= declared
     assert len(decoded) > len(bounded)
 
