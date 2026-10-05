@@ -17,6 +17,7 @@ from ...contracts import (
     ExitCode,
     ObservedPopulation,
 )
+from ...contracts.comparison_state import COMPARISON_HEALTH, COMPARISON_LANES
 from ...metrics.registry import METRIC_FAMILIES
 from ...models import ObservationLaneName, cycle_kind_counts
 from ...observability import span
@@ -134,14 +135,10 @@ _POPULATION_REFUSALS: dict[ObservedPopulation, str] = {
     "complete_empty": gate_msgs.GATE_REASON_EMPTY_ANALYSIS_SCOPE,
 }
 
-HEALTH_INPUT_LANES: tuple[ObservationLaneName, ...] = (
-    "clones.blocks",
-    "clones.functions",
-    "coupling_cohesion_observations",
-    "dead_code",
-    "dependencies",
-    "module_identity",
-    "risk_observations",
+#: The lanes the health score is derived from: the health comparison's lanes
+#: in the one table of what each comparison reads.
+HEALTH_INPUT_LANES: tuple[ObservationLaneName, ...] = cast(
+    "tuple[ObservationLaneName, ...]", COMPARISON_LANES[COMPARISON_HEALTH]
 )
 
 _COMPARISON_GATE_NAMES = frozenset(

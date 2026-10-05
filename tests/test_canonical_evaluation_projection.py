@@ -34,7 +34,7 @@ import pytest
 from codeclone.canonical.comparison_projection import (
     SUMMARY_HEALTH_BLOCK,
     answered_if_compared,
-    comparisons_made,
+    stored_comparison_state,
 )
 from codeclone.canonical.evaluation_projection import (
     GATE_CONFIG_KEYS,
@@ -131,8 +131,8 @@ def _projected_health(served: _Served, label: str) -> Mapping[str, object]:
     health = health_payload(served.model)
     if label != "run_summary":
         return health
-    made = comparisons_made(served.model.facts.comparison)
-    return answered_if_compared(SUMMARY_HEALTH_BLOCK, health, made)
+    state = stored_comparison_state(served.model)
+    return answered_if_compared(SUMMARY_HEALTH_BLOCK, health, state)
 
 
 # -- The accounting ---------------------------------------------------------------

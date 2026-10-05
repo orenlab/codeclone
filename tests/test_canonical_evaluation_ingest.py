@@ -113,7 +113,12 @@ def test_the_populations_carry_every_distinguishing_state(
         "compared": [4],
         "partial": [4],
         "api_disabled": [4],
-        "lanes_skipped": [16],
+        # Dead code and dependencies skipped: two of the seven health input
+        # lanes never observed, so the current half of the health
+        # subtraction is not the baseline's measure and the producer states
+        # no health comparison (normalized comparison state, 2026-10-05;
+        # it published 16 before).
+        "lanes_skipped": [],
         "foreign_scope": [],
         "missing": [],
         "gates_failed": [0],

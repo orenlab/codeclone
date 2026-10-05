@@ -18,7 +18,6 @@ carry.  The accounting literals are measurements of the comparison corpus
 
 from __future__ import annotations
 
-import ast
 import copy
 import json
 import shutil
@@ -37,6 +36,14 @@ from codeclone.canonical.comparison_rows import (
 from codeclone.canonical.errors import LegacyIngestError
 from codeclone.canonical.ingest import canonical_model_from_legacy_document
 from codeclone.canonical.model import ComparisonFacts, novelty_families
+from codeclone.contracts.comparison_state import (
+    COMPARISON_COMPLEXITY,
+    COMPARISON_COUPLING,
+    COMPARISON_DEAD_CODE,
+    COMPARISON_DEPENDENCIES,
+    COMPARISON_LANES,
+    DOCUMENT_FIELDS,
+)
 from codeclone.core.comparison_snapshot import ComparisonInputs, _clone_novelty_rows
 from codeclone.findings.ids import clone_group_id
 from codeclone.models import LaneTrust, TrustVector
@@ -51,8 +58,6 @@ from tests.test_canonical_roundtrip import (
     FIXTURE_ROOT_DIGEST,
     fixture_model,
 )
-
-_REPORTING = Path(__file__).resolve().parents[1] / "codeclone" / "core" / "reporting.py"
 
 
 def _novelty(house: ComparisonFacts) -> dict[str, dict[tuple[str, str | None], int]]:
@@ -460,27 +465,35 @@ def test_a_trusted_clone_lane_its_groups_call_uncompared_is_not_compared(
 
 def test_the_lane_family_pairing_is_the_reporting_one() -> None:
     """``COMPARISON_LANE_FAMILIES`` restates, for the four set-difference
-    lanes, the pairing ``core.reporting._metrics_for_report`` writes the
-    ``baseline_diff_available`` flags under — pinned against that SOURCE, so
-    a pairing moved there reds here instead of silently misfiling a lane."""
-    pairs: set[tuple[str, str]] = set()
-    for node in ast.walk(ast.parse(_REPORTING.read_text("utf-8"))):
-        if not (isinstance(node, ast.Tuple) and len(node.elts) == 4):
-            continue
-        family, lanes = node.elts[0], node.elts[1]
-        if (
-            isinstance(family, ast.Constant)
-            and isinstance(lanes, ast.Tuple)
-            and len(lanes.elts) == 1
-            and isinstance(lanes.elts[0], ast.Constant)
-        ):
-            pairs.add((str(family.value), str(lanes.elts[0].value)))
+    lanes, the pairing the producer writes the ``baseline_diff_available``
+    flags under -- the report document's spelling of each comparison
+    (``contracts.comparison_state.DOCUMENT_FIELDS``) beside the lanes it
+    reads (``COMPARISON_LANES``), the tables ``core.reporting`` writes the
+    families from -- so a pairing moved there reds here instead of silently
+    misfiling a lane."""
+    pairs = {
+        (family, lane)
+        for (comparison, _term), (family, _key) in DOCUMENT_FIELDS.items()
+        for lane in COMPARISON_LANES[comparison]
+        if comparison in _SET_DIFF_COMPARISONS
+    }
     expected = {
         (family, lane)
         for lane, family in COMPARISON_LANE_FAMILIES.items()
         if lane not in {"adoption_counts", "api_surface"}
     }
     assert expected == pairs
+
+
+#: The four set-difference comparisons, each reading one lane.
+_SET_DIFF_COMPARISONS = frozenset(
+    {
+        COMPARISON_COMPLEXITY,
+        COMPARISON_COUPLING,
+        COMPARISON_DEPENDENCIES,
+        COMPARISON_DEAD_CODE,
+    }
+)
 
 
 # ---------------------------------------------------------------------------

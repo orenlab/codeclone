@@ -39,7 +39,6 @@ from codeclone.canonical.comparison_projection import (
     UNPROJECTED_DIFF_KEYS,
     answered_if_compared,
     baseline_state,
-    comparisons_made,
     group_novelty,
     known_debt_paths,
     metric_deltas,
@@ -48,6 +47,7 @@ from codeclone.canonical.comparison_projection import (
     new_clone_groups,
     new_finding_paths,
     novelty_counts,
+    stored_comparison_state,
 )
 from codeclone.canonical.comparison_rows import DELTA_FAMILY_TERMS
 from codeclone.canonical.model import CanonicalModel, ComparisonFacts
@@ -186,13 +186,15 @@ def test_new_by_source_kind_matches_the_mcp_surface(
 # -- C1.21 / C1.23: the ``diff`` block ---------------------------------------------
 
 
-def _projected_diff(comparison: ComparisonFacts) -> dict[str, object]:
+def _projected_diff(model: CanonicalModel) -> dict[str, object]:
     """The ``diff`` terms the run summary answers from the stored run: the
-    projections under the one comparison rule (ruling 2026-10-03)."""
+    projections under the one comparison rule (ruling 2026-10-03), read
+    off the stored run's normalized comparison state."""
+    comparison = model.facts.comparison
     return answered_if_compared(
         SUMMARY_DIFF_BLOCK,
         {"new_clones": new_clone_groups(comparison), **metric_deltas(comparison)},
-        comparisons_made(comparison),
+        stored_comparison_state(model),
     )
 
 
@@ -208,8 +210,7 @@ def test_the_diff_block_matches_the_mcp_surface(served_diff: _Served) -> None:
     """``new_clones`` and the six deltas byte for byte, in the surface's
     order — on every population whose API lane ran or had nothing to
     compare against, and on the two whose API comparison did not run."""
-    comparison = served_diff.model.facts.comparison
-    assert _canonical(_projected_diff(comparison)) == _canonical(
+    assert _canonical(_projected_diff(served_diff.model)) == _canonical(
         _surface_diff(served_diff)
     )
 
@@ -250,7 +251,7 @@ def test_an_api_comparison_that_did_not_run_answers_null_on_both_sides(
     comparison = served.model.facts.comparison
     assert _api_lane_state(comparison) == _API_NOT_COMPARED[name]
     assert not comparison.api_surface_delta
-    projected = _projected_diff(comparison)
+    projected = _projected_diff(served.model)
     surface = _surface_diff(served)
     assert [projected[term] for term in _API_TERMS] == [None, None, None]
     assert _canonical(projected) == _canonical(surface)

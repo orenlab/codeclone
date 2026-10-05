@@ -74,9 +74,10 @@ publication flag above stays the kill switch of every reading.
 comparison the run made (ruling 2026-10-03, "not compared -> null").  The
 decision has one owner, ``canonical.comparison_projection``, read by the
 store's reading here and by the surface's memory answer alike; this door
-hands the surface the owner's memory half (:func:`document_comparisons_made`
-and :func:`answered_if_compared`), so the two answers cannot apply two
-copies of the rule.
+hands the surface the memory half -- the state read back off the sealed
+document (:func:`document_comparison_state`) and the same rule
+(:func:`answered_if_compared`) -- so the two answers cannot apply two copies
+of the rule.
 """
 
 from __future__ import annotations
@@ -92,8 +93,8 @@ from ..canonical.comparison_projection import (
     SUMMARY_DIFF_BLOCK,
     SUMMARY_HEALTH_BLOCK,
     answered_if_compared,
-    document_comparisons_made,
 )
+from ..canonical.comparison_state import document_comparison_state
 from ..canonical.errors import (
     UNKNOWN_RUN_STORE_ABSENT,
     CanonicalModelError,
@@ -469,7 +470,7 @@ __all__ = [
     "ServedRunSummary",
     "ServedUnitLocation",
     "answered_if_compared",
-    "document_comparisons_made",
+    "document_comparison_state",
     "read_run_store_authority_candidates",
     "read_run_store_blast_radius_facts",
     "read_run_store_slices",

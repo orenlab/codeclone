@@ -82,12 +82,12 @@ from codeclone.canonical.comparison_projection import (
     SUMMARY_HEALTH_BLOCK,
     answered_if_compared,
     baseline_state,
-    comparisons_made,
     metric_deltas,
     metrics_baseline_state,
     new_by_source_kind,
     new_clone_groups,
     novelty_counts,
+    stored_comparison_state,
 )
 from codeclone.canonical.comparison_rows import (
     NOVELTY_KNOWN,
@@ -145,6 +145,7 @@ from codeclone.canonical.store import (
     FAMILY_DEPENDENCY_CYCLE,
     FAMILY_DEPENDENCY_CYCLE_NOVELTY,
     FAMILY_DEPENDENCY_RELATION,
+    FAMILY_DISABLED_CAPABILITY,
     FAMILY_FILE_MODULE,
     FAMILY_FINDING_EVALUATION,
     FAMILY_GRAPH_NODE,
@@ -583,16 +584,16 @@ def run_summary_from_model(model: CanonicalModel, *, run_id: str) -> ServedRunSu
     ``comparison_projection.answered_if_compared``)."""
     mode = analysis_mode(model)
     facts = model.facts.comparison
-    made = comparisons_made(facts)
+    state = stored_comparison_state(model)
     return ServedRunSummary(
         run_id=run_id,
         mode=mode,
         baseline=baseline_state(facts),
         metrics_baseline=metrics_baseline_state(facts),
         inventory=inventory(model),
-        health=answered_if_compared(SUMMARY_HEALTH_BLOCK, health_payload(model), made),
+        health=answered_if_compared(SUMMARY_HEALTH_BLOCK, health_payload(model), state),
         findings=_findings_block(model),
-        diff=answered_if_compared(SUMMARY_DIFF_BLOCK, _diff_block(model), made),
+        diff=answered_if_compared(SUMMARY_DIFF_BLOCK, _diff_block(model), state),
         analysis_profile=analysis_profile(model),
         dead_code=dead_code(model),
         coverage_join=coverage_join(model),
@@ -624,10 +625,12 @@ RUN_SUMMARY_FAMILIES: Final = (
     FAMILY_DEAD_SYMBOL_NOVELTY,
     FAMILY_DEPENDENCY_CYCLE,
     FAMILY_DEPENDENCY_CYCLE_NOVELTY,
+    FAMILY_DISABLED_CAPABILITY,
     FAMILY_FILE_MODULE,
     FAMILY_GRAPH_NODE,
     FAMILY_HEALTH_DELTA,
     FAMILY_HEALTH_RESULT,
+    FAMILY_LANE_TRUST,
     FAMILY_METRICS_BASELINE_WITNESS,
     FAMILY_RISK_OBSERVATION,
     FAMILY_RUN_SCALAR,

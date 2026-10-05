@@ -20,7 +20,11 @@ from ..contracts import (
     DEFAULT_COVERAGE_MIN,
     ObservedPopulation,
     observed_population,
-    population_universe_observed,
+)
+from ..contracts.comparison_state import (
+    COMPARISON_ADOPTION,
+    COMPARISON_API_SURFACE,
+    DOCUMENT_FIELDS,
 )
 from ..contracts.report_identity import realized_health_params
 from ..models import (
@@ -33,8 +37,7 @@ from ..models import (
     TrustVector,
 )
 from ..observability import span
-from ..report.document._common import health_verdict_withheld
-from ..report.gates.evaluator import HEALTH_INPUT_LANES, GateResult, GateState
+from ..report.gates.evaluator import GateResult, GateState
 from ..report.gates.evaluator import MetricGateConfig as _MetricGateConfig
 from ..report.gates.evaluator import (
     active_gate_lane_requirements as _active_gate_lane_requirements,
@@ -63,6 +66,7 @@ from .canonical_snapshot import (
     resolve_run_store_config,
 )
 from .comparison_snapshot import ComparisonInputs, ComparisonInputsFactory
+from .comparison_state import run_comparison_state
 from .evaluation_snapshot import EvaluationInputs, EvaluationInputsFactory
 from .metrics_payload import _enrich_metrics_report_payload
 
@@ -219,134 +223,51 @@ def _metrics_for_report(
     coverage_adoption_diff_available: bool,
     api_surface_diff_available: bool,
     baseline_trust: TrustVector | None = None,
+    new_func: Collection[str] | None = None,
+    new_block: Collection[str] | None = None,
 ) -> Mapping[str, object] | None:
+    """The metric families of the document, each comparison field written
+    from the run's one normalized comparison state
+    (:func:`core.comparison_state.run_comparison_state`): a family's
+    ``baseline_diff_available`` is that state's ``made`` and its delta the
+    state's value, so the document, the store rows read off it, and every
+    reader of either state the producer's one decision."""
     validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
     if analysis.metrics_payload is None:
         return None
-    # The current half of the availability question, for health and for the
-    # adoption family alike. Lane trust can only vouch for the baseline term
-    # of the subtraction; a run whose own population carries no verdict made
-    # no comparison however trusted the stored lanes are, and publishing a
-    # delta beside ``baseline_diff_available: true`` would state "compared"
-    # about a comparison that never ran (`B8`, `G4`). Read through the one
-    # reader the document tree already uses, not a second ``score is None``
-    # derivation (`G2`). Computed from the same health family the enrichment
-    # copies unchanged, so both consumers below read one fact.
-    health_withheld = health_verdict_withheld(
-        _as_mapping(analysis.metrics_payload.get("health"))
-    )
-    # The universe term of the four set-diff families below, read from the
-    # same owner the API family already consults (`api.comparison`): a
-    # set-membership diff needs the whole current universe observed, not
-    # merely a score to exist. ``partial`` and ``unmeasured`` therefore mute
-    # the four — an unread module's carriers are indistinguishable from
-    # removed ones — while ``complete_empty`` keeps publishing, because a
-    # genuinely emptied scope really removed what the baseline remembers.
-    # This is deliberately not ``health_withheld``: the two binary collapses
-    # of the population disagree on ``partial`` and on ``complete_empty``,
-    # and each has its own named owner in the contract ring (`G2`).
-    universe_observed = (
-        analysis.project_metrics is not None
-        and population_universe_observed(analysis.project_metrics.health.population)
+    state = run_comparison_state(
+        analysis=analysis,
+        metrics_diff=validated_metrics_diff,
+        new_func=new_func,
+        new_block=new_block,
+        coverage_adoption_diff_available=coverage_adoption_diff_available,
+        api_surface_diff_available=api_surface_diff_available,
+        baseline_trust=baseline_trust,
     )
     enriched = _enrich_metrics_report_payload(
         metrics_payload=analysis.metrics_payload,
         metrics_diff=validated_metrics_diff,
-        # The adoption permilles are ratios over the same unobserved
-        # population, so the withheld current half silences their satellite
-        # too: the enrichment then writes ``baseline_diff_available: false``
-        # and zeroes the deltas, mirroring the health family below.
-        coverage_adoption_diff_available=(
-            coverage_adoption_diff_available and not health_withheld
-        ),
-        api_surface_diff_available=api_surface_diff_available,
+        coverage_adoption_diff_available=state.made(COMPARISON_ADOPTION),
+        api_surface_diff_available=state.made(COMPARISON_API_SURFACE),
     )
-    trusted_lanes = {
-        item.name
-        for item in (() if baseline_trust is None else baseline_trust.lanes)
-        if baseline_trust is not None
-        and baseline_trust.root_verified
-        and item.status == "trusted"
-    }
-    # Each row names *every* lane its comparison consumes, not a representative
-    # one. Health is why: it is derived from seven lanes, and keying it on
-    # ``risk_observations`` alone published a delta as available while one of
-    # the other six was opaque -- the baseline half of that subtraction had
-    # never been recovered. The report already states the seven in
-    # ``contracts.evaluation.health_input_lanes`` and the gate matrix already
-    # requires all of them, so this reads that same manifest instead of a
-    # third opinion about what health consumes (`G2`, `G3`, `B8`).
-    comparison_rows: tuple[tuple[str, tuple[str, ...], str, int], ...] = (
-        (
-            (
-                "complexity",
-                ("risk_observations",),
-                "new_high_risk",
-                len(validated_metrics_diff.new_high_risk_functions),
-            ),
-            (
-                "coupling",
-                ("coupling_cohesion_observations",),
-                "new_high_risk",
-                len(validated_metrics_diff.new_high_coupling_classes),
-            ),
-            (
-                "dependencies",
-                ("dependencies",),
-                "new_cycles",
-                len(validated_metrics_diff.new_cycles),
-            ),
-            # Carried beside the total because only this one gates. Without it
-            # the report document cannot tell the gate evaluator which of the
-            # new cycles can actually break an import.
-            (
-                "dependencies",
-                ("dependencies",),
-                "new_import_cycles",
-                len(validated_metrics_diff.new_import_cycles),
-            ),
-            (
-                "dependencies",
-                ("dependencies",),
-                "new_deferred_cycles",
-                len(validated_metrics_diff.new_deferred_cycles),
-            ),
-            (
-                "dead_code",
-                ("dead_code",),
-                "new_items",
-                len(validated_metrics_diff.new_dead_code),
-            ),
-            (
-                "health",
-                HEALTH_INPUT_LANES,
-                "delta",
-                validated_metrics_diff.health_delta,
-            ),
-        )
-        if validated_metrics_diff is not None
-        else ()
-    )
-    for family_name, lanes, value_key, value in comparison_rows:
+    if validated_metrics_diff is None:
+        return enriched
+    for (comparison, term), (family_name, value_key) in DOCUMENT_FIELDS.items():
+        if comparison in _ENRICHED_COMPARISONS:
+            continue
         family = dict(_as_mapping(enriched.get(family_name)))
         summary = dict(_as_mapping(family.get("summary")))
-        available = trusted_lanes.issuperset(lanes)
-        if family_name == "health":
-            if health_withheld:
-                available = False
-        elif not universe_observed:
-            # The set-diff families: lane trust vouches for the baseline term
-            # only, and on an unobserved universe the current term is empty by
-            # construction — publishing "0 new" beside ``available: true``
-            # would state "compared" about a comparison whose current half
-            # never existed (`B8`, `G4`). Health stays on its own reader
-            # above: a truncated run still carries an honest score delta.
-            available = False
+        available = state.made(comparison)
         summary["baseline_diff_available"] = available
-        summary[value_key] = value if available else 0
+        summary[value_key] = state.value(comparison, term) if available else 0
         family["summary"] = summary
         enriched[family_name] = family
     return enriched
+
+
+#: The comparisons whose document fields the enrichment writes (it also
+#: publishes the API change rows); the loop above writes the others.
+_ENRICHED_COMPARISONS = frozenset({COMPARISON_ADOPTION, COMPARISON_API_SURFACE})
 
 
 def build_report_body_for_analysis(
@@ -407,6 +328,8 @@ def build_report_body_for_analysis(
                 coverage_adoption_diff_available=coverage_adoption_diff_available,
                 api_surface_diff_available=api_surface_diff_available,
                 baseline_trust=baseline_trust,
+                new_func=new_func,
+                new_block=new_block,
             ),
             suggestions=analysis.suggestions,
             structural_findings=(
@@ -486,6 +409,8 @@ def _comparison_inputs_factory(
                 coverage_adoption_diff_available=coverage_adoption_diff_available,
                 api_surface_diff_available=api_surface_diff_available,
                 baseline_trust=shared_trust,
+                new_func=new_func,
+                new_block=new_block,
             ),
             trust=shared_trust,
             new_func=None if new_func is None else frozenset(new_func),

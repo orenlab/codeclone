@@ -81,7 +81,7 @@ from ...api.run_store_serving import (
     ServedRunSummary,
     ServedUnitLocation,
     answered_if_compared,
-    document_comparisons_made,
+    document_comparison_state,
     read_run_store_authority_candidates,
     read_run_store_blast_radius_facts,
     read_run_store_patch_run,
@@ -258,13 +258,13 @@ def memory_run_summary(
     (``canonical.comparison_projection``, behind the door).
     """
     baseline_diff = as_mapping(record.summary.get("baseline_diff"))
-    made = document_comparisons_made(
+    state = document_comparison_state(
         record.served_report,
-        clones_compared=baseline_diff.get("new_clone_groups_total") is not None,
+        new_clone_groups=baseline_diff.get("new_clone_groups_total"),
     )
     payload = dict(built)
     for block in (SUMMARY_DIFF_BLOCK, SUMMARY_HEALTH_BLOCK):
-        payload[block] = answered_if_compared(block, as_mapping(payload[block]), made)
+        payload[block] = answered_if_compared(block, as_mapping(payload[block]), state)
     return payload
 
 
