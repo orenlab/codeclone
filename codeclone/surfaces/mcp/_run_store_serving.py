@@ -31,11 +31,15 @@ its slices, so the shadow read costs one bounded store read and one tuple
 comparison per query, and buys a runtime witness that the store-backed
 answer is the producer's answer.
 
-Three readings go through that one decision (:func:`_shadow_read`), each
+Five readings go through that one decision (:func:`_shadow_read`), each
 with its own memory side and its own agreement: the three slices of
 ``search_graph`` / ``get_implementation_context``, the authority candidate
-rows ``check_authority(section="candidates")`` pages, and the run summary
-(``get_run_summary``, consumer migration C1).  The candidates' memory is
+rows ``check_authority(section="candidates")`` pages, the run summary
+(``get_run_summary``, consumer migration C1), the patch contract
+(``check_patch_contract`` and the verification ``finish_controlled_change``
+runs, consumer migration C6) and the blast radius (``get_blast_radius`` and
+the radius ``start_controlled_change`` declares against, consumer migration
+C7).  The last three are behind the serving switch.  The candidates' memory is
 the sealed document's own rows, and their agreement is the WIRE: a page
 serializes each row with its key order and JSON types, so two rows Python
 calls equal (``True == 1``, one dict against the same dict with its keys
@@ -57,7 +61,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import replace
+from dataclasses import fields, replace
 from typing import Final, TypeVar
 
 from ...api.run_store_serving import (
@@ -67,6 +71,7 @@ from ...api.run_store_serving import (
     SERVING_REASON_SERVED,
     SERVING_SOURCE_MEMORY,
     SERVING_SOURCE_RUN_STORE,
+    BlastRadiusFacts,
     RunStoreServingOutcome,
     ServedAuthorityCandidates,
     ServedPatchRun,
@@ -74,6 +79,7 @@ from ...api.run_store_serving import (
     ServedRunSummary,
     ServedUnitLocation,
     read_run_store_authority_candidates,
+    read_run_store_blast_radius_facts,
     read_run_store_patch_run,
     read_run_store_slices,
     read_run_store_summary,
@@ -81,6 +87,7 @@ from ...api.run_store_serving import (
 from ...observability import record_counter
 from ...utils.coerce import as_mapping
 from ._authority_candidates import authority_candidate_items
+from ._blast_radius import BlastRadiusResult
 from ._session_shared import MCPRunRecord, MCPServiceContractError
 
 _ServedT = TypeVar("_ServedT")
@@ -344,13 +351,58 @@ def served_run_summary(
     return payload, _named_divergence(served, candidate, memory)
 
 
+def blast_radius_fields(result: BlastRadiusResult) -> dict[str, object]:
+    """Every field of one computed blast radius, in the answer's names and
+    order -- the whole result, before ``include`` filters it and before the
+    two context lists are cut to their shown length."""
+    return {field.name: getattr(result, field.name) for field in fields(result)}
+
+
+def _blast_radius_agrees(stored: BlastRadiusResult, memory: BlastRadiusResult) -> bool:
+    """Byte for byte on the wire: every field, every list in its order."""
+    return _summary_wire(blast_radius_fields(stored)) == _summary_wire(
+        blast_radius_fields(memory)
+    )
+
+
+def served_blast_radius(
+    record: MCPRunRecord,
+    memory: BlastRadiusResult,
+    compute: Callable[[BlastRadiusFacts], BlastRadiusResult],
+) -> tuple[BlastRadiusResult, RunStoreServingOutcome]:
+    """The blast radius to answer for one record, and where it came from
+    (consumer migration C7).
+
+    ``memory`` is the radius the surface computed from the record's
+    document; ``compute`` is the same computation, handed the facts the
+    store states for the same execution.  The store's radius is served only
+    when the two are the same bytes over the WHOLE result -- every field,
+    the uncut context lists, list order included; otherwise memory is
+    served, ``divergent``, with the differing fields named.
+    """
+    facts, outcome = read_run_store_blast_radius_facts(
+        root=record.root, link=record.execution.run_snapshot_link
+    )
+    candidate = None if facts is None else compute(facts)
+    result, served = _shadow_read(
+        memory, (candidate, outcome), agrees=_blast_radius_agrees
+    )
+    return result, _named_divergence(
+        served,
+        None if candidate is None else blast_radius_fields(candidate),
+        blast_radius_fields(memory),
+    )
+
+
 __all__ = [
     "ENTITY_COUNTS_KEY",
     "EXECUTION_BASELINE_KEYS",
     "PRESENTATION_SECURITY_KEYS",
+    "blast_radius_fields",
     "memory_authority_candidates",
     "memory_slices",
     "served_authority_candidates",
+    "served_blast_radius",
     "served_run_summary",
     "served_slices",
     "store_summary_payload",

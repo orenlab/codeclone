@@ -4,15 +4,24 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Neutral blast-radius computation over canonical report dicts."""
+"""Neutral blast-radius computation over the facts of one run.
+
+The computation reads a :class:`~codeclone.canonical.blast_radius_facts.
+BlastRadiusFacts` carrier and nothing else of the run.  The carrier has two
+sources: :func:`blast_radius_facts` reads it off a canonical report document
+(the parent's memory), and the run store's projection reads it off a stored
+run (consumer migration C7).  :func:`compute_blast_radius` is the document
+road kept whole: the carrier of the document, computed.
+"""
 
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from ..canonical.blast_radius_facts import BlastRadiusFacts
 from ..paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
 from ..utils.coerce import as_mapping as _as_mapping
 from ..utils.coerce import as_sequence as _as_sequence
@@ -181,14 +190,11 @@ def _module_to_output(module: str, module_paths: Mapping[str, str]) -> str:
 
 
 def _build_reverse_import_graph(
-    edges: Sequence[Mapping[str, object]],
+    edges: Sequence[tuple[str, str]],
 ) -> dict[str, set[str]]:
     reverse: dict[str, set[str]] = {}
-    for edge in edges:
-        source = str(edge.get("source", "")).strip()
-        target = str(edge.get("target", "")).strip()
-        if source and target:
-            reverse.setdefault(target, set()).add(source)
+    for source, target in edges:
+        reverse.setdefault(target, set()).add(source)
     return reverse
 
 
@@ -199,6 +205,19 @@ def _dependency_edges(
     families = _as_mapping(metrics.get("families"))
     dependencies = _as_mapping(families.get("dependencies"))
     return tuple(_as_mapping(item) for item in _as_sequence(dependencies.get("items")))
+
+
+def _edge_pairs(
+    edges: Sequence[Mapping[str, object]],
+) -> tuple[tuple[str, str], ...]:
+    """The ``(source, target)`` import edges, both ends named, sorted unique."""
+    pairs = {
+        (str(edge.get("source", "")).strip(), str(edge.get("target", "")).strip())
+        for edge in edges
+    }
+    return tuple(
+        sorted((source, target) for source, target in pairs if source and target)
+    )
 
 
 def _opaque_dynamic_load_paths(
@@ -300,18 +319,32 @@ def _suppressed_clone_buckets(
     return _suppressed_clone_groups_in(_suppressed_clone_container(report_document))
 
 
+def _clone_group_paths(
+    report_document: Mapping[str, object],
+) -> tuple[tuple[str, ...], ...]:
+    """Each active clone group's site paths, one entry per group."""
+    return tuple(
+        sorted(
+            _dedupe_sorted(
+                {
+                    _item_path(_as_mapping(item))
+                    for item in _as_sequence(group.get("items"))
+                }
+            )
+            for group in _clone_group_buckets(report_document)
+        )
+    )
+
+
 def _compute_clone_cohort_members(
     *,
-    report_document: Mapping[str, object],
+    clone_groups: Sequence[Sequence[str]],
     origin_paths: Sequence[str],
 ) -> tuple[str, ...]:
     origin_set = set(origin_paths)
     cohort_paths: set[str] = set()
-    for group in _clone_group_buckets(report_document):
-        item_paths = {
-            _item_path(_as_mapping(item)) for item in _as_sequence(group.get("items"))
-        }
-        item_paths.discard("")
+    for group in clone_groups:
+        item_paths = set(group)
         if origin_set.intersection(item_paths):
             cohort_paths.update(item_paths - origin_set)
     return _dedupe_sorted(cohort_paths)
@@ -321,11 +354,9 @@ def _compute_cycle_membership(
     *,
     origin_modules: Sequence[str],
     origin_by_module: Mapping[str, str],
-    report_document: Mapping[str, object],
+    cycles: Sequence[Sequence[str]],
 ) -> tuple[str, ...]:
-    cycle_modules = {
-        module for cycle in _dependency_cycles(report_document) for module in cycle
-    }
+    cycle_modules = {module for cycle in cycles for module in cycle}
     return _dedupe_sorted(
         {
             origin_by_module[module]
@@ -363,11 +394,37 @@ def _blast_zone(
     }
 
 
-def _compute_risk_signals(
-    *,
+def _item_paths_where(
+    items: object,
+    keep: Callable[[Mapping[str, object]], bool],
+) -> tuple[str, ...]:
+    """The path of every item ``keep`` selects, sorted unique."""
+    return _dedupe_sorted(
+        {
+            _item_path(_as_mapping(item))
+            for item in _as_sequence(items)
+            if keep(_as_mapping(item))
+        }
+    )
+
+
+def _high_risk(item: Mapping[str, object]) -> bool:
+    return str(item.get("risk", "")).strip() == "high"
+
+
+def _coverage_signal(item: Mapping[str, object]) -> bool:
+    return bool(item.get("coverage_hotspot")) or bool(item.get("scope_gap_hotspot"))
+
+
+def _overloaded_candidate(item: Mapping[str, object]) -> bool:
+    return str(item.get("candidate_status", "")).strip() == "candidate"
+
+
+def _risk_signal_paths(
     report_document: Mapping[str, object],
-    blast_zone_paths: set[str],
-) -> dict[str, list[str]]:
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """High complexity, high coupling, low coverage and overloaded-candidate
+    paths, run-wide: the blast zone cuts them in the computation."""
     complexity, coupling, coverage_join, overloaded_modules = sections(
         report_document,
         "metrics.families.complexity",
@@ -375,39 +432,36 @@ def _compute_risk_signals(
         "metrics.families.coverage_join",
         "metrics.families.overloaded_modules",
     )
+    return (
+        _item_paths_where(complexity.get("items"), _high_risk),
+        _item_paths_where(coupling.get("items"), _high_risk),
+        _item_paths_where(coverage_join.get("items"), _coverage_signal),
+        _item_paths_where(overloaded_modules.get("items"), _overloaded_candidate),
+    )
 
-    high_complexity = {
-        _item_path(_as_mapping(item))
-        for item in _as_sequence(complexity.get("items"))
-        if str(_as_mapping(item).get("risk", "")).strip() == "high"
-        and _item_path(_as_mapping(item)) in blast_zone_paths
-    }
-    high_coupling = {
-        _item_path(_as_mapping(item))
-        for item in _as_sequence(coupling.get("items"))
-        if str(_as_mapping(item).get("risk", "")).strip() == "high"
-        and _item_path(_as_mapping(item)) in blast_zone_paths
-    }
-    low_coverage = {
-        _item_path(_as_mapping(item))
-        for item in _as_sequence(coverage_join.get("items"))
-        if (
-            bool(_as_mapping(item).get("coverage_hotspot"))
-            or bool(_as_mapping(item).get("scope_gap_hotspot"))
-        )
-        and _item_path(_as_mapping(item)) in blast_zone_paths
-    }
-    overloaded = {
-        _item_path(_as_mapping(item))
-        for item in _as_sequence(overloaded_modules.get("items"))
-        if str(_as_mapping(item).get("candidate_status", "")).strip() == "candidate"
-        and _item_path(_as_mapping(item)) in blast_zone_paths
-    }
+
+def _in_zone(paths: Sequence[str], blast_zone_paths: set[str]) -> list[str]:
+    return [path for path in paths if path in blast_zone_paths]
+
+
+def _compute_risk_signals(
+    *,
+    facts: BlastRadiusFacts,
+    blast_zone_paths: set[str],
+) -> dict[str, list[str]]:
     return {
-        "high_complexity_in_blast_zone": list(_dedupe_sorted(high_complexity)),
-        "high_coupling_in_blast_zone": list(_dedupe_sorted(high_coupling)),
-        "low_coverage_in_blast_zone": list(_dedupe_sorted(low_coverage)),
-        "overloaded_modules_in_blast_zone": list(_dedupe_sorted(overloaded)),
+        "high_complexity_in_blast_zone": _in_zone(
+            facts.high_complexity_paths, blast_zone_paths
+        ),
+        "high_coupling_in_blast_zone": _in_zone(
+            facts.high_coupling_paths, blast_zone_paths
+        ),
+        "low_coverage_in_blast_zone": _in_zone(
+            facts.low_coverage_paths, blast_zone_paths
+        ),
+        "overloaded_modules_in_blast_zone": _in_zone(
+            facts.overloaded_candidate_paths, blast_zone_paths
+        ),
     }
 
 
@@ -482,17 +536,110 @@ def _append_review_entry(
     )
 
 
+def _known_debt_paths(report_document: Mapping[str, object]) -> tuple[str, ...]:
+    """Every site path of a group the baseline calls ``known``."""
+    return _dedupe_sorted(
+        {
+            path
+            for group in _all_finding_groups(report_document)
+            if str(group.get("novelty", "")).strip() == "known"
+            for path in _finding_paths(group)
+        }
+    )
+
+
+def _suppressed_clone_paths(report_document: Mapping[str, object]) -> tuple[str, ...]:
+    """Every site path of a suppressed clone group."""
+    return _dedupe_sorted(
+        {
+            path
+            for group in _suppressed_clone_buckets(report_document)
+            for path in _finding_paths(group)
+        }
+    )
+
+
+def _report_only_paths(
+    report_document: Mapping[str, object],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The security-surface and the overloaded-module paths, in that order."""
+    metrics = _as_mapping(report_document.get("metrics"))
+    families = _as_mapping(metrics.get("families"))
+    security_surfaces, overloaded_modules = (
+        _item_paths_where(
+            _as_mapping(families.get(family_name)).get("items"), _every_item
+        )
+        for family_name in ("security_surfaces", "overloaded_modules")
+    )
+    return security_surfaces, overloaded_modules
+
+
+def _every_item(_item: Mapping[str, object]) -> bool:
+    return True
+
+
+def _review_entries(
+    *,
+    facts: BlastRadiusFacts,
+    origin_paths: Sequence[str],
+    blast_zone_paths: set[str],
+) -> dict[tuple[str, str, str], dict[str, str]]:
+    """Review context: advisory facts inside the zone, keyed for dedupe."""
+    review_entries: dict[tuple[str, str, str], dict[str, str]] = {}
+    origin_set = set(origin_paths)
+    # (paths, reason, category, whether an origin path is excluded).  The
+    # dynamic frontier is advisory only: an opaque site resolves to no target,
+    # so it never entered the import graph and must not widen the radius here
+    # either -- and it is reported on the origin too.
+    for paths, reason, category, skip_origin in (
+        (
+            facts.dynamic_frontier_paths,
+            REVIEW_REASON_DYNAMIC_FRONTIER,
+            "dynamic_frontier_boundary",
+            False,
+        ),
+        (
+            facts.known_debt_paths,
+            REVIEW_REASON_KNOWN_BASELINE_DEBT,
+            "known_baseline_debt",
+            True,
+        ),
+        (
+            facts.suppressed_clone_paths,
+            REVIEW_REASON_GOLDEN_FIXTURE_SURFACE,
+            "golden_fixture_surface",
+            False,
+        ),
+        (
+            facts.security_surface_paths,
+            REVIEW_REASON_SECURITY_BOUNDARY,
+            "security_boundary_context",
+            True,
+        ),
+        (
+            facts.overloaded_module_paths,
+            REVIEW_REASON_REPORT_ONLY_DESIGN,
+            "report_only_context",
+            True,
+        ),
+    ):
+        for path in paths:
+            if path in blast_zone_paths and not (skip_origin and path in origin_set):
+                _append_review_entry(
+                    review_entries, path=path, reason=reason, category=category
+                )
+    return review_entries
+
+
 def _compute_change_boundaries(
     *,
-    report_document: Mapping[str, object],
+    facts: BlastRadiusFacts,
     origin_paths: Sequence[str],
     blast_zone_paths: set[str],
     forbidden_patterns: Sequence[str],
     allowed_scope: Sequence[str] = (),
 ) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, str], ...]]:
     do_not_touch_entries: dict[str, dict[str, str]] = {}
-    review_entries: dict[tuple[str, str, str], dict[str, str]] = {}
-    origin_set = set(origin_paths)
     allowed_set = set(allowed_scope)
     for pattern in DEFAULT_DO_NOT_TOUCH_PATTERNS:
         _append_boundary_entry(
@@ -510,60 +657,9 @@ def _compute_change_boundaries(
             category="explicit_forbidden",
             severity="hard",
         )
-    for path in _opaque_dynamic_load_paths(report_document):
-        # Advisory only: an opaque site resolves to no target, so it never
-        # entered the import graph and must not widen the radius here either.
-        if path in blast_zone_paths:
-            _append_review_entry(
-                review_entries,
-                path=path,
-                reason=REVIEW_REASON_DYNAMIC_FRONTIER,
-                category="dynamic_frontier_boundary",
-            )
-    for group in _all_finding_groups(report_document):
-        if str(group.get("novelty", "")).strip() != "known":
-            continue
-        for path in _finding_paths(group):
-            if path in blast_zone_paths and path not in origin_set:
-                _append_review_entry(
-                    review_entries,
-                    path=path,
-                    reason=REVIEW_REASON_KNOWN_BASELINE_DEBT,
-                    category="known_baseline_debt",
-                )
-    for group in _suppressed_clone_buckets(report_document):
-        for path in _finding_paths(group):
-            if path in blast_zone_paths:
-                _append_review_entry(
-                    review_entries,
-                    path=path,
-                    reason=REVIEW_REASON_GOLDEN_FIXTURE_SURFACE,
-                    category="golden_fixture_surface",
-                )
-    metrics = _as_mapping(report_document.get("metrics"))
-    families = _as_mapping(metrics.get("families"))
-    for family_name, reason, category in (
-        (
-            "security_surfaces",
-            REVIEW_REASON_SECURITY_BOUNDARY,
-            "security_boundary_context",
-        ),
-        (
-            "overloaded_modules",
-            REVIEW_REASON_REPORT_ONLY_DESIGN,
-            "report_only_context",
-        ),
-    ):
-        family = _as_mapping(families.get(family_name))
-        for raw_item in _as_sequence(family.get("items")):
-            path = _item_path(_as_mapping(raw_item))
-            if path in blast_zone_paths and path not in origin_set:
-                _append_review_entry(
-                    review_entries,
-                    path=path,
-                    reason=reason,
-                    category=category,
-                )
+    review_entries = _review_entries(
+        facts=facts, origin_paths=origin_paths, blast_zone_paths=blast_zone_paths
+    )
     if allowed_set:
         for path in blast_zone_paths:
             if path not in allowed_set:
@@ -604,6 +700,38 @@ def _guardrails(
     return tuple(guardrails)
 
 
+def blast_radius_facts(report_document: Mapping[str, object]) -> BlastRadiusFacts:
+    """The facts of one run a blast radius reads, off its report document."""
+    edges = _edge_pairs(_dependency_edges(report_document))
+    module_paths = _module_path_index(report_document)
+    high_complexity, high_coupling, low_coverage, overloaded_candidates = (
+        _risk_signal_paths(report_document)
+    )
+    security_surfaces, overloaded_modules = _report_only_paths(report_document)
+    return BlastRadiusFacts(
+        dependent_paths=tuple(
+            sorted(
+                {
+                    (source, _module_to_output(source, module_paths))
+                    for source, _ in edges
+                }
+            )
+        ),
+        dependency_edges=edges,
+        dependency_cycles=_dependency_cycles(report_document),
+        clone_groups=_clone_group_paths(report_document),
+        suppressed_clone_paths=_suppressed_clone_paths(report_document),
+        known_debt_paths=_known_debt_paths(report_document),
+        dynamic_frontier_paths=_opaque_dynamic_load_paths(report_document),
+        high_complexity_paths=high_complexity,
+        high_coupling_paths=high_coupling,
+        low_coverage_paths=low_coverage,
+        overloaded_candidate_paths=overloaded_candidates,
+        overloaded_module_paths=overloaded_modules,
+        security_surface_paths=security_surfaces,
+    )
+
+
 def compute_blast_radius(
     *,
     run_id: str,
@@ -613,10 +741,31 @@ def compute_blast_radius(
     forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
     allowed_scope: Sequence[str] = (),
 ) -> BlastRadiusResult:
+    """The blast radius of ``files`` over one report document."""
+    return compute_blast_radius_from_facts(
+        run_id=run_id,
+        facts=blast_radius_facts(report_document),
+        files=files,
+        depth=depth,
+        forbidden_patterns=forbidden_patterns,
+        allowed_scope=allowed_scope,
+    )
+
+
+def compute_blast_radius_from_facts(
+    *,
+    run_id: str,
+    facts: BlastRadiusFacts,
+    files: Sequence[str],
+    depth: BlastRadiusDepth = "direct",
+    forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
+    allowed_scope: Sequence[str] = (),
+) -> BlastRadiusResult:
+    """The blast radius of ``files`` over the facts of one run."""
     origin_paths = _dedupe_sorted(
         tuple(_normalize_relative_path(path) for path in files)
     )
-    module_paths = _module_path_index(report_document)
+    module_paths = dict(facts.dependent_paths)
     origin_by_module = {
         module: path
         for path in origin_paths
@@ -624,7 +773,7 @@ def compute_blast_radius(
         if module
     }
     origin_modules = tuple(sorted(origin_by_module))
-    reverse_graph = _build_reverse_import_graph(_dependency_edges(report_document))
+    reverse_graph = _build_reverse_import_graph(facts.dependency_edges)
     direct_modules = _compute_direct_dependents(
         origin_modules=origin_modules,
         reverse_graph=reverse_graph,
@@ -648,13 +797,13 @@ def compute_blast_radius(
         )
     )
     clone_cohort_members = _compute_clone_cohort_members(
-        report_document=report_document,
+        clone_groups=facts.clone_groups,
         origin_paths=origin_paths,
     )
     dependency_cycle_members = _compute_cycle_membership(
         origin_modules=origin_modules,
         origin_by_module=origin_by_module,
-        report_document=report_document,
+        cycles=facts.dependency_cycles,
     )
     radius_level = _compute_radius_level(
         direct_dependents=direct_dependents,
@@ -666,12 +815,9 @@ def compute_blast_radius(
         transitive_dependents=transitive_dependents,
         clone_cohort_members=clone_cohort_members,
     )
-    risk = _compute_risk_signals(
-        report_document=report_document,
-        blast_zone_paths=zone,
-    )
+    risk = _compute_risk_signals(facts=facts, blast_zone_paths=zone)
     do_not_touch, review_context = _compute_change_boundaries(
-        report_document=report_document,
+        facts=facts,
         origin_paths=origin_paths,
         blast_zone_paths=zone,
         forbidden_patterns=forbidden_patterns,
@@ -710,5 +856,7 @@ __all__ = [
     "REVIEW_REASON_SECURITY_BOUNDARY",
     "BlastRadiusDepth",
     "BlastRadiusResult",
+    "blast_radius_facts",
     "compute_blast_radius",
+    "compute_blast_radius_from_facts",
 ]

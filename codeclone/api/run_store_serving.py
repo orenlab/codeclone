@@ -46,12 +46,16 @@ that receipt.  A served answer that came over the bridge says so in
 this vocabulary already has, and nothing is ever looked up "by a similar
 scope".
 
-**One road, three readings.**  What is read at the end of the road is the
+**One road, five readings.**  What is read at the end of the road is the
 only thing that differs between the door's operations: the three served
 slices (``search_graph``, ``get_implementation_context``), the authority
-candidate rows (``check_authority(section="candidates")``) and the run
+candidate rows (``check_authority(section="candidates")``), the run
 summary's store-carried blocks (``get_run_summary``, consumer migration
-C1).  The gates, the two roads, the one store open and the refusal
+C1), the facts one run lends the patch contract (``check_patch_contract``
+and the verification ``finish_controlled_change`` runs, consumer migration
+C6) and the facts a blast radius is computed from (``get_blast_radius`` and
+the radius ``start_controlled_change`` declares against, consumer migration
+C7).  The gates, the two roads, the one store open and the refusal
 vocabulary are written once, in :func:`_read_published`, and every
 operation is that function with a different reader -- so a consumer that
 moves onto the store cannot bring a second resolution with its own idea of
@@ -61,10 +65,10 @@ what ``served`` means.
 road of the consumer-migration program, and it is temporary: a consumer
 that moved onto the store goes back to memory under ``memory`` without the
 store being read, and says so (``store_disabled``, the switch named in
-``detail``).  It is honoured by the migrated consumers only --
-``get_run_summary`` today -- and is removed with the last consumer's
-cutover, no later than 2026-11-30.  The publication flag above stays the
-kill switch of every reading.
+``detail``).  It is honoured by the migrated consumers only -- the run
+summary, patch verification and the blast radius today -- and is removed
+with the last consumer's cutover, no later than 2026-11-30.  The
+publication flag above stays the kill switch of every reading.
 """
 
 from __future__ import annotations
@@ -75,6 +79,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, TypeVar
 
+from ..canonical.blast_radius_facts import BlastRadiusFacts
 from ..canonical.errors import (
     UNKNOWN_RUN_STORE_ABSENT,
     CanonicalModelError,
@@ -91,6 +96,7 @@ from ..canonical.serving import (
     ServedRunSummary,
     ServedUnitLocation,
     read_served_authority_candidates,
+    read_served_blast_radius_facts,
     read_served_patch_run,
     read_served_run_slices,
     read_served_run_summary,
@@ -396,6 +402,28 @@ def _store_answer(
     )
 
 
+def read_run_store_blast_radius_facts(
+    *, root: Path, link: RunSnapshotLink | None
+) -> tuple[BlastRadiusFacts | None, RunStoreServingOutcome]:
+    """The facts one execution's blast radius is computed from, out of the
+    store, or a typed reason for none (consumer migration C7).
+
+    The same gates, the same two roads and the same one store open as
+    :func:`read_run_store_slices`, behind the same serving switch as
+    :func:`read_run_store_summary`: a record that stated a bridge is
+    answered from memory without a store read while the switch names
+    memory, and the answer names the switch.
+    """
+    source = serving_source()
+    if link is not None and source == SERVE_FROM_MEMORY:
+        return _memory(
+            SERVING_REASON_STORE_DISABLED,
+            store_run_id=link.store_run_id,
+            detail=f"{ENV_SERVE_FROM}={source}",
+        )
+    return _read_published(root=root, link=link, read=read_served_blast_radius_facts)
+
+
 __all__ = [
     "ENV_SERVE_FROM",
     "MEMORY_BY_DESIGN_REASONS",
@@ -418,12 +446,14 @@ __all__ = [
     "SERVING_SOURCES",
     "SERVING_SOURCE_MEMORY",
     "SERVING_SOURCE_RUN_STORE",
+    "BlastRadiusFacts",
     "RunStoreServingOutcome",
     "ServedAuthorityCandidates",
     "ServedRunSlices",
     "ServedRunSummary",
     "ServedUnitLocation",
     "read_run_store_authority_candidates",
+    "read_run_store_blast_radius_facts",
     "read_run_store_slices",
     "read_run_store_summary",
     "serving_source",

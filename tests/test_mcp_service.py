@@ -11107,7 +11107,10 @@ def test_mcp_service_clear_session_runs_clears_in_memory_state(tmp_path: Path) -
         "cleared_runs": 1,
         "cleared_review_entries": 1,
         "cleared_gate_results": 1,
-        "cleared_blast_radius_entries": 1,
+        # One question on two roads (consumer migration C7): the blast radius
+        # and the declare share the served road's entry; the implementation
+        # context computes on the document road and holds its own.
+        "cleared_blast_radius_entries": 2,
         "cleared_context_projection_pages": 1,
         "cleared_intents": 1,
         "workspace_cleared": True,
@@ -16274,6 +16277,7 @@ def test_mcp_state_optional_payload_and_pruning_edges(tmp_path: Path) -> None:
     service._last_gate_results[stale.run_id] = {"status": "pass"}
     service._spread_max_cache[stale.run_id] = 1
     from codeclone.analysis.blast_radius import BlastRadiusResult
+    from codeclone.api.run_store_serving import RunStoreServingOutcome
 
     service._blast_radius_cache[
         (
@@ -16283,8 +16287,12 @@ def test_mcp_state_optional_payload_and_pruning_edges(tmp_path: Path) -> None:
             "direct",
             (),
             (),
+            "memory",
         )
-    ] = cast("BlastRadiusResult", {})
+    ] = (
+        cast("BlastRadiusResult", {}),
+        RunStoreServingOutcome(source="memory", reason="not_published"),
+    )
 
     service._runs.clear()
     service._prune_session_state()

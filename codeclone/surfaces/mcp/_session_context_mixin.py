@@ -433,7 +433,7 @@ def _context_subject_from_explicit(
 
 
 class _ContextSessionDependencies(Protocol):
-    def _blast_radius_result(
+    def _document_blast_radius(
         self,
         *,
         record: MCPRunRecord,
@@ -547,7 +547,7 @@ class _MCPSessionContextMixin:
         session = cast("_ContextSessionDependencies", self)
         transitive = depth > 1 or mode == "impact"
         if subject.paths:
-            blast_result = session._blast_radius_result(
+            blast_result = session._document_blast_radius(
                 record=record,
                 files=subject.paths,
                 depth="transitive" if transitive else "direct",

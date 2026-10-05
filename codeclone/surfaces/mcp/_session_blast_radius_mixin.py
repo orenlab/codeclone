@@ -10,6 +10,11 @@ from collections.abc import Sequence
 from typing import Final, cast
 
 from ...api.memory import blast_radius_cache_limit
+from ...api.run_store_serving import (
+    BlastRadiusFacts,
+    RunStoreServingOutcome,
+    serving_source,
+)
 from . import _session_helpers as _helpers
 from ._blast_radius import (
     DEFAULT_BLAST_RADIUS_INCLUDE,
@@ -20,7 +25,9 @@ from ._blast_radius import (
     BlastRadiusResult,
     blast_radius_to_payload,
     compute_blast_radius,
+    compute_blast_radius_from_facts,
 )
+from ._run_store_serving import served_blast_radius
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
 from ._session_shared import (
     CodeCloneMCPRunStore,
@@ -39,6 +46,13 @@ from ._session_shared import (
 #: graph. Root is a correctness boundary here first, and the quota partition
 #: second. It is stored resolved, matching ``run_store_key``: one checkout
 #: reached under an alias is one partition, not two.
+#:
+#: The last slot (consumer migration C7) is the road the answer was computed
+#: on: the serving switch the edge read it under, or
+#: :data:`BLAST_RADIUS_DOCUMENT_ROAD`.  An answer cached under one switch
+#: carries that switch's ``serving`` block, so the other switch is another
+#: question -- never a cached answer naming a switch the caller has since
+#: turned.
 BlastRadiusCacheKey = tuple[
     str,
     str,
@@ -46,8 +60,20 @@ BlastRadiusCacheKey = tuple[
     str,
     tuple[str, ...],
     tuple[str, ...],
+    str,
 ]
-BlastRadiusCache = dict[BlastRadiusCacheKey, BlastRadiusResult]
+#: One cached answer: the radius and where it came from -- no outcome on the
+#: document road, which takes no serving decision.
+BlastRadiusCacheEntry = tuple[BlastRadiusResult, RunStoreServingOutcome | None]
+BlastRadiusCache = dict[BlastRadiusCacheKey, BlastRadiusCacheEntry]
+
+#: The road of the one reader that has not moved onto the run store -- the
+#: implementation context: the radius off the record's document alone, no
+#: store read, no serving decision.  That reader resolves the store once per
+#: request for its own slices and is pinned to exactly once
+#: (``tests/test_implementation_context_run_store_serving.py``); its radius is
+#: its own consumer migration, not this one.
+BLAST_RADIUS_DOCUMENT_ROAD: Final = "document"
 
 #: Every consumer names the slot it reads through these, never a bare index.
 #: A bare index is how the previous shape broke: the pruner read slot 0 as a
@@ -80,6 +106,54 @@ def _finding_session(
     return cast(_MCPSessionFindingMixin, session)
 
 
+def _computed_blast_radius(
+    record: MCPRunRecord,
+    *,
+    files: tuple[str, ...],
+    depth: BlastRadiusDepth,
+    forbidden_patterns: tuple[str, ...],
+    allowed_scope: tuple[str, ...],
+    road: str,
+) -> BlastRadiusCacheEntry:
+    """One normalized question, computed on its road (no cache).
+
+    The radius off the record's document always; on a serving road, the same
+    computation handed the facts the store states for the execution too, and
+    the edge decides which is served (``served_blast_radius``).
+    """
+    run_id = _helpers._short_run_id(record.run_id)
+    memory = compute_blast_radius(
+        run_id=run_id,
+        report_document=record.served_report,
+        files=files,
+        depth=depth,
+        forbidden_patterns=forbidden_patterns,
+        allowed_scope=allowed_scope,
+    )
+    if road == BLAST_RADIUS_DOCUMENT_ROAD:
+        return memory, None
+
+    def from_store(facts: BlastRadiusFacts) -> BlastRadiusResult:
+        return compute_blast_radius_from_facts(
+            run_id=run_id,
+            facts=facts,
+            files=files,
+            depth=depth,
+            forbidden_patterns=forbidden_patterns,
+            allowed_scope=allowed_scope,
+        )
+
+    return served_blast_radius(record, memory, from_store)
+
+
+def _serving_payload(entry: BlastRadiusCacheEntry) -> dict[str, object]:
+    """The ``serving`` block of a serving road's entry -- a serving road
+    always caches its outcome; only the document road, a key the serving
+    road never builds, caches none."""
+    _result, outcome = entry
+    return cast(RunStoreServingOutcome, outcome).as_payload()
+
+
 class _MCPSessionBlastRadiusMixin:
     _runs: CodeCloneMCPRunStore
     _state_lock: _StateLock
@@ -105,12 +179,14 @@ class _MCPSessionBlastRadiusMixin:
                 "get_blast_radius requires at least one file."
             )
         normalized_include = self._validated_blast_radius_include(include)
-        result = self._blast_radius_result(
+        result, serving = self._served_blast_radius(
             record=record,
             files=normalized_files,
             depth=normalized_depth,
         )
-        return blast_radius_to_payload(result, include=normalized_include)
+        payload = blast_radius_to_payload(result, include=normalized_include)
+        payload["serving"] = serving
+        return payload
 
     def _blast_radius_result(
         self,
@@ -121,6 +197,75 @@ class _MCPSessionBlastRadiusMixin:
         forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
         allowed_scope: Sequence[str] = (),
     ) -> BlastRadiusResult:
+        """The radius a controlled change declares and starts against:
+        served (:meth:`_served_blast_radius`)."""
+        result, _serving = self._served_blast_radius(
+            record=record,
+            files=files,
+            depth=depth,
+            forbidden_patterns=forbidden_patterns,
+            allowed_scope=allowed_scope,
+        )
+        return result
+
+    def _served_blast_radius(
+        self,
+        *,
+        record: MCPRunRecord,
+        files: Sequence[str],
+        depth: BlastRadiusDepth,
+        forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
+        allowed_scope: Sequence[str] = (),
+    ) -> tuple[BlastRadiusResult, dict[str, object]]:
+        """The radius and its ``serving`` block, on the road the serving
+        switch names.
+
+        Computed once from the record's document (memory) and, behind the
+        switch, once from the facts the store states for the same
+        execution; the store's is served only when the two are the same
+        bytes (``served_blast_radius``).
+        """
+        entry = self._cached_blast_radius(
+            record=record,
+            files=files,
+            depth=depth,
+            forbidden_patterns=forbidden_patterns,
+            allowed_scope=allowed_scope,
+            road=serving_source(),
+        )
+        return entry[0], _serving_payload(entry)
+
+    def _document_blast_radius(
+        self,
+        *,
+        record: MCPRunRecord,
+        files: Sequence[str],
+        depth: BlastRadiusDepth,
+        forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
+        allowed_scope: Sequence[str] = (),
+    ) -> BlastRadiusResult:
+        """The radius off the record's document alone: no store read, no
+        serving decision (see :data:`BLAST_RADIUS_DOCUMENT_ROAD`)."""
+        result, _serving = self._cached_blast_radius(
+            record=record,
+            files=files,
+            depth=depth,
+            forbidden_patterns=forbidden_patterns,
+            allowed_scope=allowed_scope,
+            road=BLAST_RADIUS_DOCUMENT_ROAD,
+        )
+        return result
+
+    def _cached_blast_radius(
+        self,
+        *,
+        record: MCPRunRecord,
+        files: Sequence[str],
+        depth: BlastRadiusDepth,
+        forbidden_patterns: Sequence[str],
+        allowed_scope: Sequence[str],
+        road: str,
+    ) -> BlastRadiusCacheEntry:
         normalized_files = tuple(sorted(set(files)))
         default_forbidden = set(DEFAULT_DO_NOT_TOUCH_PATTERNS)
         normalized_forbidden = tuple(
@@ -134,6 +279,7 @@ class _MCPSessionBlastRadiusMixin:
             depth,
             normalized_forbidden,
             normalized_allowed_scope,
+            road,
         )
         with self._state_lock:
             cached = self._blast_radius_cache.get(cache_key)
@@ -142,23 +288,23 @@ class _MCPSessionBlastRadiusMixin:
                 self._blast_radius_cache[cache_key] = cached
         if cached is not None:
             return cached
-        result = compute_blast_radius(
-            run_id=_helpers._short_run_id(record.run_id),
-            report_document=record.served_report,
+        entry = _computed_blast_radius(
+            record,
             files=normalized_files,
             depth=depth,
             forbidden_patterns=normalized_forbidden,
             allowed_scope=normalized_allowed_scope,
+            road=road,
         )
         limit = blast_radius_cache_limit(root_path=record.root)
         with self._state_lock:
-            self._retain_in_partition(cache_key, result, limit=limit)
-        return result
+            self._retain_in_partition(cache_key, entry, limit=limit)
+        return entry
 
     def _retain_in_partition(
         self,
         cache_key: BlastRadiusCacheKey,
-        result: BlastRadiusResult,
+        result: BlastRadiusCacheEntry,
         *,
         limit: int,
     ) -> None:
@@ -235,8 +381,10 @@ class _MCPSessionBlastRadiusMixin:
 __all__ = [
     "BLAST_RADIUS_CACHE_KEY_ROOT",
     "BLAST_RADIUS_CACHE_KEY_RUN_ID",
+    "BLAST_RADIUS_DOCUMENT_ROAD",
     "LEGACY_SESSION_BLAST_RADIUS_CACHE_CEILING",
     "BlastRadiusCache",
+    "BlastRadiusCacheEntry",
     "BlastRadiusCacheKey",
     "_MCPSessionBlastRadiusMixin",
 ]

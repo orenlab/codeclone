@@ -23,6 +23,7 @@ BlastRadiusResult = _core.BlastRadiusResult
 DEFAULT_DO_NOT_TOUCH_PATTERNS = _core.DEFAULT_DO_NOT_TOUCH_PATTERNS
 MAX_CONTEXT_ITEMS = _core.MAX_CONTEXT_ITEMS
 compute_blast_radius = _core.compute_blast_radius
+compute_blast_radius_from_facts = _core.compute_blast_radius_from_facts
 
 # Re-export core helpers for MCP contract tests and backward compatibility.
 _append_boundary_entry = _core._append_boundary_entry

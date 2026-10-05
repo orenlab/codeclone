@@ -75,6 +75,8 @@ from pathlib import Path
 from typing import Final, cast, get_args
 
 from codeclone.canonical.authority_projection import candidate_rows_from_families
+from codeclone.canonical.blast_radius_facts import BlastRadiusFacts
+from codeclone.canonical.blast_radius_projection import blast_radius_facts_from_model
 from codeclone.canonical.comparison_projection import (
     baseline_state,
     metric_deltas,
@@ -138,6 +140,7 @@ from codeclone.canonical.store import (
     FAMILY_DEAD_SYMBOL_NOVELTY,
     FAMILY_DEPENDENCY_CYCLE,
     FAMILY_DEPENDENCY_CYCLE_NOVELTY,
+    FAMILY_DEPENDENCY_RELATION,
     FAMILY_FILE_MODULE,
     FAMILY_FINDING_EVALUATION,
     FAMILY_GRAPH_NODE,
@@ -146,6 +149,7 @@ from codeclone.canonical.store import (
     FAMILY_IMPORT_OBSERVATION,
     FAMILY_LANE_TRUST,
     FAMILY_METRICS_BASELINE_WITNESS,
+    FAMILY_OVERLOADED_MODULE,
     FAMILY_RELATIONSHIP_OBSERVATION,
     FAMILY_RISK_OBSERVATION,
     FAMILY_RUN_SCALAR,
@@ -153,6 +157,7 @@ from codeclone.canonical.store import (
     FAMILY_SEMANTIC_EDGE,
     FAMILY_STRUCTURAL_GROUP,
     FAMILY_SUPPRESSED_CLONE_GROUP,
+    FAMILY_UNIT_RISK_RESULT,
     FAMILY_UNIT_SPAN,
     FAMILY_UNREACHABLE_STATEMENT_GROUP,
     FAMILY_VIOLATION,
@@ -916,8 +921,63 @@ def read_served_patch_run(store: RunStore, run_id: str) -> ServedPatchRun:
     return patch_run_from_model(model, run_id=run_id)
 
 
+#: The families :func:`read_served_blast_radius_facts` reads -- every one,
+#: and none it could do without (``tests/test_blast_radius_declared_families
+#: .py``).  Measured 2026-10-03 the way the run summary's were (every family,
+#: then each one taken away): 26 of the store's 56 on the nineteen served
+#: populations of consumer migration C7, flask and the self-repository.  The
+#: authority families (``graph_node``, ``semantic_edge``, ``violation``) are
+#: read because the one owner of the known-debt paths walks the whole
+#: published finding universe; ``risk_observation`` is reached only by a run
+#: that joined a coverage report.
+BLAST_RADIUS_FAMILIES: Final = (
+    FAMILY_CLONE_GROUP,
+    FAMILY_CLONE_NOVELTY,
+    FAMILY_COHESION_HOTSPOT,
+    FAMILY_COMPLEXITY_HOTSPOT,
+    FAMILY_COMPLEXITY_NOVELTY,
+    FAMILY_COUPLING_HOTSPOT,
+    FAMILY_COUPLING_NOVELTY,
+    FAMILY_COVERAGE_JOIN,
+    FAMILY_COVERAGE_UNIT,
+    FAMILY_DEAD_SYMBOL_GROUP,
+    FAMILY_DEAD_SYMBOL_NOVELTY,
+    FAMILY_DEPENDENCY_CYCLE,
+    FAMILY_DEPENDENCY_CYCLE_NOVELTY,
+    FAMILY_DEPENDENCY_RELATION,
+    FAMILY_FILE_MODULE,
+    FAMILY_GRAPH_NODE,
+    FAMILY_IMPORT_OBSERVATION,
+    FAMILY_OVERLOADED_MODULE,
+    FAMILY_RISK_OBSERVATION,
+    FAMILY_SECURITY_SURFACE,
+    FAMILY_SEMANTIC_EDGE,
+    FAMILY_STRUCTURAL_GROUP,
+    FAMILY_SUPPRESSED_CLONE_GROUP,
+    FAMILY_UNIT_RISK_RESULT,
+    FAMILY_UNREACHABLE_STATEMENT_GROUP,
+    FAMILY_VIOLATION,
+)
+
+
+def read_served_blast_radius_facts(store: RunStore, run_id: str) -> BlastRadiusFacts:
+    """Read the declared families of one published run and rebuild the facts
+    its blast radius is computed from (consumer migration C7).
+
+    Bounded: :data:`BLAST_RADIUS_FAMILIES` only, through
+    :func:`~codeclone.canonical.store.read_named_families`; the facts are
+    rebuilt by their one owner,
+    :func:`~codeclone.canonical.blast_radius_projection.blast_radius_facts_from_model`.
+    A run the store does not hold refuses typed (``UnknownRunError``), and a
+    projection reaching past the declaration refuses (``UnreadFamilyError``).
+    """
+    model = read_named_families(store, run_id, BLAST_RADIUS_FAMILIES)
+    return blast_radius_facts_from_model(model)
+
+
 __all__ = [
     "AUTHORITY_PRODUCER_FAMILY",
+    "BLAST_RADIUS_FAMILIES",
     "RUN_SUMMARY_FAMILIES",
     "SECURITY_SURFACE_COUNT_KEYS",
     "SERVED_AUTHORITY_CANDIDATE_FAMILIES",
@@ -928,6 +988,7 @@ __all__ = [
     "ServedUnitLocation",
     "module_dep_order_key",
     "read_served_authority_candidates",
+    "read_served_blast_radius_facts",
     "read_served_run_slices",
     "read_served_run_summary",
     "relationship_record_order_key",

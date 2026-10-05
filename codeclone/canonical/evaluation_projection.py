@@ -184,21 +184,27 @@ def finding_severities(evaluation: EvaluationFacts) -> dict[str, str]:
     return {row.finding_id: row.severity for row in evaluation.finding_evaluation}
 
 
+def high_band_files(evaluation: EvaluationFacts, dimension: str) -> tuple[str, ...]:
+    """Every file holding a unit the run banded high on ``dimension``, sorted:
+    the run-wide set a blast zone is cut from."""
+    return tuple(
+        sorted(
+            {
+                row.symbol.file.path
+                for row in evaluation.unit_risk_result
+                if row.dimension == dimension and row.band == _HIGH
+            }
+        )
+    )
+
+
 def high_band_paths(
     evaluation: EvaluationFacts, dimension: str, zone: Iterable[str]
 ) -> list[str]:
     """``structural_risk.high_<dimension>_in_blast_zone``: the files of the
     zone that hold a unit the run banded high on that dimension."""
     paths = set(zone)
-    return sorted(
-        {
-            row.symbol.file.path
-            for row in evaluation.unit_risk_result
-            if row.dimension == dimension
-            and row.band == _HIGH
-            and row.symbol.file.path in paths
-        }
-    )
+    return [path for path in high_band_files(evaluation, dimension) if path in paths]
 
 
 __all__ = [
@@ -211,6 +217,7 @@ __all__ = [
     "gate_answer",
     "health_payload",
     "health_score",
+    "high_band_files",
     "high_band_paths",
     "production_hotspots",
     "selection",
