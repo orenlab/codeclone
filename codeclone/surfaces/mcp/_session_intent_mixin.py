@@ -51,6 +51,7 @@ from ._intent import (
 )
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_finding_mixin import _MCPSessionFindingMixin
+from ._session_run_lease_mixin import _MCPSessionRunLeaseMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
@@ -189,6 +190,12 @@ def _typed_eviction(call: Callable[[], dict[str, object]]) -> dict[str, object]:
 
 class _SessionStatePrune(Protocol):
     def _prune_session_state(self) -> None: ...
+
+
+def _leases(session: object) -> _MCPSessionRunLeaseMixin:
+    """The session's store leases on its intents' before-runs."""
+
+    return cast(_MCPSessionRunLeaseMixin, session)
 
 
 def _run_state_prune(session: object) -> None:
@@ -500,6 +507,7 @@ class _MCPSessionIntentMixin:
             with self._state_lock:
                 self._active_intents.pop(intent_id, None)
             self._unpin_intent_run(record_payload)
+            self._release_superseded_run_leases(superseded)
             return _registry_store_unreadable_refusal(
                 root=record.root,
                 operation="declare",
@@ -530,7 +538,17 @@ class _MCPSessionIntentMixin:
                 ttl=ttl,
             )
             _attach_replaced_intents(queued_payload, replacement_reports)
+            # A queued intent takes no lease: it holds no run until promoted.
+            self._release_superseded_run_leases(superseded)
             return queued_payload
+        # Active: lease the before-run in the store, then release what the
+        # superseded intents held -- in that order, as they may share it.
+        _leases(self)._take_intent_run_lease(
+            intent_id=record_payload.intent_id,
+            record=record,
+            ttl_seconds=ttl,
+        )
+        self._release_superseded_run_leases(superseded)
         # ── Queued context: advisory info about waiting agents ─────
         queued_context = self._queued_context_from_workspace(
             scope=normalized_scope,
@@ -732,6 +750,7 @@ class _MCPSessionIntentMixin:
             start_epoch=self._agent_start_epoch,
             intent_id=intent_id,
         )
+        _leases(self)._take_intent_run_lease(intent_id=intent_id, record=record)
         promoted_payload: dict[str, object] = {
             "intent_id": intent_id,
             "previous_status": "queued",
@@ -899,6 +918,7 @@ class _MCPSessionIntentMixin:
             )
             for removed_intent in removed_intents:
                 self._unpin_intent_run(removed_intent)
+        _leases(self)._release_intent_run_leases(removed_ids)
         workspace_cleared = True
         for root_path, removed_intent, _report_digest in workspace_targets:
             workspace_cleared = (
@@ -1061,12 +1081,13 @@ class _MCPSessionIntentMixin:
         intent: IntentRecord,
     ) -> None:
         try:
-            renew_workspace_intent_lease(
+            renewed = renew_workspace_intent_lease(
                 root=record.root,
                 pid=self._agent_pid,
                 start_epoch=self._agent_start_epoch,
                 intent_id=intent.intent_id,
             )
+            _leases(self)._renew_intent_run_lease(intent.intent_id, renewed=renewed)
         except Exception:
             return
 
@@ -1106,6 +1127,7 @@ class _MCPSessionIntentMixin:
             intent_id=active_intent.intent_id,
             lease_seconds=lease_seconds,
         )
+        _leases(self)._renew_intent_run_lease(active_intent.intent_id, renewed=renewed)
         if renewed:
             latest_record = find_workspace_intent(
                 root=record.root,
@@ -1271,6 +1293,13 @@ class _MCPSessionIntentMixin:
         with self._state_lock:
             # Recovered: the intent is bound to a held execution again.
             self._before_run_evicted_intents.pop(recovered.intent_id, None)
+        # A new grant on the run it is bound to now; the one it held while
+        # retired is released after it.
+        _leases(self)._take_intent_run_lease(
+            intent_id=recovered.intent_id,
+            record=recovery_run.record,
+            ttl_seconds=target.workspace_record.ttl_seconds,
+        )
         return self._recovered_payload(
             target=target,
             recovery_run=recovery_run,
@@ -1860,6 +1889,14 @@ class _MCPSessionIntentMixin:
         for intent in superseded:
             if intent.status is not IntentStatus.QUEUED:
                 self._unpin_intent_run(intent)
+
+    def _release_superseded_run_leases(
+        self,
+        superseded: Sequence[IntentRecord],
+    ) -> None:
+        _leases(self)._release_intent_run_leases(
+            [intent.intent_id for intent in superseded]
+        )
 
     def _prune_session_state(self) -> None:
         """The session's prune, then the intents whose before-run went with it.

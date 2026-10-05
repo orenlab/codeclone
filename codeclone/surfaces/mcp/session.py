@@ -49,6 +49,7 @@ from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_memory_mixin import _MCPSessionMemoryMixin
 from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
+from ._session_run_lease_mixin import _MCPSessionRunLeaseMixin
 from ._session_shared import (
     _REPORT_DUMMY_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -179,6 +180,7 @@ class MCPSession(
     _MCPSessionReviewReceiptMixin,
     _MCPSessionAuditArtifactMixin,
     _MCPSessionPatchContractMixin,
+    _MCPSessionRunLeaseMixin,
     _MCPSessionIntentMixin,
     _MCPSessionMemoryMixin,
     _MCPSessionContextMixin,
@@ -206,6 +208,8 @@ class MCPSession(
         self._memory_continuation_requests: dict[str, dict[str, object]] = {}
         self._active_intents: dict[str, IntentRecord] = {}
         self._before_run_evicted_intents: dict[str, IntentRecord] = {}
+        self._intent_run_leases = {}
+        self._intent_run_lease_sequence = 0
         self._start_replay_cache: dict[str, dict[str, object]] = {}
         self._intent_sequence = 0
         self._agent_pid = os.getpid()

@@ -248,6 +248,9 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
                     start_epoch=self._agent_start_epoch,
                     intent_id=intent_id,
                 )
+            # Its store leases too; one that cannot be released now dissolves
+            # at its deadline.
+            self._release_intent_run_leases(tuple(snapshot))
         except Exception:
             pass
         self._shutdown_close_resources()
