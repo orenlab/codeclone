@@ -105,6 +105,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Published baselines are 86% smaller (columnar data lanes).
 - Report generation peak memory −24% (JSON), further −14% (multi-artifact); documents built only on demand.
 - Engineering Memory staleness checks batch subject lookups.
+- MCP answers from the run store (`CODECLONE_SERVE_FROM=run_store`) read a stored run's authority graph only when the run holds violations and its risk observations only when it joined coverage, keep each run's served facts for the life of the server process (bounded to 10 runs, re-checked as published on every answer) and prove the run's membership by its object ids once per process; a repeated store answer reads no family of the run, and every answer is still served only when byte-equal to memory.
 
 ### Dependencies
 
