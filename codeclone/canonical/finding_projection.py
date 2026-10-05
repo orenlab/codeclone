@@ -42,7 +42,9 @@ through ``canonical.authority_projection``.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Final, cast
 
 from codeclone.canonical.analysis_rows import (
@@ -149,6 +151,24 @@ PROJECTED_FAMILIES: Final[tuple[str, ...]] = (
     FAMILY_DESIGN,
     FAMILY_AUTHORITY,
 )
+
+
+def _id_namespace(group_id: str) -> str:
+    """The text an id owner writes before a group's own key: the id's first
+    ``:``-terminated segment."""
+    return group_id[: group_id.index(":") + 1]
+
+
+#: The namespace every group id of a published family starts with, read off
+#: the one id owner (``findings.ids``) that family's builders spell their ids
+#: through -- never restated as a literal.
+PROJECTED_FAMILY_ID_NAMESPACES: Final[Mapping[str, str]] = {
+    FAMILY_CLONE: _id_namespace(clone_group_id("", "")),
+    FAMILY_STRUCTURAL: _id_namespace(structural_group_id("", "")),
+    FAMILY_DEAD_CODE: _id_namespace(dead_code_group_id("")),
+    FAMILY_DESIGN: _id_namespace(design_group_id("", "")),
+    FAMILY_AUTHORITY: _id_namespace(authority_group_id("", "")),
+}
 
 #: The item keys a clone-family item is projected with; the per-kind item
 #: metrics (``loc``, ``stmt_count``, ``fingerprint``, ``size``…) stay with
@@ -642,51 +662,143 @@ def authority_group_skeletons(model: CanonicalModel) -> list[_Group]:
 # -- the whole document skeleton ---------------------------------------------
 
 
-def _symbols_of(facts: AnalysisFacts) -> set[SymbolId]:
-    symbols: set[SymbolId] = set()
+def _clone_symbols(facts: AnalysisFacts) -> Iterator[SymbolId]:
     for group in facts.clone_groups:
-        symbols.update(item.symbol for item in group.items)
+        yield from (item.symbol for item in group.items)
     for suppressed in facts.suppressed_clone_groups:
-        symbols.update(item.symbol for item in suppressed.items)
+        yield from (item.symbol for item in suppressed.items)
+
+
+def _structural_symbols(facts: AnalysisFacts) -> Iterator[SymbolId]:
     for structural in facts.structural_groups:
-        symbols.update(item.symbol for item in structural.occurrences)
-    symbols.update(row.symbol for row in facts.dead_symbol_groups)
-    symbols.update(row.symbol for row in facts.unreachable_statement_groups)
-    symbols.update(row.symbol for row in facts.complexity_hotspots)
-    symbols.update(row.symbol for row in facts.coupling_hotspots)
-    symbols.update(row.symbol for row in facts.cohesion_hotspots)
-    symbols.update(row.symbol for row in facts.coverage_units)
-    return symbols
+        yield from (item.symbol for item in structural.occurrences)
 
 
-def projected_finding_groups(model: CanonicalModel) -> dict[str, list[_Group]]:
-    """Every published family's group skeletons, keyed by family, each
-    family's list in a total ANALYSIS order (identity, then the items) —
-    never the document's priority order, which is evaluation."""
+def _dead_code_symbols(facts: AnalysisFacts) -> Iterator[SymbolId]:
+    yield from (row.symbol for row in facts.dead_symbol_groups)
+    yield from (row.symbol for row in facts.unreachable_statement_groups)
+
+
+def _design_symbols(facts: AnalysisFacts) -> Iterator[SymbolId]:
+    yield from (row.symbol for row in facts.complexity_hotspots)
+    yield from (row.symbol for row in facts.coupling_hotspots)
+    yield from (row.symbol for row in facts.cohesion_hotspots)
+    yield from (row.symbol for row in facts.coverage_units)
+
+
+#: The symbols each family's site-keyed skeletons name (the clone family's
+#: include its suppressed population).  The authority family keys its own
+#: sites (``authority_projection``), so it names none here.
+_FAMILY_SYMBOLS: Final[Mapping[str, Callable[[AnalysisFacts], Iterator[SymbolId]]]] = {
+    FAMILY_CLONE: _clone_symbols,
+    FAMILY_STRUCTURAL: _structural_symbols,
+    FAMILY_DEAD_CODE: _dead_code_symbols,
+    FAMILY_DESIGN: _design_symbols,
+}
+
+
+def _symbols_of(
+    facts: AnalysisFacts, families: Collection[str] = PROJECTED_FAMILIES
+) -> set[SymbolId]:
+    """The symbols the site-keyed skeletons of ``families`` name."""
+    return {
+        symbol
+        for family, symbols in _FAMILY_SYMBOLS.items()
+        if family in families
+        for symbol in symbols(facts)
+    }
+
+
+def projected_family_groups(
+    model: CanonicalModel, families: Collection[str]
+) -> dict[str, list[_Group]]:
+    """The group skeletons of the named published families only, keyed and
+    ordered as :func:`projected_finding_groups` keys and orders them -- and
+    reading only the rows those families are built from, so a bounded model
+    that does not hold another family's rows can still answer for these.
+
+    A group's legacy key depends on its own symbol and the FILE-MODULE
+    relation alone, so a family's skeletons are the same bytes whichever
+    other families are projected beside it.
+    """
     facts = model.facts.analysis
-    legacy = legacy_symbol_keys(_symbols_of(facts), model.file_modules)
+    legacy = legacy_symbol_keys(_symbols_of(facts, families), model.file_modules)
     file_of_module = {relation.module: relation.file for relation in model.file_modules}
-    families: dict[str, list[_Group]] = {
-        FAMILY_CLONE: clone_group_skeletons(facts.clone_groups, legacy),
-        FAMILY_STRUCTURAL: structural_group_skeletons(facts.structural_groups, legacy),
-        FAMILY_DEAD_CODE: [
+    builders: dict[str, Callable[[], list[_Group]]] = {
+        FAMILY_CLONE: lambda: clone_group_skeletons(facts.clone_groups, legacy),
+        FAMILY_STRUCTURAL: lambda: structural_group_skeletons(
+            facts.structural_groups, legacy
+        ),
+        FAMILY_DEAD_CODE: lambda: [
             *dead_symbol_group_skeletons(facts.dead_symbol_groups, legacy),
             *unreachable_statement_skeletons(
                 facts.unreachable_statement_groups, legacy
             ),
         ],
-        FAMILY_DESIGN: [
+        FAMILY_DESIGN: lambda: [
             *complexity_hotspot_skeletons(facts.complexity_hotspots, legacy),
             *coupling_hotspot_skeletons(facts.coupling_hotspots, legacy),
             *cohesion_hotspot_skeletons(facts.cohesion_hotspots, legacy),
             *dependency_cycle_skeletons(facts.dependency_cycles, file_of_module),
             *coverage_group_skeletons(facts, legacy),
         ],
-        FAMILY_AUTHORITY: authority_group_skeletons(model),
+        FAMILY_AUTHORITY: lambda: authority_group_skeletons(model),
     }
     return {
-        family: sorted(groups, key=group_order) for family, groups in families.items()
+        family: sorted(build(), key=group_order)
+        for family, build in builders.items()
+        if family in families
     }
+
+
+#: The projections of the read in progress, when its reader opened one
+#: (:func:`projected_once`): each model projected, held beside its groups so
+#: the identity it is found by cannot be handed to another model.
+_PROJECTED_IN_READ: ContextVar[
+    list[tuple[CanonicalModel, dict[str, list[_Group]]]] | None
+] = ContextVar("projected_finding_groups_in_read", default=None)
+
+
+@contextmanager
+def projected_once() -> Iterator[None]:
+    """One read's scope: inside it, :func:`projected_finding_groups` projects
+    each model once and hands every later caller the same groups.
+
+    A reading arranges several owners over one model -- the run summary's
+    finding counts, novelty counts, new findings by source kind, coverage
+    block and dependency comparison terms each ask for the groups -- and
+    the groups are a pure function of the model.  The groups are shared,
+    never copied: their callers read them and build their own answers.
+    """
+    token = _PROJECTED_IN_READ.set([])
+    try:
+        yield
+    finally:
+        _PROJECTED_IN_READ.reset(token)
+
+
+def projected_finding_groups(model: CanonicalModel) -> dict[str, list[_Group]]:
+    """Every published family's group skeletons, keyed by family, each
+    family's list in a total ANALYSIS order (identity, then the items) —
+    never the document's priority order, which is evaluation.  Projected
+    once per model inside a read's :func:`projected_once` scope."""
+    held = _PROJECTED_IN_READ.get()
+    if held is None:
+        return projected_family_groups(model, PROJECTED_FAMILIES)
+    return _projected_in_read(held, model)
+
+
+def _projected_in_read(
+    held: list[tuple[CanonicalModel, dict[str, list[_Group]]]], model: CanonicalModel
+) -> dict[str, list[_Group]]:
+    """The groups this read already projected for ``model``, else projected
+    now and held for the rest of the read."""
+    for projected, groups in held:
+        if projected is model:
+            return groups
+    groups = projected_family_groups(model, PROJECTED_FAMILIES)
+    held.append((model, groups))
+    return groups
 
 
 def suppressed_clone_skeletons(model: CanonicalModel) -> list[_Group]:
@@ -715,6 +827,7 @@ def group_order(group: Mapping[str, object]) -> tuple[str, str]:
 __all__ = [
     "CLONE_FACT_KEYS",
     "PROJECTED_FAMILIES",
+    "PROJECTED_FAMILY_ID_NAMESPACES",
     "SITE_ITEM_KEYS",
     "UNPROJECTED_GROUP_KEYS",
     "authority_group_skeletons",
@@ -726,7 +839,9 @@ __all__ = [
     "dead_symbol_group_skeletons",
     "dependency_cycle_skeletons",
     "group_order",
+    "projected_family_groups",
     "projected_finding_groups",
+    "projected_once",
     "structural_group_skeletons",
     "suppressed_clone_group_skeletons",
     "suppressed_clone_skeletons",

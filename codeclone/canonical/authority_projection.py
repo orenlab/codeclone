@@ -576,24 +576,39 @@ def _violation_document_order(row: Mapping[str, object]) -> tuple[object, ...]:
     )
 
 
+def _violation_parties(violations: Iterable[ViolationRow]) -> set[SymbolId]:
+    """Every symbol a violation row names: its sink, its owner, its
+    producers, and the targets of its producer roots."""
+    parties: set[SymbolId] = set()
+    for row in violations:
+        parties.update((row.sink_identity, row.canonical_owner, *row.producer_set))
+        parties.update(
+            root.target for root in row.root_set if isinstance(root, ProducerRoot)
+        )
+    return parties
+
+
 def violation_projection_rows(model: CanonicalModel) -> tuple[dict[str, object], ...]:
-    """Rebuild the published violation rows from canonical facts alone."""
+    """Rebuild the published violation rows from canonical facts alone.
+
+    A run that holds no violation row publishes none, and its authority
+    graph is not read: the graph settles the conclusions of the rows, and
+    there is no row.  The answer is the ``()`` the rebuild below gives for
+    an empty family -- whose only other effect, the legacy keys of the
+    graph's producer roots, can refuse only for a file the FILE-MODULE
+    relation maps to two modules, which no producer writes (both build the
+    relation from a path-keyed mapping).  A serving reading of a run that
+    holds no violation row therefore never reads the graph
+    (``canonical.serving``).
+    """
 
     facts = model.facts.analysis
+    if not facts.violations:
+        return ()
     graph = _AuthorityGraphView(model)
-    symbols = {
-        symbol
-        for row in facts.violations
-        for symbol in (row.sink_identity, row.canonical_owner, *row.producer_set)
-    }
-    roots = {
-        root.target
-        for row in facts.violations
-        for root in row.root_set
-        if isinstance(root, ProducerRoot)
-    }
     legacy = legacy_symbol_keys(
-        symbols | roots | graph.producer_root_targets(), model.file_modules
+        _violation_parties(facts.violations) | graph.producer_root_targets(),
+        model.file_modules,
     )
     return tuple(
         sorted(

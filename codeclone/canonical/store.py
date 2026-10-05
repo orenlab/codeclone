@@ -3632,8 +3632,90 @@ def _scan_run_family(
         object_ids.append(stored_id)
 
 
+@dataclass(frozen=True, slots=True)
+class ReadWhen:
+    """A read condition of a bounded read: ``families`` are read only when
+    the run holds at least one row of ``decider``.
+
+    The condition is a fact of the run being read, never of the reader's
+    memory: ``decider`` is itself one of the families the read names, read
+    first and in the same transaction, so what the read decides to read is
+    decided by the rows it proves.  A family a condition did not read is a
+    typed absence like every other unread family -- a projection that
+    reaches it refuses, it never reads "empty".
+    """
+
+    decider: _FamilyEntry
+    families: tuple[_FamilyEntry, ...]
+
+
+def _refuse_malformed_conditions(
+    names: frozenset[str], conditions: tuple[ReadWhen, ...]
+) -> None:
+    """Refuse, before the store is touched, conditions that cannot extend a
+    read of ``names``: a declaration error, never a stored fact."""
+    refusal = _conditions_refusal(names, conditions)
+    if refusal:
+        raise ValueError(refusal)
+
+
+def _conditions_refusal(names: frozenset[str], conditions: tuple[ReadWhen, ...]) -> str:
+    """Why ``conditions`` cannot extend a read of ``names``, or ``""``."""
+    undecided = sorted(
+        condition.decider.family
+        for condition in conditions
+        if condition.decider.family not in names
+    )
+    if undecided:
+        return (
+            "a read condition is decided by a family the read does not name: "
+            + ", ".join(undecided)
+        )
+    conditional = [
+        entry.family for condition in conditions for entry in condition.families
+    ]
+    twice = sorted(
+        {
+            family
+            for family in conditional
+            if family in names or conditional.count(family) > 1
+        }
+    )
+    if twice:
+        return "a read condition reads a family the read reads already: " + ", ".join(
+            twice
+        )
+    return ""
+
+
+def _scan_met_conditions(
+    connection: sqlite3.Connection,
+    run: tuple[int, str],
+    conditions: tuple[ReadWhen, ...],
+    object_ids: list[str],
+    collected: dict[str, list[object]],
+) -> frozenset[str]:
+    """Scan the families of every condition whose decider -- already read
+    into ``collected`` -- holds a row of the run; the families scanned."""
+    run_pk, namespace = run
+    scanned: set[str] = set()
+    for condition in conditions:
+        if not collected.get(condition.decider.family):
+            continue
+        for entry in condition.families:
+            _scan_run_family(
+                connection, run_pk, namespace, entry.family, object_ids, collected
+            )
+            scanned.add(entry.family)
+    return frozenset(scanned)
+
+
 def read_named_families(
-    store: RunStore, run_id: str, families: Iterable[_FamilyEntry]
+    store: RunStore,
+    run_id: str,
+    families: Iterable[_FamilyEntry],
+    *,
+    read_when: Iterable[ReadWhen] = (),
 ) -> CanonicalModel:
     """The NAMED families of ONE published run, as a model.
 
@@ -3658,8 +3740,18 @@ def read_named_families(
     One explicit read transaction, as ``read_family`` holds one: a collector
     committing between two family scans would otherwise turn a deleted run
     into an empty family.
+
+    ``read_when`` adds the families a condition names (:class:`ReadWhen`):
+    every named family is read first, then each condition, in its order,
+    reads its families when its decider -- a named family -- holds a row of
+    this run.  Each family is read at most once: a condition whose decider
+    the read does not name, or that reads a family the read already names
+    or another condition reads, is a declaration error, refused before the
+    store is touched (:func:`_conditions_refusal`).
     """
     names = frozenset(entry.family for entry in families)
+    conditions = tuple(read_when)
+    _refuse_malformed_conditions(names, conditions)
     connection = store._connection
     with _typed_sqlite_faults(store._path):
         cursor = connection.cursor()
@@ -3674,7 +3766,10 @@ def read_named_families(
                 _scan_run_family(
                     connection, run_pk, namespace, family, object_ids, collected
                 )
-            model = _collected_model(collected, names)
+            loaded = names | _scan_met_conditions(
+                connection, (run_pk, namespace), conditions, object_ids, collected
+            )
+            model = _collected_model(collected, loaded)
             cursor.execute("COMMIT")
         except BaseException:
             cursor.execute("ROLLBACK")
@@ -5159,6 +5254,7 @@ __all__ = [
     "HeadState",
     "LeaseGrant",
     "PublishReceipt",
+    "ReadWhen",
     "RunReportEdge",
     "RunStore",
     "RunStoreGcJob",

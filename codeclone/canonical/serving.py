@@ -105,6 +105,7 @@ from codeclone.canonical.evaluation_projection import (
 from codeclone.canonical.finding_projection import (
     PROJECTED_FAMILIES,
     projected_finding_groups,
+    projected_once,
 )
 from codeclone.canonical.identity import (
     FileId,
@@ -166,6 +167,7 @@ from codeclone.canonical.store import (
     FAMILY_UNIT_SPAN,
     FAMILY_UNREACHABLE_STATEMENT_GROUP,
     FAMILY_VIOLATION,
+    ReadWhen,
     RunStore,
     read_named_families,
 )
@@ -581,30 +583,56 @@ def run_summary_from_model(model: CanonicalModel, *, run_id: str) -> ServedRunSu
 
     The comparison fields of ``health`` and ``diff`` state a number only
     for a comparison the stored run made (ruling 2026-10-03, one owner:
-    ``comparison_projection.answered_if_compared``)."""
-    mode = analysis_mode(model)
-    facts = model.facts.comparison
-    state = stored_comparison_state(model)
-    return ServedRunSummary(
-        run_id=run_id,
-        mode=mode,
-        baseline=baseline_state(facts),
-        metrics_baseline=metrics_baseline_state(facts),
-        inventory=inventory(model),
-        health=answered_if_compared(SUMMARY_HEALTH_BLOCK, health_payload(model), state),
-        findings=_findings_block(model),
-        diff=answered_if_compared(SUMMARY_DIFF_BLOCK, _diff_block(model), state),
-        analysis_profile=analysis_profile(model),
-        dead_code=dead_code(model),
-        coverage_join=coverage_join(model),
-        security_surfaces=_security_block(model, mode),
-    )
+    ``comparison_projection.answered_if_compared``).  The finding groups the
+    blocks are counted over are projected once for the whole arrangement
+    (``finding_projection.projected_once``)."""
+    with projected_once():
+        mode = analysis_mode(model)
+        facts = model.facts.comparison
+        state = stored_comparison_state(model)
+        return ServedRunSummary(
+            run_id=run_id,
+            mode=mode,
+            baseline=baseline_state(facts),
+            metrics_baseline=metrics_baseline_state(facts),
+            inventory=inventory(model),
+            health=answered_if_compared(
+                SUMMARY_HEALTH_BLOCK, health_payload(model), state
+            ),
+            findings=_findings_block(model),
+            diff=answered_if_compared(SUMMARY_DIFF_BLOCK, _diff_block(model), state),
+            analysis_profile=analysis_profile(model),
+            dead_code=dead_code(model),
+            coverage_join=coverage_join(model),
+            security_surfaces=_security_block(model, mode),
+        )
 
 
-#: The families the run summary's projections read -- every one, and none
-#: they could do without (``tests/test_run_summary_declared_families.py``).
-#: Measured 2026-10-03 on the sixteen served populations, flask and the
-#: self-repository: 32 of the store's 56 families.
+#: The authority graph settles the conclusions of the violation rows and of
+#: nothing else (``authority_projection.violation_projection_rows``): a
+#: reading that needs it reads it when the run holds a violation row, and a
+#: run that holds none -- the self-repository: 0 rows, against 49 361 graph
+#: rows and 60-75 % of every store answer (serving-cost audit, 2026-10-05) --
+#: never pays for it.
+AUTHORITY_GRAPH_WHEN_VIOLATIONS: Final = ReadWhen(
+    decider=FAMILY_VIOLATION, families=(FAMILY_GRAPH_NODE, FAMILY_SEMANTIC_EDGE)
+)
+#: The risk observations state the complexity of a coverage group's unit
+#: (``finding_projection.coverage_group_skeletons``), which is the only use
+#: the run summary and the blast radius have for them: they read them when
+#: the run holds a coverage join.
+RISK_WHEN_COVERAGE_JOIN: Final = ReadWhen(
+    decider=FAMILY_COVERAGE_JOIN, families=(FAMILY_RISK_OBSERVATION,)
+)
+
+#: The families the run summary's projections read on every run -- every
+#: one, and none they could do without -- and the conditions under which
+#: they read three more (``tests/test_run_summary_declared_families.py``,
+#: per branch of each condition).  Measured 2026-10-03 on the sixteen served
+#: populations, flask and the self-repository (32 of the store's 56
+#: families); the two comparison-state inputs (``disabled_capability``,
+#: ``lane_trust``) are read on every run; the authority graph and the risk
+#: observations moved behind their conditions 2026-10-05.
 RUN_SUMMARY_FAMILIES: Final = (
     FAMILY_ADOPTION_DELTA,
     FAMILY_ANALYSIS_POPULATION,
@@ -627,19 +655,21 @@ RUN_SUMMARY_FAMILIES: Final = (
     FAMILY_DEPENDENCY_CYCLE_NOVELTY,
     FAMILY_DISABLED_CAPABILITY,
     FAMILY_FILE_MODULE,
-    FAMILY_GRAPH_NODE,
     FAMILY_HEALTH_DELTA,
     FAMILY_HEALTH_RESULT,
     FAMILY_LANE_TRUST,
     FAMILY_METRICS_BASELINE_WITNESS,
-    FAMILY_RISK_OBSERVATION,
     FAMILY_RUN_SCALAR,
     FAMILY_SECURITY_SURFACE,
-    FAMILY_SEMANTIC_EDGE,
     FAMILY_STRUCTURAL_GROUP,
     FAMILY_SUPPRESSED_CLONE_GROUP,
     FAMILY_UNREACHABLE_STATEMENT_GROUP,
     FAMILY_VIOLATION,
+)
+#: The run summary's read conditions, in the order they are decided.
+RUN_SUMMARY_READ_WHEN: Final = (
+    AUTHORITY_GRAPH_WHEN_VIOLATIONS,
+    RISK_WHEN_COVERAGE_JOIN,
 )
 
 
@@ -647,13 +677,17 @@ def read_served_run_summary(store: RunStore, run_id: str) -> ServedRunSummary:
     """Read the declared families of one published run and arrange its
     summary blocks.
 
-    Bounded: :data:`RUN_SUMMARY_FAMILIES` only, each row proven against its
-    content address; a projection that reached past the declaration would
-    refuse typed (``UnreadFamilyError``, a stored answer the projection
-    cannot express), never read an empty family.  A run the store does not
-    hold refuses typed (``UnknownRunError``), as every reading here does.
+    Bounded: :data:`RUN_SUMMARY_FAMILIES`, and the families of each of
+    :data:`RUN_SUMMARY_READ_WHEN` whose condition the run's own rows meet,
+    each row proven against its content address; a projection that reached
+    past the declaration would refuse typed (``UnreadFamilyError``, a stored
+    answer the projection cannot express), never read an empty family.  A
+    run the store does not hold refuses typed (``UnknownRunError``), as
+    every reading here does.
     """
-    model = read_named_families(store, run_id, RUN_SUMMARY_FAMILIES)
+    model = read_named_families(
+        store, run_id, RUN_SUMMARY_FAMILIES, read_when=RUN_SUMMARY_READ_WHEN
+    )
     return run_summary_from_model(model, run_id=run_id)
 
 
@@ -851,7 +885,13 @@ def _patch_gate_state(
 
 
 def patch_run_from_model(model: CanonicalModel, *, run_id: str) -> ServedPatchRun:
-    """Arrange one stored run's facts into what the patch contract reads."""
+    """Arrange one stored run's facts into what the patch contract reads;
+    the finding groups are projected once for the whole arrangement."""
+    with projected_once():
+        return _patch_run(model, run_id=run_id)
+
+
+def _patch_run(model: CanonicalModel, *, run_id: str) -> ServedPatchRun:
     heads = _Heads(
         {relation.file.path: relation.module.module for relation in model.file_modules}
     )
@@ -884,10 +924,14 @@ def patch_run_from_model(model: CanonicalModel, *, run_id: str) -> ServedPatchRu
     )
 
 
-#: The families :func:`read_served_patch_run` reads -- every one, and none
-#: it could do without (``tests/test_patch_contract_declared_families.py``).
-#: Measured 2026-10-03 on the sixteen served populations and the 25 runs of
-#: the patch-contract battery: 33 of the store's 56 families.
+#: The families :func:`read_served_patch_run` reads on every run -- every
+#: one, and none it could do without -- and the condition under which it
+#: reads the authority graph (``tests/test_patch_contract_declared_families
+#: .py``, per branch).  Measured 2026-10-03 on the sixteen served
+#: populations and the 25 runs of the patch-contract battery: 33 of the
+#: store's 56 families; the graph moved behind its condition 2026-10-05.
+#: The risk observations stay unconditional: the per-symbol complexity
+#: index and the complexity maximum are read off them on every run.
 PATCH_CONTRACT_FAMILIES: Final = (
     FAMILY_ADOPTION_COUNT,
     FAMILY_ADOPTION_DELTA,
@@ -912,36 +956,42 @@ PATCH_CONTRACT_FAMILIES: Final = (
     FAMILY_DEPENDENCY_CYCLE_NOVELTY,
     FAMILY_FILE_MODULE,
     FAMILY_FINDING_EVALUATION,
-    FAMILY_GRAPH_NODE,
     FAMILY_HEALTH_DELTA,
     FAMILY_HEALTH_RESULT,
     FAMILY_LANE_TRUST,
     FAMILY_RISK_OBSERVATION,
-    FAMILY_SEMANTIC_EDGE,
     FAMILY_STRUCTURAL_GROUP,
     FAMILY_SUPPRESSED_CLONE_GROUP,
     FAMILY_UNREACHABLE_STATEMENT_GROUP,
     FAMILY_VIOLATION,
 )
+#: The patch contract's read condition.
+PATCH_CONTRACT_READ_WHEN: Final = (AUTHORITY_GRAPH_WHEN_VIOLATIONS,)
 
 
 def read_served_patch_run(store: RunStore, run_id: str) -> ServedPatchRun:
     """Read the declared families of one published run and arrange what
     the patch contract reads of it.  Bounded, as every reading here is:
-    :data:`PATCH_CONTRACT_FAMILIES` only."""
-    model = read_named_families(store, run_id, PATCH_CONTRACT_FAMILIES)
+    :data:`PATCH_CONTRACT_FAMILIES`, and the authority graph when the run
+    holds a violation row (:data:`PATCH_CONTRACT_READ_WHEN`)."""
+    model = read_named_families(
+        store, run_id, PATCH_CONTRACT_FAMILIES, read_when=PATCH_CONTRACT_READ_WHEN
+    )
     return patch_run_from_model(model, run_id=run_id)
 
 
-#: The families :func:`read_served_blast_radius_facts` reads -- every one,
-#: and none it could do without (``tests/test_blast_radius_declared_families
-#: .py``).  Measured 2026-10-03 the way the run summary's were (every family,
-#: then each one taken away): 26 of the store's 56 on the nineteen served
-#: populations of consumer migration C7, flask and the self-repository.  The
-#: authority families (``graph_node``, ``semantic_edge``, ``violation``) are
-#: read because the one owner of the known-debt paths walks the whole
-#: published finding universe; ``risk_observation`` is reached only by a run
-#: that joined a coverage report.
+#: The families :func:`read_served_blast_radius_facts` reads on every run --
+#: every one, and none it could do without -- and the condition under which
+#: it reads the risk observations (``tests/test_blast_radius_declared_families
+#: .py``, per branch).  Measured 2026-10-03 the way the run summary's were
+#: (every family, then each one taken away): 26 of the store's 56 on the
+#: nineteen served populations of consumer migration C7, flask and the
+#: self-repository.  Since 2026-10-05 the one owner of the known-debt paths
+#: walks only the families a novelty row can name
+#: (``comparison_projection.NOVELTY_BEARING_FAMILIES``), so the authority
+#: families (``graph_node``, ``semantic_edge``, ``violation``) and the
+#: structural groups are no longer read at all, and ``risk_observation`` is
+#: read when the run joined a coverage report.
 BLAST_RADIUS_FAMILIES: Final = (
     FAMILY_CLONE_GROUP,
     FAMILY_CLONE_NOVELTY,
@@ -958,39 +1008,43 @@ BLAST_RADIUS_FAMILIES: Final = (
     FAMILY_DEPENDENCY_CYCLE_NOVELTY,
     FAMILY_DEPENDENCY_RELATION,
     FAMILY_FILE_MODULE,
-    FAMILY_GRAPH_NODE,
     FAMILY_IMPORT_OBSERVATION,
     FAMILY_OVERLOADED_MODULE,
-    FAMILY_RISK_OBSERVATION,
     FAMILY_SECURITY_SURFACE,
-    FAMILY_SEMANTIC_EDGE,
-    FAMILY_STRUCTURAL_GROUP,
     FAMILY_SUPPRESSED_CLONE_GROUP,
     FAMILY_UNIT_RISK_RESULT,
     FAMILY_UNREACHABLE_STATEMENT_GROUP,
-    FAMILY_VIOLATION,
 )
+#: The blast radius's read condition.
+BLAST_RADIUS_READ_WHEN: Final = (RISK_WHEN_COVERAGE_JOIN,)
 
 
 def read_served_blast_radius_facts(store: RunStore, run_id: str) -> BlastRadiusFacts:
     """Read the declared families of one published run and rebuild the facts
     its blast radius is computed from (consumer migration C7).
 
-    Bounded: :data:`BLAST_RADIUS_FAMILIES` only, through
+    Bounded: :data:`BLAST_RADIUS_FAMILIES`, and the risk observations when
+    the run holds a coverage join (:data:`BLAST_RADIUS_READ_WHEN`), through
     :func:`~codeclone.canonical.store.read_named_families`; the facts are
     rebuilt by their one owner,
     :func:`~codeclone.canonical.blast_radius_projection.blast_radius_facts_from_model`.
     A run the store does not hold refuses typed (``UnknownRunError``), and a
     projection reaching past the declaration refuses (``UnreadFamilyError``).
     """
-    model = read_named_families(store, run_id, BLAST_RADIUS_FAMILIES)
+    model = read_named_families(
+        store, run_id, BLAST_RADIUS_FAMILIES, read_when=BLAST_RADIUS_READ_WHEN
+    )
     return blast_radius_facts_from_model(model)
 
 
 __all__ = [
+    "AUTHORITY_GRAPH_WHEN_VIOLATIONS",
     "AUTHORITY_PRODUCER_FAMILY",
     "BLAST_RADIUS_FAMILIES",
+    "BLAST_RADIUS_READ_WHEN",
+    "RISK_WHEN_COVERAGE_JOIN",
     "RUN_SUMMARY_FAMILIES",
+    "RUN_SUMMARY_READ_WHEN",
     "SECURITY_SURFACE_COUNT_KEYS",
     "SERVED_AUTHORITY_CANDIDATE_FAMILIES",
     "SERVED_SLICE_FAMILIES",
@@ -1009,6 +1063,7 @@ __all__ = [
 __all__ += [
     "PATCH_CLONE_KINDS",
     "PATCH_CONTRACT_FAMILIES",
+    "PATCH_CONTRACT_READ_WHEN",
     "PATCH_METRIC_DIMENSIONS",
     "ServedPatchRun",
     "patch_run_from_model",

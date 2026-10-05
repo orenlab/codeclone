@@ -58,6 +58,7 @@ from codeclone.canonical.comparison_rows import (
     AVAILABILITY_COMPARED,
     DELTA_FAMILY_TERMS,
     LANE_TRUSTED,
+    NOVELTY_FAMILY_ID_PREFIXES,
     NOVELTY_KNOWN,
     NOVELTY_NEW,
     NOVELTY_UNAVAILABLE,
@@ -71,6 +72,8 @@ from codeclone.canonical.comparison_state import (
 )
 from codeclone.canonical.finding_projection import (
     PROJECTED_FAMILIES,
+    PROJECTED_FAMILY_ID_NAMESPACES,
+    projected_family_groups,
     projected_finding_groups,
 )
 from codeclone.canonical.model import (
@@ -254,16 +257,57 @@ def new_finding_paths(model: CanonicalModel) -> dict[str, tuple[str, ...]]:
     }
 
 
+def novelty_bearing_families(
+    prefixes: Mapping[str, tuple[str, ...]] = NOVELTY_FAMILY_ID_PREFIXES,
+) -> tuple[str, ...]:
+    """The published families a novelty row can carry an id of, in the
+    document's family order.
+
+    Derived, never listed: a family's group ids all start with its id
+    namespace (``finding_projection.PROJECTED_FAMILY_ID_NAMESPACES``, read
+    off the one id owner), and every stored novelty row's id starts with
+    one of its novelty family's ``prefixes`` -- the model law
+    (``model._prove_comparison_keys``) that ``normalize`` holds and every
+    publication runs before it writes.  Two such ids can be equal only when
+    one prefix starts the other; a family whose namespace no prefix starts,
+    and that starts no prefix, holds no group a novelty row can name, so
+    every one of its groups is ``unavailable`` on every published run.
+    """
+    every_prefix = tuple(chain.from_iterable(prefixes.values()))
+    return tuple(
+        family
+        for family in PROJECTED_FAMILIES
+        if any(
+            PROJECTED_FAMILY_ID_NAMESPACES[family].startswith(prefix)
+            or prefix.startswith(PROJECTED_FAMILY_ID_NAMESPACES[family])
+            for prefix in every_prefix
+        )
+    )
+
+
+#: The published families a novelty row can name: the only ones a finding
+#: the comparison called ``known`` -- or ``new`` -- can belong to.
+NOVELTY_BEARING_FAMILIES: Final[tuple[str, ...]] = novelty_bearing_families()
+
+
 def known_debt_paths(model: CanonicalModel) -> tuple[str, ...]:
     """Every path a finding the comparison called ``known`` sits in — the
     set the blast radius's ``known_baseline_debt`` review context is cut
-    from (the zone and the origin are the blast radius's own)."""
+    from (the zone and the origin are the blast radius's own).
+
+    Only :data:`NOVELTY_BEARING_FAMILIES` are walked: a group of any other
+    family is ``unavailable`` by construction, so it adds no path, and the
+    rows only it is built from -- the authority graph and its violation
+    rows, the structural groups -- are never needed for this answer.
+    """
+    novelty = _novelty_by_id(model.facts.comparison)
+    groups = projected_family_groups(model, NOVELTY_BEARING_FAMILIES)
     return tuple(
         sorted(
             {
                 path
-                for group, word in _worded_groups(model)
-                if word == NOVELTY_KNOWN
+                for group in chain.from_iterable(groups.values())
+                if novelty.get(str(group["id"]), NOVELTY_UNAVAILABLE) == NOVELTY_KNOWN
                 for path in _group_paths(group)
             }
         )
@@ -453,6 +497,7 @@ def answered_if_compared(
 
 __all__ = [
     "DIFF_DELTA_KEYS",
+    "NOVELTY_BEARING_FAMILIES",
     "SOURCE_KIND_BREAKDOWN",
     "SUMMARY_COMPARISON_FIELDS",
     "SUMMARY_DIFF_BLOCK",
@@ -468,6 +513,7 @@ __all__ = [
     "new_by_source_kind",
     "new_clone_groups",
     "new_finding_paths",
+    "novelty_bearing_families",
     "novelty_counts",
     "stored_comparison_state",
 ]
