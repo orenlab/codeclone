@@ -58,6 +58,7 @@ from ..canonical.finding_projection import (
 )
 from ..canonical.identity import SymbolId
 from ..canonical.model import AnalysisFacts, ComparisonFacts, FileModuleRelation
+from ..contracts.comparison_state import COMPARISON_CLONES, COMPARISON_LANES
 from ..findings.ids import clone_group_id
 from ..report.document._common import (
     ENTITY_NOVELTY_DOMAIN_COMPLEXITY,
@@ -69,6 +70,7 @@ from ..report.document._common import (
     lane_is_trusted,
 )
 from ..utils.coerce import as_int, as_mapping, as_sequence
+from .comparison_state import compared_clone_lanes
 
 if TYPE_CHECKING:
     from ..models import TrustVector
@@ -165,22 +167,24 @@ def _metric_summary(inputs: ComparisonInputs, lane: str) -> Mapping[str, object]
     return as_mapping(family.get("summary"))
 
 
-def _compared(inputs: ComparisonInputs, lane: str, *, lane_trusted: bool) -> bool:
-    """Whether this lane's comparison ran.
+def _compared_lanes(inputs: ComparisonInputs, *, trusted: set[str]) -> frozenset[str]:
+    """The lanes whose comparison ran.
 
-    A clone lane is read the way the document's novelty owner reads it: a
-    difference set under an UNTRUSTED lane is not a comparison.  That guard
-    is load-bearing, not cautious — measured 2026-09-26, the CLI hands
-    ``report`` its flattened sets (``set(comparison.new_func or ())``), so a
-    lane nothing compared arrives as "compared, nothing new"; the document
-    stays honest only because ``clone_novelty`` checks trust first, and the
-    store has to read it the same way.
+    A clone lane by the one clone rule the producer's state is decided by
+    (``core.comparison_state.compared_clone_lanes``): a difference set
+    under an UNTRUSTED lane is not a comparison.  A metric lane by its
+    family's ``baseline_diff_available``, which is the producer's ``made``.
     """
-    if lane == "clones.functions":
-        return lane_trusted and inputs.new_func is not None
-    if lane == "clones.blocks":
-        return lane_trusted and inputs.new_block is not None
-    return bool(_metric_summary(inputs, lane).get("baseline_diff_available"))
+    clone_lanes = COMPARISON_LANES[COMPARISON_CLONES]
+    metric_lanes = frozenset(
+        lane
+        for lane in COMPARED_LANES
+        if lane not in clone_lanes
+        and _metric_summary(inputs, lane).get("baseline_diff_available")
+    )
+    return metric_lanes | compared_clone_lanes(
+        trusted=trusted, new_func=inputs.new_func, new_block=inputs.new_block
+    )
 
 
 def _availability(
@@ -190,12 +194,13 @@ def _availability(
     trusted: set[str],
     disabled: set[str],
 ) -> frozenset[ComparisonAvailabilityRow]:
+    compared = _compared_lanes(inputs, trusted=trusted)
     return frozenset(
         ComparisonAvailabilityRow(
             **identity,
             lane=lane,
             availability=comparison_availability_state(
-                compared=_compared(inputs, lane, lane_trusted=lane in trusted),
+                compared=lane in compared,
                 lane_trusted=lane in trusted,
             ),
         )

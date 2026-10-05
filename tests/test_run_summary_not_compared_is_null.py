@@ -108,6 +108,10 @@ STATE_TABLE: dict[str, tuple[_Cell, ...]] = {
     # the API comparison runs over an observed empty universe and measures
     # every baseline symbol removed.
     "trusted_complete_empty": (0, None, None, None, None, 29, 0, 0, None),
+    # The block clone lane under an older algorithm revision: the clone
+    # comparison runs over the function lane alone, health (which reads both
+    # clone lanes) is withheld, every other comparison runs.
+    "older_revision_block_clone_lane": (2, None, -97, -43, 16, 2, 1, 38, None),
 }
 
 

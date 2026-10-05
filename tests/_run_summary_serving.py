@@ -33,6 +33,11 @@ health score's measure zero), and the trusted tree with every Python file
 unparsable (``unmeasured``) or removed (``complete_empty``).  They are
 registered apart (``COMPARISON_STATE_POPULATIONS``), so a consumer that
 counts ``SUMMARY_POPULATIONS`` as its own population keeps the sixteen.
+A fourth joined them (2026-10-05, acceptance of the normalized comparison
+state): the trusted tree with the block clone lane under an older algorithm
+revision, the one population whose clone comparison ran over exactly one of
+its two lanes -- without it a reader that required both lanes and a reader
+that required either agree on every population.
 
 This module is a helper, not a test module, so it may read the canonical
 store beside the surface (the Phase 39S test-import law binds
@@ -57,17 +62,22 @@ from codeclone.api.run_store_serving import (
     read_run_store_summary,
 )
 from codeclone.canonical import store as store_module
+from codeclone.canonical.comparison_state import ComparisonState
 from codeclone.canonical.model import CanonicalModel
 from codeclone.canonical.serving import (
     read_served_blast_radius_facts,
     read_served_patch_run,
     read_served_run_summary,
 )
+from codeclone.core.comparison_state import run_comparison_state
 from codeclone.surfaces.mcp._run_store_serving import memory_run_summary
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests import conftest as corpora
-from tests.test_baseline_lane_degradation import downgrade_lane_payload_schema
+from tests.test_baseline_lane_degradation import (
+    downgrade_lane_payload_schema,
+    retag_lane_descriptor,
+)
 
 #: The population, by name, and the publication each one states.
 SUMMARY_POPULATIONS: dict[str, str] = {
@@ -98,6 +108,7 @@ COMPARISON_STATE_POPULATIONS: dict[str, str] = {
     "trusted_unchanged": "published",
     "trusted_unmeasured": "head_withheld",
     "trusted_complete_empty": "published",
+    "older_revision_block_clone_lane": "published",
 }
 
 #: Every population the run summary's own pins hold.
@@ -133,6 +144,53 @@ class SummaryPopulation:
         the serving switch named (``None``: the switch unset)."""
         with serving_environment(self.store_path, serve_from=serve_from):
             return self.service.get_run_summary(root=str(self.root))
+
+
+@contextmanager
+def produced_states() -> Iterator[list[ComparisonState]]:
+    """Every state the producer builds while the context lasts, in order:
+    the one producer, wrapped where the report reads it."""
+    produced: list[ComparisonState] = []
+
+    def recording(**inputs: Any) -> ComparisonState:
+        state = run_comparison_state(**inputs)
+        produced.append(state)
+        return state
+
+    patch = pytest.MonkeyPatch()
+    try:
+        patch.setattr("codeclone.core.reporting.run_comparison_state", recording)
+        yield produced
+    finally:
+        patch.undo()
+
+
+#: Every comparison state the producer built during each population's last
+#: analysis, by the population's own store path (:func:`produced_by`).
+_PRODUCED: dict[Path, tuple[ComparisonState, ...]] = {}
+
+
+def _analysed(
+    service: CodeCloneMCPService,
+    request: MCPAnalysisRequest,
+    *,
+    analyses: int,
+    store_path: Path,
+) -> None:
+    """Analyse ``analyses`` times, keeping the states the producer built
+    during the last analysis -- the one the execution's record is."""
+    for _ in range(analyses):
+        with produced_states() as produced:
+            service.analyze_repository(request)
+        _PRODUCED[store_path] = tuple(produced)
+
+
+def produced_by(population: SummaryPopulation) -> tuple[ComparisonState, ...]:
+    """Every comparison state the producer
+    (``core.comparison_state.run_comparison_state``) built during the
+    population's last analysis -- empty when the metrics never ran -- so a
+    pin can hold the producer's own answer, not only its readers'."""
+    return _PRODUCED[population.store_path]
 
 
 @contextmanager
@@ -253,6 +311,7 @@ class SummaryPopulations:
             "trusted_unchanged": self._unchanged,
             "trusted_unmeasured": lambda: self._trusted_unread(unparsable=True),
             "trusted_complete_empty": lambda: self._trusted_unread(unparsable=False),
+            "older_revision_block_clone_lane": self._older_revision_block_clone_lane,
         }
         build = builders.get(name)
         if build is None:
@@ -340,6 +399,19 @@ class SummaryPopulations:
                 path.unlink()
         return root, {"api_surface": True}, 1
 
+    def _older_revision_block_clone_lane(self) -> tuple[Path, dict[str, object], int]:
+        """The trusted tree with the block clone lane recorded under an older
+        algorithm revision: exactly ONE clone lane is compared (the function
+        lane), so the clone comparison ran over one lane of its two -- and
+        health, which reads both, is withheld."""
+        root = self._comparison_tree("older_revision_block_clone_lane", "trusted")
+        retag_lane_descriptor(
+            root / "codeclone.baseline.json",
+            lane_name="clones.blocks",
+            algorithm_revision="2",
+        )
+        return root, {"api_surface": True}, 1
+
     def _coverage(self, *, valid: bool) -> tuple[Path, dict[str, object], int]:
         """The trusted comparison tree joined with a Cobertura report that
         covers one of its two complexity hotspots a quarter and omits the
@@ -359,8 +431,7 @@ class SummaryPopulations:
         store_path = self._base / f"{name}.sqlite3"
         service = CodeCloneMCPService(history_limit=4)
         with serving_environment(store_path, serve_from=None):
-            for _ in range(analyses):
-                service.analyze_repository(request)
+            _analysed(service, request, analyses=analyses, store_path=store_path)
         population = SummaryPopulation(
             name=name, root=root, store_path=store_path, service=service
         )
@@ -616,6 +687,8 @@ __all__ = [
     "SummaryPopulation",
     "SummaryPopulations",
     "fresh_served_facts",
+    "produced_by",
+    "produced_states",
     "serving_environment",
     "shared_populations",
     "store_row_replaced",

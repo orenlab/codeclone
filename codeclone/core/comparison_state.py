@@ -15,15 +15,19 @@ The report document and the run store are written from its answer
 (``core.reporting``), and every reader reads that answer back
 (``contracts.comparison_state``) instead of deciding again.
 
-The decision for each comparison, in the words its old owners used:
+The decision for each comparison, in the words its old owners used — and
+every one of them over trusted lanes only: ``unavailable`` is the owner's
+word for a comparison whose lane is not trusted, so no comparison is
+stated against an untrusted lane (measured 2026-10-05: a run against the
+container of another scope, every lane ``unavailable``, stated the adoption
+and API deltas against it; an adoption lane recorded under an older schema
+stated three measured zeros):
 
 * a set-difference family (complexity, coupling, dependencies, dead code)
-  ran when every lane it reads is trusted and the current universe was
-  observed — on an unobserved universe the current term is empty by
-  construction, and "0 new" would state a comparison whose current half
-  never existed;
-* health ran when its seven input lanes are trusted and the run published
-  a verdict;
+  ran when the current universe was observed — on an unobserved universe
+  the current term is empty by construction, and "0 new" would state a
+  comparison whose current half never existed;
+* health ran when the run published a verdict;
 * adoption ran when the comparison context found a baseline term and the
   health verdict was not withheld (its permilles are ratios over the same
   population);
@@ -33,8 +37,9 @@ The decision for each comparison, in the words its old owners used:
   against nothing, and the "removed" changes it counted are not facts
   (measured 2026-10-05: ``{enabled: false, baseline_diff_available: true,
   breaking: 29}``);
-* the clone comparison ran for a lane that is trusted and whose difference
-  set exists.
+* the clone comparison ran over the lanes :func:`compared_clone_lanes`
+  names — the one rule the store's clone availability rows are written by
+  too (``core.comparison_snapshot``).
 
 A capability the run did not enable never ran, whatever else holds.
 """
@@ -124,6 +129,34 @@ def _values(diff: MetricsDiff | None) -> dict[str, dict[str, int]]:
     }
 
 
+def _clone_sets(
+    new_func: Collection[str] | None, new_block: Collection[str] | None
+) -> dict[str, Collection[str] | None]:
+    return {"clones.blocks": new_block, "clones.functions": new_func}
+
+
+def compared_clone_lanes(
+    *,
+    trusted: Collection[str],
+    new_func: Collection[str] | None,
+    new_block: Collection[str] | None,
+) -> frozenset[str]:
+    """The clone lanes whose comparison ran: trusted, with a difference set.
+
+    The one rule for both readings of the clone comparison -- the state's
+    clone result here and the store's per-lane availability rows
+    (``core.comparison_snapshot``).  The trust term is load-bearing, not
+    cautious: the CLI hands ``report`` flattened sets
+    (``set(comparison.new_func or ())``), so a lane nothing compared
+    arrives as "compared, nothing new" (measured 2026-09-26)."""
+    sets = _clone_sets(new_func, new_block)
+    return frozenset(
+        lane
+        for lane in COMPARISON_LANES[COMPARISON_CLONES]
+        if lane in trusted and sets[lane] is not None
+    )
+
+
 def _clone_results(
     *,
     trusted: frozenset[str],
@@ -131,17 +164,15 @@ def _clone_results(
     new_func: Collection[str] | None,
     new_block: Collection[str] | None,
 ) -> dict[ComparisonKey, ComparisonResult]:
-    """Read the way the store reads it: a difference set under an untrusted
-    lane is not a comparison (``core.comparison_snapshot._compared``)."""
+    """Either clone lane: the comparison ran over the lanes
+    :func:`compared_clone_lanes` names, and counts their new groups."""
     lanes = COMPARISON_LANES[COMPARISON_CLONES]
-    sets = {"clones.blocks": new_block, "clones.functions": new_func}
-    compared_sets = [
-        sets[lane] for lane in lanes if lane in trusted and sets[lane] is not None
-    ]
+    ran = compared_clone_lanes(trusted=trusted, new_func=new_func, new_block=new_block)
+    sets = _clone_sets(new_func, new_block)
     return comparison_results(
         COMPARISON_CLONES,
-        {TERM_NEW_GROUPS: sum(len(tuple(keys or ())) for keys in compared_sets)},
-        ran=bool(compared_sets),
+        {TERM_NEW_GROUPS: sum(len(tuple(sets[lane] or ())) for lane in sorted(ran))},
+        ran=bool(ran),
         enabled=not enabled.isdisjoint(lanes),
         lanes_trusted=not trusted.isdisjoint(lanes),
     )
@@ -171,35 +202,27 @@ def run_comparison_state(
     )
     diffed = metrics_diff is not None and metrics_payload is not None
     ran = {
-        COMPARISON_HEALTH: diffed
-        and trusted.issuperset(COMPARISON_LANES[COMPARISON_HEALTH])
-        and not health_withheld,
-        COMPARISON_ADOPTION: diffed
-        and coverage_adoption_diff_available
-        and not health_withheld,
-        COMPARISON_API_SURFACE: diffed and api_surface_diff_available,
-        **{
-            comparison: diffed
-            and universe_observed
-            and trusted.issuperset(COMPARISON_LANES[comparison])
-            for comparison in _SET_DIFF_COMPARISONS
-        },
+        COMPARISON_HEALTH: not health_withheld,
+        COMPARISON_ADOPTION: coverage_adoption_diff_available and not health_withheld,
+        COMPARISON_API_SURFACE: api_surface_diff_available,
+        **dict.fromkeys(_SET_DIFF_COMPARISONS, universe_observed),
     }
     results = _clone_results(
         trusted=trusted, enabled=enabled, new_func=new_func, new_block=new_block
     )
     for comparison, made in ran.items():
         lanes = COMPARISON_LANES[comparison]
+        lanes_trusted = trusted.issuperset(lanes)
         results.update(
             comparison_results(
                 comparison,
                 values.get(comparison, {}),
-                ran=made,
+                ran=diffed and lanes_trusted and made,
                 enabled=enabled.issuperset(lanes),
-                lanes_trusted=trusted.issuperset(lanes),
+                lanes_trusted=lanes_trusted,
             )
         )
     return comparison_state(results)
 
 
-__all__ = ["run_comparison_state"]
+__all__ = ["compared_clone_lanes", "run_comparison_state"]

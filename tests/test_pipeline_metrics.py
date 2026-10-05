@@ -2020,11 +2020,36 @@ def _permille_diff(param: int, returns: int, docstring: int) -> MetricsDiff:
     )
 
 
+def _trusted_lanes(
+    *lanes: ObservationLaneName, untrusted: tuple[ObservationLaneName, ...] = ()
+) -> TrustVector:
+    """A root-verified trust vector over ``lanes``, the ``untrusted`` ones
+    recorded under an older algorithm revision."""
+
+    return TrustVector(
+        root_verified=True,
+        lanes=tuple(
+            LaneTrust(
+                name=lane,
+                status="unavailable" if lane in untrusted else "trusted",
+                reason="algorithm_revision" if lane in untrusted else "compatible",
+            )
+            for lane in lanes
+        ),
+    )
+
+
 def _adoption_comparison_published(
     project_metrics: ProjectMetrics,
     metrics_diff: MetricsDiff,
+    *,
+    context_available: bool = True,
+    untrusted: tuple[ObservationLaneName, ...] = (),
 ) -> dict[str, object]:
-    """One observation of what the report publishes for the adoption family."""
+    """One observation of what the report publishes for the adoption family,
+    under the comparison context's answer (``context_available``: the
+    baseline carries an adoption term) and the lanes the run does not
+    trust."""
 
     enriched = _metrics_for_report(
         analysis=AnalysisResult(
@@ -2051,8 +2076,9 @@ def _adoption_comparison_published(
             observation_bundle=TEST_OBSERVATION_BUNDLE,
         ),
         metrics_diff=metrics_diff,
-        coverage_adoption_diff_available=True,
+        coverage_adoption_diff_available=context_available,
         api_surface_diff_available=False,
+        baseline_trust=_trusted_lanes("adoption_counts", untrusted=untrusted),
     )
     assert enriched is not None
     summary = cast(
@@ -2117,6 +2143,52 @@ def test_metrics_for_report_keeps_adoption_comparison_on_a_measured_run() -> Non
         "param_delta": -250,
         "return_delta": 0,
         "docstring_delta": -333,
+    }
+
+
+def test_metrics_for_report_states_no_adoption_comparison_without_a_baseline_term() -> (
+    None
+):
+    """The comparison context's answer decides too: a baseline that carries
+    no adoption term was not compared, however trusted the lanes the run
+    reads are.  Measured 2026-10-05: a producer ignoring the context's
+    answer survived the whole suite -- no population had a metrics diff, a
+    published health verdict and no adoption term at once."""
+
+    published = _adoption_comparison_published(
+        _project_metrics_with_adoption_and_api(),
+        _permille_diff(-250, 0, -333),
+        context_available=False,
+    )
+
+    assert published == {
+        "baseline_diff_available": False,
+        "param_delta": 0,
+        "return_delta": 0,
+        "docstring_delta": 0,
+    }
+
+
+def test_metrics_for_report_states_no_adoption_comparison_over_an_untrusted_lane() -> (
+    None
+):
+    """A comparison reads its lane: an adoption lane the run does not trust
+    (here one recorded under an older algorithm revision) was not compared,
+    whatever the comparison context found.  Measured 2026-10-05: an
+    adoption lane under an older schema published three measured zeros, and
+    a container of another scope the deltas against it."""
+
+    published = _adoption_comparison_published(
+        _project_metrics_with_adoption_and_api(),
+        _permille_diff(-250, 0, -333),
+        untrusted=("adoption_counts",),
+    )
+
+    assert published == {
+        "baseline_diff_available": False,
+        "param_delta": 0,
+        "return_delta": 0,
+        "docstring_delta": 0,
     }
 
 
@@ -2200,6 +2272,7 @@ def _api_comparison_published(
         metrics_diff=comparison.metrics_diff,
         coverage_adoption_diff_available=False,
         api_surface_diff_available=comparison.api_surface_diff_available,
+        baseline_trust=_trusted_lanes("api_surface"),
     )
     assert enriched is not None
     api_surface = cast("dict[str, object]", enriched["api_surface"])

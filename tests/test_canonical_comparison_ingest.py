@@ -190,9 +190,11 @@ def test_a_foreign_container_leaves_every_lane_unavailable(
     comparison_runs: dict[str, ComparisonRun],
 ) -> None:
     """The container of another scope: every lane untrusted, every governed
-    finding unavailable — and, as the producer publishes it (measured, on
-    the desk), the CLI still calls the metrics baseline loaded and states the
-    adoption and API deltas against it."""
+    finding unavailable, and no comparison stated against it.  The CLI still
+    calls the metrics baseline loaded (the witness is the CLI's), but a
+    comparison reads its lanes, and none is trusted: until 2026-10-05 the
+    producer stated the adoption and API deltas against the foreign
+    container (``compared`` beside every lane ``unavailable``)."""
     house = comparison_runs["foreign_scope"].stored.facts.comparison
     witness = house.baseline_witness
     assert witness is not None
@@ -200,11 +202,10 @@ def test_a_foreign_container_leaves_every_lane_unavailable(
     assert {(row.status, row.reason) for row in house.lane_trust} == {
         ("unavailable", "baseline_scope_id")
     }
-    assert _availability(house) == {
-        **dict.fromkeys(_ALL_COMPARED, "unavailable"),
-        "adoption_counts": "compared",
-        "api_surface": "compared",
-    }
+    assert (_availability(house), _deltas(house)) == (
+        dict.fromkeys(_ALL_COMPARED, "unavailable"),
+        {"adoption_delta": {}, "api_surface_delta": {}},
+    )
     assert _novelty(house) == _LANE_UNAVAILABLE
 
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -32,21 +33,31 @@ from codeclone.canonical.comparison_state import (
     document_comparison_state,
     not_compared,
 )
+from codeclone.canonical.model import CanonicalModel
 from codeclone.canonical.store import RunStore
 from codeclone.contracts.comparison_state import (
     COMPARISON_API_SURFACE,
+    COMPARISON_CLONES,
     COMPARISON_HEALTH,
     COMPARISON_KEYS,
     COMPARISON_LANES,
     COMPARISON_TERMS,
+    DOCUMENT_FIELDS,
     NOT_COMPARED_DISABLED,
     NOT_COMPARED_NOT_RUN,
     NOT_COMPARED_UNAVAILABLE,
+    TERM_NEW_GROUPS,
     not_compared_reason,
 )
 from codeclone.report.gates.evaluator import HEALTH_INPUT_LANES
-from codeclone.utils.coerce import as_mapping
-from tests._run_summary_serving import RUN_SUMMARY_POPULATIONS, shared_populations
+from codeclone.utils.coerce import as_mapping, as_sequence
+from tests._run_summary_serving import (
+    RUN_SUMMARY_POPULATIONS,
+    SummaryPopulations,
+    produced_by,
+    shared_populations,
+)
+from tests.conftest import ComparisonRun
 
 # -- the carrier's own laws --------------------------------------------------------
 
@@ -146,7 +157,7 @@ def test_the_store_and_the_document_read_one_state_on_every_population(
         str, tuple[ComparisonState, ComparisonState, dict[str, object]]
     ],
 ) -> None:
-    """Every key, value and reason, on all nineteen populations -- and the
+    """Every key, value and reason, on every served population -- and the
     population distinguishes: every reason and both outcomes occur, and a
     comparison that ran and measured zero is among them."""
     assert {
@@ -167,6 +178,183 @@ def test_the_store_and_the_document_read_one_state_on_every_population(
         NOT_COMPARED_NOT_RUN,
         NOT_COMPARED_UNAVAILABLE,
     }, outcomes
+
+
+def test_the_producer_states_what_the_store_and_the_document_read(
+    tmp_path_factory: pytest.TempPathFactory,
+    population_states: dict[
+        str, tuple[ComparisonState, ComparisonState, dict[str, object]]
+    ],
+) -> None:
+    """The third side of the equality: the state the producer itself built
+    during each execution -- every key, the clone comparison included -- is
+    the state the store rows and the document state back.  A producer answer
+    no reader reads could drift unseen (measured 2026-10-05: a producer
+    counting a clone set under an untrusted lane survived the whole suite).
+    The metrics never ran on the two clones-only populations: the producer
+    is never asked there, and the accounting says so."""
+    populations = shared_populations(tmp_path_factory)
+    unasked = set()
+    for name in RUN_SUMMARY_POPULATIONS:
+        produced = produced_by(populations[name])
+        if not produced:
+            unasked.add(name)
+            continue
+        stored, document, _api = population_states[name]
+        assert {state == produced[0] for state in produced} == {True}, name
+        assert produced[0].results == stored.results, name
+        assert produced[0].results == document.results, name
+    assert unasked == {"clones_only", "clones_only_warm"}
+    clone_outcomes = {
+        produced_by(populations[name])[0]
+        .result(COMPARISON_CLONES, TERM_NEW_GROUPS)
+        .reason
+        or "compared"
+        for name in set(RUN_SUMMARY_POPULATIONS) - unasked
+    }
+    assert clone_outcomes == {"compared", NOT_COMPARED_UNAVAILABLE}
+
+
+def test_one_compared_clone_lane_is_a_clone_comparison(
+    population_states: dict[
+        str, tuple[ComparisonState, ComparisonState, dict[str, object]]
+    ],
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    """The clone comparison reads either lane: a run whose block lane is
+    recorded under an older revision compared its function lane alone, and
+    every reader states the clone comparison made -- the population that
+    tells "either lane" from "both lanes" (measured 2026-10-05: a store
+    reader requiring both survived the whole suite, no population compared
+    exactly one)."""
+    populations = shared_populations(tmp_path_factory)
+    record = populations["older_revision_block_clone_lane"].record
+    link = record.execution.run_snapshot_link
+    assert link is not None and link.store_run_id
+    with RunStore(
+        populations["older_revision_block_clone_lane"].store_path, create=False
+    ) as store:
+        model = store.read_run(link.store_run_id)
+    availability = {
+        row.lane: row.availability
+        for row in model.facts.comparison.comparison_availability
+        if row.lane in COMPARISON_LANES[COMPARISON_CLONES]
+    }
+    assert availability == {
+        "clones.blocks": "unavailable",
+        "clones.functions": "compared",
+    }
+    stored, document, _api = population_states["older_revision_block_clone_lane"]
+    for state in (stored, document):
+        assert state.made(COMPARISON_CLONES)
+        assert state.reason(COMPARISON_HEALTH) == NOT_COMPARED_UNAVAILABLE
+
+
+# -- the raw document pair, family by family -----------------------------------------
+
+
+def _raw_runs(
+    comparison_runs: dict[str, ComparisonRun],
+    populations: SummaryPopulations,
+) -> list[tuple[str, Mapping[str, object], CanonicalModel]]:
+    """Every run the pins below read raw: the CLI comparison corpus (the
+    document it wrote and the run it published) and every served population
+    (the record's document and its stored run)."""
+    runs: list[tuple[str, Mapping[str, object], CanonicalModel]] = [
+        (f"cli.{name}", run.document, run.stored)
+        for name, run in comparison_runs.items()
+    ]
+    for name in RUN_SUMMARY_POPULATIONS:
+        record = populations[name].record
+        link = record.execution.run_snapshot_link
+        assert link is not None and link.store_run_id
+        with RunStore(populations[name].store_path, create=False) as store:
+            runs.append((name, record.served_report, store.read_run(link.store_run_id)))
+    return runs
+
+
+@pytest.fixture(scope="module")
+def raw_runs(
+    comparison_runs: dict[str, ComparisonRun],
+    tmp_path_factory: pytest.TempPathFactory,
+) -> list[tuple[str, Mapping[str, object], CanonicalModel]]:
+    return _raw_runs(comparison_runs, shared_populations(tmp_path_factory))
+
+
+def _families(document: Mapping[str, object]) -> Mapping[str, object]:
+    return as_mapping(as_mapping(document.get("metrics")).get("families"))
+
+
+def test_the_documents_raw_pair_is_the_stored_state_on_every_population(
+    raw_runs: list[tuple[str, Mapping[str, object], CanonicalModel]],
+) -> None:
+    """Per family, per run, the RAW fields the document writes -- never the
+    document reader, which names a disabled lane's reason whatever the flag
+    says -- against the state the store's rows state: the flag is a bool and
+    is the comparison's ``made``, the delta is its value when it ran and the
+    pair's empty half when it did not.  Measured 2026-10-05: a producer that
+    compared a set-difference family whose lane the run disabled survived
+    the whole suite, the reader masking the flag."""
+    outcomes: Counter[tuple[object, str]] = Counter()
+    for name, document, model in raw_runs:
+        state = stored_comparison_state(model)
+        families = _families(document)
+        for key, (family, field) in DOCUMENT_FIELDS.items():
+            result = state.result(*key)
+            summary = as_mapping(as_mapping(families[family]).get("summary"))
+            flag = summary["baseline_diff_available"]
+            assert flag is True or flag is False, (name, family, flag)
+            assert flag is result.is_compared, (name, key)
+            assert summary[field] == (result.value if result.is_compared else 0), (
+                name,
+                key,
+            )
+            outcomes[(flag, str(result.reason))] += 1
+    assert {reason for _flag, reason in outcomes} == {
+        "None",
+        NOT_COMPARED_DISABLED,
+        NOT_COMPARED_NOT_RUN,
+        NOT_COMPARED_UNAVAILABLE,
+    }, outcomes
+    assert {flag for flag, _reason in outcomes} == {True, False}, outcomes
+
+
+def test_a_comparison_runs_only_over_lanes_it_trusts(
+    raw_runs: list[tuple[str, Mapping[str, object], CanonicalModel]],
+) -> None:
+    """``unavailable`` is the owner's word for a comparison whose lane is
+    not trusted: no comparison is stated over a lane its run does not trust
+    -- in the document's families (against the document's own lane trust)
+    or in the store's availability rows (against the store's).  Measured
+    2026-10-05: a CLI run against the container of another scope, every lane
+    ``unavailable``, published the adoption and API deltas against it."""
+    stated = []
+    for name, document, model in raw_runs:
+        baseline = as_mapping(document.get("baseline"))
+        trusted = {
+            str(as_mapping(row).get("name"))
+            for row in as_sequence(baseline.get("sorted_lane_trust"))
+            if as_mapping(row).get("status") == "trusted"
+        }
+        families = _families(document)
+        for (comparison, term), (family, _field) in DOCUMENT_FIELDS.items():
+            summary = as_mapping(as_mapping(families.get(family)).get("summary"))
+            if term == COMPARISON_TERMS[comparison][0] and summary.get(
+                "baseline_diff_available"
+            ):
+                stated.append((name, comparison))
+                untrusted = set(COMPARISON_LANES[comparison]) - trusted
+                assert not untrusted, (name, comparison, sorted(untrusted))
+        comparison_facts = model.facts.comparison
+        stored_trusted = {
+            row.lane for row in comparison_facts.lane_trust if row.status == "trusted"
+        }
+        for row in comparison_facts.comparison_availability:
+            if row.availability == "compared":
+                assert row.lane in stored_trusted, (name, row.lane)
+    assert {comparison for _name, comparison in stated} == {
+        comparison for comparison, _term in DOCUMENT_FIELDS
+    }
 
 
 def test_a_run_that_did_not_collect_the_api_surface_states_no_api_comparison(
