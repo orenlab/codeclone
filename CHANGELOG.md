@@ -34,6 +34,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - First-argument `codeclone --mcp` runs `codeclone-mcp` with the rest; without the `mcp` extra: same install hint, exit `2`.
 - Canonical run store: the comparison tier (baseline and metrics-baseline witnesses, per-lane trust, comparison availability, disabled capabilities, novelty of five finding families, adoption and API deltas) is published as run-store rows beside the analysis rows; report and MCP answers are unchanged byte for byte.
 - MCP `get_run_summary` carries a `serving` block naming the source of the answer and why. With the run store enabled and `CODECLONE_SERVE_FROM=run_store` the summary is read from the 32 store families its fields come from and served only when it equals the in-memory answer byte for byte; otherwise memory is served and the differing fields are named (temporary switch, default `memory`).
+- MCP `check_patch_contract` (and the verification `finish_controlled_change` runs) and `get_blast_radius` (and the radius `start_controlled_change` computes) can be answered from the run store under the same switch: each tool's own answer carries a `serving` block (per run for a verification), values are unchanged, and a store answer that disagrees with memory is not served. The default remains `memory`.
 
 ### Changed
 
