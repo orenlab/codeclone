@@ -63,20 +63,25 @@ from typing import Final, TypeVar
 from ...api.run_store_serving import (
     MEMORY_BY_DESIGN_REASONS,
     SERVING_REASON_DIVERGENT,
+    SERVING_REASON_NOT_PUBLISHED,
+    SERVING_REASON_SERVED,
     SERVING_SOURCE_MEMORY,
+    SERVING_SOURCE_RUN_STORE,
     RunStoreServingOutcome,
     ServedAuthorityCandidates,
+    ServedPatchRun,
     ServedRunSlices,
     ServedRunSummary,
     ServedUnitLocation,
     read_run_store_authority_candidates,
+    read_run_store_patch_run,
     read_run_store_slices,
     read_run_store_summary,
 )
 from ...observability import record_counter
 from ...utils.coerce import as_mapping
 from ._authority_candidates import authority_candidate_items
-from ._session_shared import MCPRunRecord
+from ._session_shared import MCPRunRecord, MCPServiceContractError
 
 _ServedT = TypeVar("_ServedT")
 
@@ -350,4 +355,134 @@ __all__ = [
     "served_slices",
     "store_summary_payload",
     "summary_divergence",
+]
+
+
+# -- the patch contract (consumer migration C6) -----------------------------
+#
+# ``check_patch_contract`` reads one run (budget) or two (verify): each run
+# goes through the door on its own, and the store's answer is the verifier
+# run again over the stored facts of every run it read.  The store's answer
+# is served only when the whole answer is the memory's byte for byte -- the
+# run summary's rule, on the wire, field order and JSON types included -- and
+# a run the store could not answer for names itself in the serving block.
+
+#: ``serving.detail`` of an answer that read no run at all (the before-run
+#: was never resolved): nothing the store carries is in it.
+PATCH_NO_RUN_DETAIL: Final = "no_run_read"
+#: The one run of the budget mode.
+PATCH_BUDGET_RUN: Final = "run"
+#: The emission fact the memory answer may carry and the store cannot: the
+#: audit trail's sequence number, appended after the event was written.
+_AUDIT_SEQUENCE_KEY: Final = "_audit_sequence"
+
+
+def _patch_outcome(
+    read: Mapping[str, tuple[ServedPatchRun | None, RunStoreServingOutcome]],
+) -> RunStoreServingOutcome:
+    """One outcome for the runs read: the first run the store did not answer
+    for (before the after-run), named; else served."""
+    for side, (stored, outcome) in read.items():
+        if stored is None:
+            return replace(
+                outcome,
+                store_run_id="",
+                detail=f"{side}: {outcome.detail}" if outcome.detail else side,
+            )
+    return RunStoreServingOutcome(
+        source=SERVING_SOURCE_RUN_STORE, reason=SERVING_REASON_SERVED
+    )
+
+
+def _with_emission_facts(
+    candidate: dict[str, object], memory: Mapping[str, object]
+) -> dict[str, object]:
+    """The store's answer with the memory answer's audit sequence, which is
+    the record of an emission, not a fact of either run."""
+    if _AUDIT_SEQUENCE_KEY in memory:
+        candidate = {
+            key: value for key, value in candidate.items() if key != _AUDIT_SEQUENCE_KEY
+        }
+        candidate[_AUDIT_SEQUENCE_KEY] = memory[_AUDIT_SEQUENCE_KEY]
+    return candidate
+
+
+def served_patch_contract(
+    memory: Mapping[str, object],
+    runs: Mapping[str, MCPRunRecord],
+    store_answer: Callable[[Mapping[str, ServedPatchRun]], dict[str, object]],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """The patch-contract answer to serve, and its ``serving`` block.
+
+    ``memory`` is the answer the verifier built from the records; ``runs``
+    are the records it read facts of, by side (``run`` for the budget,
+    ``before`` / ``after`` for a verification); ``store_answer`` builds the
+    same answer over the stored facts of every side.  A store refusal of a
+    question memory answered (the coverage gate over a run the store holds
+    no join for) is a disagreement, never an error of the tool.
+    """
+    if not runs:
+        record_counter("run_store_serving_memory")
+        outcome = RunStoreServingOutcome(
+            source=SERVING_SOURCE_MEMORY,
+            reason=SERVING_REASON_NOT_PUBLISHED,
+            detail=PATCH_NO_RUN_DETAIL,
+        )
+        return dict(memory), {**outcome.as_payload(), "runs": {}}
+    read = {
+        side: read_run_store_patch_run(
+            root=record.root, link=record.execution.run_snapshot_link
+        )
+        for side, record in runs.items()
+    }
+    outcome = _patch_outcome(read)
+    candidate: dict[str, object] | None = None
+    if outcome.reason == SERVING_REASON_SERVED:
+        stored = {
+            side: facts for side, (facts, _o) in read.items() if facts is not None
+        }
+        try:
+            candidate = _with_emission_facts(store_answer(stored), memory)
+        except MCPServiceContractError as refusal:
+            record_counter("run_store_serving_divergent")
+            served = replace(
+                outcome,
+                source=SERVING_SOURCE_MEMORY,
+                reason=SERVING_REASON_DIVERGENT,
+                detail=f"the store refused: {refusal}",
+            )
+            return dict(memory), _patch_serving_block(served, read)
+    payload, served = _shadow_read(
+        dict(memory), (candidate, outcome), agrees=_summary_agrees
+    )
+    return payload, _patch_serving_block(
+        _named_divergence(served, candidate, memory), read
+    )
+
+
+def _patch_serving_block(
+    outcome: RunStoreServingOutcome,
+    read: Mapping[str, tuple[ServedPatchRun | None, RunStoreServingOutcome]],
+) -> dict[str, object]:
+    """The budget's one run is the block itself (the run summary's shape);
+    a verification states its outcome and each run's under ``runs``."""
+    if tuple(read) == (PATCH_BUDGET_RUN,):
+        _stored, own = read[PATCH_BUDGET_RUN]
+        if outcome.reason in {SERVING_REASON_SERVED, SERVING_REASON_DIVERGENT}:
+            outcome = replace(outcome, store_run_id=own.store_run_id)
+            if outcome.reason == SERVING_REASON_SERVED:
+                outcome = replace(outcome, detail=own.detail)
+        else:
+            outcome = own
+        return outcome.as_payload()
+    return {
+        **outcome.as_payload(),
+        "runs": {side: own.as_payload() for side, (_stored, own) in read.items()},
+    }
+
+
+__all__ += [
+    "PATCH_BUDGET_RUN",
+    "PATCH_NO_RUN_DETAIL",
+    "served_patch_contract",
 ]

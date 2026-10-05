@@ -6,10 +6,20 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from . import _session_helpers as _helpers
 from ._code_provenance import code_provenance_payload
 from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
+from ._patch_contract_runs import (
+    ComparisonFacts,
+    PatchSession,
+    RecordPatchRun,
+    focused_comparison_index,
+    gate_config,
+    require_gate_coverage,
+)
 from ._report_section import (
     findings_section_payload,
     inventory_section_payload,
@@ -72,7 +82,6 @@ from ._session_shared import (
     MCPGateRequest,
     MCPRunRecord,
     MCPServiceContractError,
-    MetricGateConfig,
     MetricsDetailFamily,
     MetricsDiff,
     Namespace,
@@ -175,6 +184,111 @@ def _module_map_section_payload(
     return payload
 
 
+def compare_runs_on_facts(
+    *,
+    before: MCPRunRecord,
+    after: MCPRunRecord,
+    focus: ComparisonFocus,
+    before_facts: ComparisonFacts,
+    after_facts: ComparisonFacts,
+) -> dict[str, object]:
+    """The comparison of two runs over their facts, wherever the facts
+    come from: the records name the runs and decide comparability, the
+    facts answer the findings, the cards and the health (consumer
+    migration C6: the patch verification compares stored runs here)."""
+
+    validated_focus = _helpers._validate_choice(
+        "focus",
+        focus,
+        _VALID_COMPARISON_FOCUS,
+    )
+    before_findings = before_facts.comparison_index(validated_focus)
+    after_findings = after_facts.comparison_index(validated_focus)
+    before_ids = set(before_findings)
+    after_ids = set(after_findings)
+    regressions = sorted(after_ids - before_ids)
+    improvements = sorted(before_ids - after_ids)
+    common = before_ids & after_ids
+    health_before = before_facts.health()
+    health_after = after_facts.health()
+    comparability = _helpers._comparison_scope(before=before, after=after)
+    comparable = bool(comparability["comparable"])
+    health_delta = (
+        health_after - health_before
+        if comparable and health_before is not None and health_after is not None
+        else None
+    )
+    verdict = (
+        _helpers._comparison_verdict(
+            regressions=len(regressions),
+            improvements=len(improvements),
+            health_delta=health_delta,
+        )
+        if comparable
+        else "incomparable"
+    )
+    regressions_payload = (
+        [
+            after_facts.comparison_card(after_findings[finding_id])
+            for finding_id in regressions
+        ]
+        if comparable
+        else []
+    )
+    improvements_payload = (
+        [
+            before_facts.comparison_card(before_findings[finding_id])
+            for finding_id in improvements
+        ]
+        if comparable
+        else []
+    )
+    payload: dict[str, object] = {
+        "before": {
+            "run_id": _helpers._short_run_id(before.run_id),
+            "health": health_before,
+        },
+        "after": {
+            "run_id": _helpers._short_run_id(after.run_id),
+            "health": health_after,
+        },
+        "comparable": comparable,
+        "health_delta": health_delta,
+        "verdict": verdict,
+        "regressions": regressions_payload,
+        "improvements": improvements_payload,
+        "unchanged": len(common) if comparable else None,
+        "summary": _helpers._comparison_summary_text(
+            comparable=comparable,
+            comparability_reason=str(comparability["reason"]),
+            regressions=len(regressions),
+            improvements=len(improvements),
+            health_delta=health_delta,
+        ),
+    }
+    if not comparable:
+        payload["reason"] = comparability["reason"]
+    return payload
+
+
+def _compare_records(
+    session: object,
+    *,
+    before: MCPRunRecord,
+    after: MCPRunRecord,
+    focus: ComparisonFocus,
+) -> dict[str, object]:
+    """The comparison of two records over the facts they hold in memory."""
+    facts = cast("PatchSession", session)
+    return compare_runs_on_facts(
+        before=before,
+        after=after,
+        focus=focus,
+        before_facts=RecordPatchRun(facts, before),
+        after_facts=RecordPatchRun(facts, after),
+    )
+
+
 class _MCPSessionChangedProjectionMixin(_MCPSessionFindingMixin):
     _runs: CodeCloneMCPRunStore
     _state_lock: _StateLock
@@ -266,18 +380,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
         *,
         focus: str,
     ) -> dict[str, dict[str, object]]:
-        findings = self._base_findings(record)
-        if focus == "clones":
-            findings = [f for f in findings if str(f.get("family", "")) == "clone"]
-        elif focus == "structural":
-            findings = [f for f in findings if str(f.get("family", "")) == "structural"]
-        elif focus == "metrics":
-            findings = [
-                f
-                for f in findings
-                if str(f.get("family", "")) in {"design", "dead_code"}
-            ]
-        return {str(finding.get("id", "")): dict(finding) for finding in findings}
+        return focused_comparison_index(self._base_findings(record), focus=focus)
 
     def _build_args(self, *, root_path: Path, request: MCPAnalysisRequest) -> Namespace:
         args = Namespace(
@@ -968,84 +1071,7 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
         ids that same-commit sibling worktrees share.
         """
 
-        validated_focus = _helpers._validate_choice(
-            "focus",
-            focus,
-            _VALID_COMPARISON_FOCUS,
-        )
-        before_findings = self._comparison_index(before, focus=validated_focus)
-        after_findings = self._comparison_index(after, focus=validated_focus)
-        before_ids = set(before_findings)
-        after_ids = set(after_findings)
-        regressions = sorted(after_ids - before_ids)
-        improvements = sorted(before_ids - after_ids)
-        common = before_ids & after_ids
-        health_before = _helpers._summary_health_score(before.summary)
-        health_after = _helpers._summary_health_score(after.summary)
-        comparability = _helpers._comparison_scope(before=before, after=after)
-        comparable = bool(comparability["comparable"])
-        health_delta = (
-            health_after - health_before
-            if comparable and health_before is not None and health_after is not None
-            else None
-        )
-        verdict = (
-            _helpers._comparison_verdict(
-                regressions=len(regressions),
-                improvements=len(improvements),
-                health_delta=health_delta,
-            )
-            if comparable
-            else "incomparable"
-        )
-        regressions_payload = (
-            [
-                self._comparison_finding_card(
-                    after,
-                    after_findings[finding_id],
-                )
-                for finding_id in regressions
-            ]
-            if comparable
-            else []
-        )
-        improvements_payload = (
-            [
-                self._comparison_finding_card(
-                    before,
-                    before_findings[finding_id],
-                )
-                for finding_id in improvements
-            ]
-            if comparable
-            else []
-        )
-        payload: dict[str, object] = {
-            "before": {
-                "run_id": _helpers._short_run_id(before.run_id),
-                "health": health_before,
-            },
-            "after": {
-                "run_id": _helpers._short_run_id(after.run_id),
-                "health": health_after,
-            },
-            "comparable": comparable,
-            "health_delta": health_delta,
-            "verdict": verdict,
-            "regressions": regressions_payload,
-            "improvements": improvements_payload,
-            "unchanged": len(common) if comparable else None,
-            "summary": _helpers._comparison_summary_text(
-                comparable=comparable,
-                comparability_reason=str(comparability["reason"]),
-                regressions=len(regressions),
-                improvements=len(improvements),
-                health_delta=health_delta,
-            ),
-        }
-        if not comparable:
-            payload["reason"] = comparability["reason"]
-        return payload
+        return _compare_records(self, before=before, after=after, focus=focus)
 
 
 class _MCPSessionStateMixin(_MCPSessionReportMixin):
@@ -1139,38 +1165,16 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         record: MCPRunRecord,
         request: MCPGateRequest,
     ) -> GatingResult:
-        if request.fail_on_untested_hotspots:
-            if record.coverage_join is None:
-                raise MCPServiceContractError(
-                    "Coverage gating requires a run created with coverage_xml."
-                )
-            if record.coverage_join.status != "ok":
-                detail = record.coverage_join.invalid_reason or "invalid coverage input"
-                raise MCPServiceContractError(
-                    "Coverage gating requires a valid Cobertura XML input. "
-                    f"Reason: {detail}"
-                )
+        coverage = record.coverage_join
+        require_gate_coverage(
+            request,
+            status=None if coverage is None else coverage.status,
+            invalid_reason=None if coverage is None else coverage.invalid_reason,
+        )
         return _evaluate_report_gates(
             report_document=record.served_report,
             enabled_lanes=record.served_report.contract.enabled_lanes,
-            config=MetricGateConfig(
-                fail_complexity=request.fail_complexity,
-                fail_coupling=request.fail_coupling,
-                fail_cohesion=request.fail_cohesion,
-                fail_cycles=request.fail_cycles,
-                fail_dead_code=request.fail_dead_code,
-                fail_health=request.fail_health,
-                fail_on_new_metrics=request.fail_on_new_metrics,
-                fail_on_typing_regression=request.fail_on_typing_regression,
-                fail_on_docstring_regression=request.fail_on_docstring_regression,
-                fail_on_api_break=request.fail_on_api_break,
-                fail_on_untested_hotspots=request.fail_on_untested_hotspots,
-                min_typing_coverage=request.min_typing_coverage,
-                min_docstring_coverage=request.min_docstring_coverage,
-                coverage_min=request.coverage_min,
-                fail_on_new=request.fail_on_new,
-                fail_threshold=request.fail_threshold,
-            ),
+            config=gate_config(request),
             metrics_diff=record.metrics_diff,
             clone_new_count=len(record.new_func) + len(record.new_block),
             clone_total=record.func_clones_count + record.block_clones_count,

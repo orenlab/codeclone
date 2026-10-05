@@ -86,10 +86,12 @@ from ..canonical.errors import (
 )
 from ..canonical.serving import (
     ServedAuthorityCandidates,
+    ServedPatchRun,
     ServedRunSlices,
     ServedRunSummary,
     ServedUnitLocation,
     read_served_authority_candidates,
+    read_served_patch_run,
     read_served_run_slices,
     read_served_run_summary,
 )
@@ -425,4 +427,32 @@ __all__ = [
     "read_run_store_slices",
     "read_run_store_summary",
     "serving_source",
+]
+
+
+def read_run_store_patch_run(
+    *, root: Path, link: RunSnapshotLink | None
+) -> tuple[ServedPatchRun | None, RunStoreServingOutcome]:
+    """The facts one run lends ``check_patch_contract``, or a typed reason
+    for none (consumer migration C6).
+
+    The same gates, the same two roads, the same one store open and the same
+    serving switch as :func:`read_run_store_summary`: a record that stated a
+    bridge is answered from memory without a store read while the switch
+    names memory.  The verifier reads two runs; each is its own call through
+    this door, so each carries its own outcome.
+    """
+    source = serving_source()
+    if link is not None and source == SERVE_FROM_MEMORY:
+        return _memory(
+            SERVING_REASON_STORE_DISABLED,
+            store_run_id=link.store_run_id,
+            detail=f"{ENV_SERVE_FROM}={source}",
+        )
+    return _read_published(root=root, link=link, read=read_served_patch_run)
+
+
+__all__ += [
+    "ServedPatchRun",
+    "read_run_store_patch_run",
 ]

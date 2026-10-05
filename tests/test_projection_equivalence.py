@@ -702,7 +702,7 @@ _CONSUMER_PATHS: dict[str, tuple[str, ...]] = {
         "metrics.families.semantic_authority",
         "metrics.families.semantic_authority.items",
     ),
-    "codeclone/surfaces/mcp/_session_patch_contract_mixin.py": (
+    "codeclone/surfaces/mcp/_patch_contract_runs.py": (
         "metrics",
         "metrics.families",
         "metrics.families.dependencies",
@@ -753,7 +753,7 @@ _CONSUMER_PATHS: dict[str, tuple[str, ...]] = {
 #: metric family at all.
 _CONSUMER_FAMILY_ARGUMENTS: dict[str, tuple[str, ...]] = {
     "codeclone/surfaces/mcp/_authority_candidates.py": (),
-    "codeclone/surfaces/mcp/_session_patch_contract_mixin.py": (
+    "codeclone/surfaces/mcp/_patch_contract_runs.py": (
         "cohesion",
         "complexity",
         "coupling",
@@ -807,7 +807,7 @@ def test_the_budget_consumer_reads_families_no_path_scan_can_see(
 ) -> None:
     """Named separately because it is the inventory's measured blind spot."""
 
-    module = "codeclone/surfaces/mcp/_session_patch_contract_mixin.py"
+    module = "codeclone/surfaces/mcp/_patch_contract_runs.py"
     reads = consumer_reads(
         module=module,
         source=(_REPO_ROOT / module).read_text("utf-8"),

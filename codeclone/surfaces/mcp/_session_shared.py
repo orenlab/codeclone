@@ -122,6 +122,7 @@ from ...models import (
 from ...observability import record_counter, span
 from ...report.gates.evaluator import GateResult as GatingResult
 from ...report.gates.evaluator import MetricGateConfig
+from ...report.gates.evaluator import evaluate_gate_state as _evaluate_gate_state
 from ...report.gates.evaluator import evaluate_gates as _evaluate_report_gates
 from ...report.gates.evaluator import summarize_metrics_diff as _summarize_metrics_diff
 from ...utils.coerce import as_float as _as_float
@@ -1288,6 +1289,7 @@ __all__ = [
     "_base_short_finding_id_payload",
     "_disambiguated_clone_short_ids_payload",
     "_disambiguated_short_finding_id_payload",
+    "_evaluate_gate_state",
     "_evaluate_report_gates",
     "_git_diff_lines_payload",
     "_json_text_payload",

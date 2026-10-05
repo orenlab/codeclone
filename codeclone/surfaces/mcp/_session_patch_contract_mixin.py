@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -24,7 +24,6 @@ from ...budget.patch_contract import (
     PatchContractMode,
     PatchContractStatus,
     StrictnessProfile,
-    baseline_status,
     budgets_for_strictness,
     detect_baseline_abuse,
 )
@@ -35,6 +34,13 @@ from ...utils.coerce import as_sequence as _as_sequence
 from . import _session_helpers as _helpers
 from ._analyzer_invariance import observation_evidence
 from ._intent import IntentCheckResult, IntentRecord, IntentScope, IntentStatus
+from ._patch_contract_runs import (
+    METRIC_VALUE_KEYS,
+    PatchRun,
+    PatchSession,
+    serve_patch_answer,
+)
+from ._run_store_serving import PATCH_BUDGET_RUN
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
 from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_shared import (
@@ -46,7 +52,7 @@ from ._session_shared import (
     MCPRunRootMismatchError,
     MCPServiceContractError,
 )
-from ._session_state_mixin import _MCPSessionStateMixin
+from ._session_state_mixin import compare_runs_on_facts
 from ._verification_profile import (
     CHECK_GATE_COMPARISON,
     CHECK_STRUCTURAL_DELTA,
@@ -61,6 +67,11 @@ from ._verification_profile import (
 )
 
 MAX_WORSENED_ITEMS = 20
+
+#: One answer of the verifier over the facts of the runs it read, by side,
+#: and whether the answer's audit events are written (only the memory
+#: computation writes them; the store computation is its shadow).
+_PatchAnswer = Callable[[Mapping[str, PatchRun], bool], dict[str, object]]
 
 
 def _names_run(candidate: str, run_id: str) -> bool:
@@ -113,8 +124,14 @@ def _finding_session(session: _MCPSessionPatchContractMixin) -> _MCPSessionFindi
     return cast(_MCPSessionFindingMixin, session)
 
 
-def _state_session(session: _MCPSessionPatchContractMixin) -> _MCPSessionStateMixin:
-    return cast(_MCPSessionStateMixin, session)
+def _validated_patch_contract_mode(mode: str) -> PatchContractMode:
+    if mode not in VALID_PATCH_CONTRACT_MODES:
+        from .messages import errors as err_msgs
+
+        raise MCPServiceContractError(
+            err_msgs.invalid_choice("mode", mode, VALID_PATCH_CONTRACT_MODES)
+        )
+    return "verify" if mode == "verify" else "budget"
 
 
 class _MCPSessionPatchContractMixin:
@@ -135,7 +152,7 @@ class _MCPSessionPatchContractMixin:
         diff_ref: str | None = None,
         changed_files: Sequence[str] | None = None,
     ) -> dict[str, object]:
-        validated_mode = self._validated_patch_contract_mode(mode)
+        validated_mode = _validated_patch_contract_mode(mode)
         validated_strictness = self._validated_strictness(strictness)
         # A declared intent already names the checkout; root only answers the
         # intent-less call, which is the one the multi-root refusal addresses.
@@ -143,21 +160,36 @@ class _MCPSessionPatchContractMixin:
             None if root is None or not root.strip() else _helpers._resolve_root(root)
         )
         if validated_mode == "budget":
-            return self._patch_contract_budget(
+            payload, serving = self._patch_contract_budget_served(
                 run_id=run_id,
                 root=declared_root,
                 intent_id=intent_id,
                 strictness=validated_strictness,
             )
-        return self._patch_contract_verify(
-            before_run_id=before_run_id,
-            after_run_id=after_run_id,
-            root=declared_root,
-            intent_id=intent_id,
-            strictness=validated_strictness,
-            diff_ref=diff_ref,
-            changed_files=changed_files,
-        )
+        else:
+            payload, serving = self._patch_contract_verify_served(
+                before_run_id=before_run_id,
+                after_run_id=after_run_id,
+                root=declared_root,
+                intent_id=intent_id,
+                strictness=validated_strictness,
+                diff_ref=diff_ref,
+                changed_files=changed_files,
+            )
+        # Where the answer came from, and why (consumer migration C6,
+        # ``_run_store_serving.served_patch_contract``); the workflow tools
+        # embed the answer without it.
+        payload["serving"] = serving
+        return payload
+
+    def _served_patch_answer(
+        self,
+        runs: Mapping[str, MCPRunRecord],
+        answer: _PatchAnswer,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """The answer over the records, shadowed by the same answer over the
+        runs' stored facts (``_patch_contract_runs.serve_patch_answer``)."""
+        return serve_patch_answer(cast("PatchSession", self), runs, answer)
 
     def _patch_contract_budget(
         self,
@@ -167,6 +199,18 @@ class _MCPSessionPatchContractMixin:
         strictness: StrictnessProfile,
         root: Path | None = None,
     ) -> dict[str, object]:
+        return self._patch_contract_budget_served(
+            run_id=run_id, intent_id=intent_id, strictness=strictness, root=root
+        )[0]
+
+    def _patch_contract_budget_served(
+        self,
+        *,
+        run_id: str | None,
+        intent_id: str | None,
+        strictness: StrictnessProfile,
+        root: Path | None = None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
         budget_intent = self._known_intent(intent_id)
         record = self._run_bound_to_root(
             run_id,
@@ -177,8 +221,29 @@ class _MCPSessionPatchContractMixin:
         if intent is not None:
             intent_session._renew_lease_if_active(record=record, intent=intent)
         budgets = self._budgets_for_record(record=record, strictness=strictness)
-        current_state = self._current_state(record)
-        gate_preview = self._gate_preview(record=record, budgets=budgets)
+        return self._served_patch_answer(
+            {PATCH_BUDGET_RUN: record},
+            lambda runs, emit: self._budget_payload(
+                run=runs[PATCH_BUDGET_RUN],
+                intent=intent,
+                strictness=strictness,
+                budgets=budgets,
+                emit=emit,
+            ),
+        )
+
+    def _budget_payload(
+        self,
+        *,
+        run: PatchRun,
+        intent: IntentRecord | None,
+        strictness: StrictnessProfile,
+        budgets: PatchBudgets,
+        emit: bool,
+    ) -> dict[str, object]:
+        record = run.record
+        current_state = run.current_state()
+        gate_preview = self._gate_preview(run=run, budgets=budgets)
         is_queued = intent is not None and intent.status == IntentStatus.QUEUED
         from .messages import patch_contract as patch_msgs
 
@@ -211,15 +276,14 @@ class _MCPSessionPatchContractMixin:
         if is_queued:
             payload["intent_status"] = "queued"
             payload["edit_allowed"] = False
-        intent_session._audit_emit(
-            root=record.root,
+        self._emit_patch_event(
+            run=run,
             event_type=EVENT_PATCH_BUDGET,
             severity="warn" if bool(gate_preview.get("would_fail")) else "info",
-            run_id=_helpers._short_run_id(record.run_id),
             intent_id=intent.intent_id if intent is not None else None,
-            report_digest=intent_session._report_digest_value(record),
             status="budget",
             payload=payload,
+            emit=emit,
         )
         return payload
 
@@ -234,6 +298,31 @@ class _MCPSessionPatchContractMixin:
         changed_files: Sequence[str] | None,
         root: Path | None = None,
     ) -> dict[str, object]:
+        return self._patch_contract_verify_served(
+            before_run_id=before_run_id,
+            after_run_id=after_run_id,
+            intent_id=intent_id,
+            strictness=strictness,
+            diff_ref=diff_ref,
+            changed_files=changed_files,
+            root=root,
+        )[0]
+
+    def _patch_contract_verify_served(
+        self,
+        *,
+        before_run_id: str | None,
+        after_run_id: str | None,
+        intent_id: str | None,
+        strictness: StrictnessProfile,
+        diff_ref: str | None,
+        changed_files: Sequence[str] | None,
+        root: Path | None = None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        # Every branch below decides WHICH answer the patch gets from the
+        # records and the session alone (identity, execution witnesses,
+        # intent, scope, changed files); the answer itself is built over the
+        # runs' facts, once from memory and once from the store.
         # ── 1. Resolve before-run (required for intent binding) ─────
         #   When intent_id is provided but before_run_id is not, auto-
         #   resolve from the intent's stored run_id.  This removes one
@@ -247,7 +336,12 @@ class _MCPSessionPatchContractMixin:
         if resolved_before_run_id is None and binding_intent is not None:
             resolved_before_run_id = binding_intent.run_id
         if resolved_before_run_id is None:
-            return self._unverified_patch_contract(reason="no_before_run")
+            return self._served_patch_answer(
+                {},
+                lambda _runs, _emit: self._unverified_patch_contract(
+                    reason="no_before_run"
+                ),
+            )
         try:
             before = self._before_run_for(
                 resolved_before_run_id,
@@ -255,9 +349,19 @@ class _MCPSessionPatchContractMixin:
                 root=root,
             )
         except MCPRunRootMismatchError:
-            return self._unverified_patch_contract(reason="before_run_root_mismatch")
+            return self._served_patch_answer(
+                {},
+                lambda _runs, _emit: self._unverified_patch_contract(
+                    reason="before_run_root_mismatch"
+                ),
+            )
         except MCPRunNotFoundError:
-            return self._unverified_patch_contract(reason="no_before_run")
+            return self._served_patch_answer(
+                {},
+                lambda _runs, _emit: self._unverified_patch_contract(
+                    reason="no_before_run"
+                ),
+            )
 
         # ── 2. Resolve intent ───────────────────────────────────────
         intent = self._optional_intent(record=before, intent_id=intent_id)
@@ -267,9 +371,12 @@ class _MCPSessionPatchContractMixin:
 
         # ── 2b. Queued intents cannot be verified ──────────────────
         if intent is not None and intent.status == IntentStatus.QUEUED:
-            return self._unverified_patch_contract(
-                reason="intent_not_active",
-                before=before,
+            return self._served_patch_answer(
+                {"before": before},
+                lambda runs, _emit: self._unverified_patch_contract(
+                    reason="intent_not_active",
+                    before=runs["before"],
+                ),
             )
 
         # ── 3. Compute actual changed files ─────────────────────────
@@ -292,11 +399,15 @@ class _MCPSessionPatchContractMixin:
 
         # ── 6. State artifact → violated early ──────────────────────
         if classification.profile == VerificationProfile.STATE_ARTIFACT_CHANGE:
-            return self._state_artifact_violated(
-                before=before,
-                intent=intent,
-                classification=classification,
-                scope_check=scope_check,
+            return self._served_patch_answer(
+                {"before": before},
+                lambda runs, emit: self._state_artifact_violated(
+                    before=runs["before"],
+                    intent=intent,
+                    classification=classification,
+                    scope_check=scope_check,
+                    emit=emit,
+                ),
             )
 
         # ── 7. Intent expiry check ──────────────────────────────────
@@ -304,11 +415,18 @@ class _MCPSessionPatchContractMixin:
             record=before,
             intent=intent,
         ):
-            after = self._optional_after_run(after_run_id, before=before)
-            return self._expired_patch_contract(
-                before=before,
-                after=after or before,
-                intent=intent,
+            expired_after = self._optional_after_run(after_run_id, before=before)
+            expired_intent = intent
+            return self._served_patch_answer(
+                {"before": before}
+                if expired_after is None
+                else {"before": before, "after": expired_after},
+                lambda runs, emit: self._expired_patch_contract(
+                    before=runs["before"],
+                    after=runs.get("after", runs["before"]),
+                    intent=expired_intent,
+                    emit=emit,
+                ),
             )
 
         # ── 8. Scope violation early exit ───────────────────────────
@@ -324,28 +442,39 @@ class _MCPSessionPatchContractMixin:
         if after_run_id is None:
             has_diff_evidence = changed_files is not None or diff_ref is not None
             if not has_diff_evidence:
-                return self._unverified_patch_contract(
-                    reason="no_after_run",
-                    before=before,
+                return self._served_patch_answer(
+                    {"before": before},
+                    lambda runs, _emit: self._unverified_patch_contract(
+                        reason="no_after_run",
+                        before=runs["before"],
+                    ),
                 )
-            return self._profile_fast_path(
-                before=before,
-                intent=intent,
-                strictness=strictness,
-                classification=classification,
-                scope_check=scope_check,
-                scope_violated=scope_violated,
+            return self._served_patch_answer(
+                {"before": before},
+                lambda runs, emit: self._profile_fast_path(
+                    before=runs["before"],
+                    intent=intent,
+                    strictness=strictness,
+                    classification=classification,
+                    scope_check=scope_check,
+                    scope_violated=scope_violated,
+                    emit=emit,
+                ),
             )
 
         # ── 10. Full structural path (after_run available) ──────────
         try:
             after = self._after_run_for(after_run_id, before=before)
         except MCPRunNotFoundError:
-            return self._unverified_patch_contract(
-                reason="no_after_run",
-                before=before,
-                classification=classification,
+            return self._served_patch_answer(
+                {"before": before},
+                lambda runs, _emit: self._unverified_patch_contract(
+                    reason="no_after_run",
+                    before=runs["before"],
+                    classification=classification,
+                ),
             )
+        pair = {"before": before, "after": after}
         matching_ids = self._matching_run_ids_outcome(
             before=before,
             after=after,
@@ -357,25 +486,20 @@ class _MCPSessionPatchContractMixin:
             actual_changed_files=actual_changed_files,
         )
         if matching_ids is not None:
-            return matching_ids
-        return self._full_structural_verify(
-            before=before,
-            after=after,
-            intent=intent,
-            strictness=strictness,
-            classification=classification,
-            scope_check=scope_check,
-            actual_changed_files=actual_changed_files,
+            return self._served_patch_answer(pair, matching_ids)
+        return self._served_patch_answer(
+            pair,
+            lambda runs, emit: self._full_structural_verify(
+                before=runs["before"],
+                after=runs["after"],
+                intent=intent,
+                strictness=strictness,
+                classification=classification,
+                scope_check=scope_check,
+                actual_changed_files=actual_changed_files,
+                emit=emit,
+            ),
         )
-
-    def _validated_patch_contract_mode(self, mode: str) -> PatchContractMode:
-        if mode not in VALID_PATCH_CONTRACT_MODES:
-            from .messages import errors as err_msgs
-
-            raise MCPServiceContractError(
-                err_msgs.invalid_choice("mode", mode, VALID_PATCH_CONTRACT_MODES)
-            )
-        return "verify" if mode == "verify" else "budget"
 
     def _validated_strictness(self, strictness: str) -> StrictnessProfile:
         if strictness not in VALID_STRICTNESS_PROFILES:
@@ -569,41 +693,14 @@ class _MCPSessionPatchContractMixin:
     def _gate_preview(
         self,
         *,
-        record: MCPRunRecord,
+        run: PatchRun,
         budgets: PatchBudgets,
     ) -> dict[str, object]:
-        gate_result = _state_session(self)._evaluate_gate_snapshot(
-            record=record,
-            request=self._gate_request(record=record, budgets=budgets),
-        )
+        gate_result = run.gate(self._gate_request(record=run.record, budgets=budgets))
         return {
             "would_fail": gate_result.exit_code != 0,
             "exit_code": gate_result.exit_code,
             "reasons": list(gate_result.reasons),
-        }
-
-    def _current_state(self, record: MCPRunRecord) -> dict[str, object]:
-        served_report = record.served_report
-        return {
-            "health_score": _helpers._summary_health_score(record.summary),
-            "complexity_max": self._family_max(
-                served_report,
-                family="complexity",
-                keys=("cyclomatic_complexity", "complexity", "value"),
-            ),
-            "coupling_max": self._family_max(
-                served_report,
-                family="coupling",
-                keys=("cbo", "coupling", "value"),
-            ),
-            "cohesion_max": self._family_max(
-                served_report,
-                family="cohesion",
-                keys=("lcom4", "cohesion", "value"),
-            ),
-            "dependency_cycles": len(self._dependency_cycles(served_report)),
-            "clone_groups": record.func_clones_count + record.block_clones_count,
-            "dead_code_high_confidence": self._dead_code_high_confidence(served_report),
         }
 
     def _headroom(
@@ -720,10 +817,11 @@ class _MCPSessionPatchContractMixin:
     def _state_artifact_violated(
         self,
         *,
-        before: MCPRunRecord,
+        before: PatchRun,
         intent: IntentRecord | None,
         classification: ClassificationResult,
         scope_check: dict[str, object] | None,
+        emit: bool,
     ) -> dict[str, object]:
         """Return violated status for state artifact mutations."""
         from .messages import patch_contract as patch_msgs
@@ -751,18 +849,45 @@ class _MCPSessionPatchContractMixin:
             "claim_validation_recommended": False,
             "message": patch_msgs.STATE_ARTIFACT_VIOLATION_MESSAGE,
         }
-        intent_session = _intent_session(self)
-        intent_session._audit_emit(
-            root=before.root,
+        self._emit_patch_event(
+            run=before,
             event_type=EVENT_PATCH_VIOLATED,
             severity="warn",
-            run_id=_helpers._short_run_id(before.run_id),
             intent_id=intent.intent_id if intent is not None else None,
-            report_digest=intent_session._report_digest_value(before),
             status=PatchContractStatus.VIOLATED.value,
             payload=payload,
+            emit=emit,
         )
         return payload
+
+    def _emit_patch_event(
+        self,
+        *,
+        run: PatchRun,
+        event_type: str,
+        severity: str,
+        intent_id: str | None,
+        status: str,
+        payload: Mapping[str, object],
+        emit: bool,
+    ) -> int | None:
+        """Write one patch-contract audit event about ``run``: its root, its
+        short id and its report digest are the record's.  The store's shadow
+        computation writes nothing (``emit`` false): one call, one event."""
+        if not emit:
+            return None
+        intent_session = _intent_session(self)
+        record = run.record
+        return intent_session._audit_emit(
+            root=record.root,
+            event_type=event_type,
+            severity=severity,
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=intent_id,
+            report_digest=intent_session._report_digest_value(record),
+            status=status,
+            payload=payload,
+        )
 
     def _matching_run_ids_outcome(
         self,
@@ -775,7 +900,7 @@ class _MCPSessionPatchContractMixin:
         scope_check: dict[str, object] | None,
         scope_violated: bool,
         actual_changed_files: Sequence[str],
-    ) -> dict[str, object] | None:
+    ) -> _PatchAnswer | None:
         """Resolve a before/after pair that carries the same run id.
 
         Identical ids are ambiguous on their own: either nothing was
@@ -783,7 +908,8 @@ class _MCPSessionPatchContractMixin:
         The registration mark and the run's own record of the changed files
         separate the two, and only the second is evidence. Returns ``None``
         when the ids differ or the profile does not require an after-run,
-        leaving the normal paths untouched.
+        leaving the normal paths untouched; otherwise the answer to build
+        over the pair's facts.
         """
 
         if before.run_id != after.run_id:
@@ -810,37 +936,41 @@ class _MCPSessionPatchContractMixin:
                 changed_files=actual_changed_files,
             )
             if predating is not None:
-                return self._change_predates_declaration_outcome(
-                    before=before,
-                    after=after,
+                return lambda runs, emit: self._change_predates_declaration_outcome(
+                    before=runs["before"],
+                    after=runs["after"],
                     intent=intent,
                     classification=classification,
                     scope_check=scope_check,
                     predating=predating,
+                    emit=emit,
                 )
-            return self._unverified_patch_contract(
+            return lambda runs, _emit: self._unverified_patch_contract(
                 reason="after_run_not_new",
-                before=before,
-                after=after,
+                before=runs["before"],
+                after=runs["after"],
                 classification=classification,
                 scope_check=scope_check,
             )
         if scope_violated and strictness != "relaxed":
-            return self._scope_violation_verify_payload(
-                before=before,
-                after=after,
+            return lambda runs, emit: self._scope_violation_verify_payload(
+                before=runs["before"],
+                after=runs["after"],
                 intent=intent,
                 classification=classification,
                 scope_check=scope_check,
+                emit=emit,
             )
-        return self._analyzer_invariant_accepted(
-            before=before,
-            after=after,
+        invariant_unobserved = unobserved
+        return lambda runs, emit: self._analyzer_invariant_accepted(
+            before=runs["before"],
+            after=runs["after"],
             intent=intent,
             strictness=strictness,
             classification=classification,
             scope_check=scope_check,
-            unobserved=unobserved,
+            unobserved=invariant_unobserved,
+            emit=emit,
         )
 
     def _invariance_run_is_fresh(
@@ -988,12 +1118,13 @@ class _MCPSessionPatchContractMixin:
     def _change_predates_declaration_outcome(
         self,
         *,
-        before: MCPRunRecord,
-        after: MCPRunRecord,
+        before: PatchRun,
+        after: PatchRun,
         intent: IntentRecord | None,
         classification: ClassificationResult,
         scope_check: dict[str, object] | None,
         predating: Sequence[str],
+        emit: bool,
     ) -> dict[str, object]:
         """Contract B: say that no BEFORE exists, and how to obtain one.
 
@@ -1038,16 +1169,14 @@ class _MCPSessionPatchContractMixin:
             "claim_validation_recommended": False,
             "message": patch_msgs.CHANGE_PREDATES_DECLARATION_MESSAGE,
         }
-        intent_session = _intent_session(self)
-        intent_session._audit_emit(
-            root=after.root,
+        self._emit_patch_event(
+            run=after,
             event_type=EVENT_PATCH_VERIFIED,
             severity="warn",
-            run_id=_helpers._short_run_id(after.run_id),
             intent_id=intent.intent_id if intent is not None else None,
-            report_digest=intent_session._report_digest_value(after),
             status=PatchContractStatus.UNVERIFIED.value,
             payload=payload,
+            emit=emit,
         )
         return payload
 
@@ -1070,13 +1199,14 @@ class _MCPSessionPatchContractMixin:
     def _analyzer_invariant_accepted(
         self,
         *,
-        before: MCPRunRecord,
-        after: MCPRunRecord,
+        before: PatchRun,
+        after: PatchRun,
         intent: IntentRecord | None,
         strictness: StrictnessProfile,
         classification: ClassificationResult,
         scope_check: dict[str, object] | None,
         unobserved: Sequence[str],
+        emit: bool,
     ) -> dict[str, object]:
         """Accept a patch whose analysis facts are provably unmoved."""
 
@@ -1125,27 +1255,26 @@ class _MCPSessionPatchContractMixin:
             ),
             "message": patch_msgs.VERIFY_ACCEPTED_ANALYZER_INVARIANT,
         }
-        intent_session = _intent_session(self)
-        intent_session._audit_emit(
-            root=after.root,
+        self._emit_patch_event(
+            run=after,
             event_type=EVENT_PATCH_VERIFIED,
             severity="info",
-            run_id=_helpers._short_run_id(after.run_id),
             intent_id=(intent.intent_id if intent is not None else None),
-            report_digest=intent_session._report_digest_value(after),
             status=status,
             payload=payload,
+            emit=emit,
         )
         return payload
 
     def _scope_violation_verify_payload(
         self,
         *,
-        before: MCPRunRecord,
-        after: MCPRunRecord | None,
+        before: PatchRun,
+        after: PatchRun | None,
         intent: IntentRecord | None,
         classification: ClassificationResult,
         scope_check: dict[str, object] | None,
+        emit: bool,
     ) -> dict[str, object]:
         """Blocking scope violation, shared by every verify path."""
 
@@ -1169,28 +1298,27 @@ class _MCPSessionPatchContractMixin:
                 violations=tuple(violations),
             ),
         }
-        intent_session = _intent_session(self)
-        intent_session._audit_emit(
-            root=before.root,
+        self._emit_patch_event(
+            run=before,
             event_type=EVENT_PATCH_VIOLATED,
             severity="warn",
-            run_id=_helpers._short_run_id(before.run_id),
             intent_id=(intent.intent_id if intent is not None else None),
-            report_digest=intent_session._report_digest_value(before),
             status=PatchContractStatus.VIOLATED.value,
             payload=payload,
+            emit=emit,
         )
         return payload
 
     def _profile_fast_path(
         self,
         *,
-        before: MCPRunRecord,
+        before: PatchRun,
         intent: IntentRecord | None,
         strictness: StrictnessProfile,
         classification: ClassificationResult,
         scope_check: dict[str, object] | None,
         scope_violated: bool,
+        emit: bool,
     ) -> dict[str, object]:
         """Handle verify when after_run_id is not provided.
 
@@ -1209,6 +1337,7 @@ class _MCPSessionPatchContractMixin:
                 intent=intent,
                 classification=classification,
                 scope_check=scope_check,
+                emit=emit,
             )
 
         # Profiles that require after_run return unverified.
@@ -1254,39 +1383,39 @@ class _MCPSessionPatchContractMixin:
             ),
             "message": profile_accepted_message(profile),
         }
-        intent_session = _intent_session(self)
-        intent_session._audit_emit(
-            root=before.root,
+        self._emit_patch_event(
+            run=before,
             event_type=EVENT_PATCH_VERIFIED,
             severity="info",
-            run_id=_helpers._short_run_id(before.run_id),
             intent_id=(intent.intent_id if intent is not None else None),
-            report_digest=intent_session._report_digest_value(before),
             status=status,
             payload=payload,
+            emit=emit,
         )
         return payload
 
     def _full_structural_verify(
         self,
         *,
-        before: MCPRunRecord,
-        after: MCPRunRecord,
+        before: PatchRun,
+        after: PatchRun,
         intent: IntentRecord | None,
         strictness: StrictnessProfile,
         classification: ClassificationResult,
         scope_check: dict[str, object] | None,
         actual_changed_files: tuple[str, ...],
+        emit: bool,
     ) -> dict[str, object]:
         """Full structural verification path (before + after runs)."""
         # Both records are already root-bound (the before-run at the intent's
         # root); compare them directly. Re-resolving the ids globally raised
         # multi-root ambiguity once a same-commit sibling registered the same
         # content-addressed id.
-        compare_payload = _state_session(self)._compare_run_records(
-            before=before,
-            after=after,
-            focus="all",
+        compare_payload = self._compare_runs_on(
+            before=before.record,
+            after=after.record,
+            before_facts=before,
+            after_facts=after,
         )
         if not bool(compare_payload.get("comparable")):
             return self._unverified_patch_contract(
@@ -1296,9 +1425,9 @@ class _MCPSessionPatchContractMixin:
                 structural_delta=self._structural_delta(compare_payload),
                 classification=classification,
             )
-        budgets = self._budgets_for_record(record=after, strictness=strictness)
-        before_gate = self._gate_preview(record=before, budgets=budgets)
-        after_gate = self._gate_preview(record=after, budgets=budgets)
+        budgets = self._budgets_for_record(record=after.record, strictness=strictness)
+        before_gate = self._gate_preview(run=before, budgets=budgets)
+        after_gate = self._gate_preview(run=after, budgets=budgets)
         structural_delta = self._structural_delta(compare_payload)
         regressions = _as_sequence(structural_delta.get("regressions"))
         intent_regressions, external_regressions = self._partition_regressions(
@@ -1330,7 +1459,7 @@ class _MCPSessionPatchContractMixin:
         baseline_abuse = detect_baseline_abuse(
             before_gate_would_fail=before_gate_fails,
             after_gate_would_fail=after_gate_fails,
-            after_baseline_status=baseline_status(after.served_report),
+            after_baseline_status=after.baseline_status(),
             regressions=len(regressions),
             changed_files=len(actual_changed_files),
             intent_available=intent is not None,
@@ -1407,31 +1536,47 @@ class _MCPSessionPatchContractMixin:
             if status == PatchContractStatus.VIOLATED.value
             else EVENT_PATCH_VERIFIED
         )
-        intent_session = _intent_session(self)
-        audit_sequence = intent_session._audit_emit(
-            root=after.root,
+        intent_id = intent.intent_id if intent is not None else None
+        audit_sequence = self._emit_patch_event(
+            run=after,
             event_type=event_type,
             severity="warn" if blocking_violations else "info",
-            run_id=_helpers._short_run_id(after.run_id),
-            intent_id=(intent.intent_id if intent is not None else None),
-            report_digest=intent_session._report_digest_value(after),
+            intent_id=intent_id,
             status=status,
             payload=payload,
+            emit=emit,
         )
         if audit_sequence is not None:
             payload["_audit_sequence"] = audit_sequence
         if bool(baseline_abuse.get("detected")):
-            intent_session._audit_emit(
-                root=after.root,
+            self._emit_patch_event(
+                run=after,
                 event_type=EVENT_BASELINE_ABUSE,
                 severity="error",
-                run_id=_helpers._short_run_id(after.run_id),
-                intent_id=(intent.intent_id if intent is not None else None),
-                report_digest=intent_session._report_digest_value(after),
+                intent_id=intent_id,
                 status="detected",
                 payload=payload,
+                emit=emit,
             )
         return payload
+
+    def _compare_runs_on(
+        self,
+        *,
+        before: MCPRunRecord,
+        after: MCPRunRecord,
+        before_facts: PatchRun,
+        after_facts: PatchRun,
+    ) -> dict[str, object]:
+        """The run comparison over every finding of the two runs' facts,
+        wherever they come from (``_session_state_mixin.compare_runs_on_facts``)."""
+        return compare_runs_on_facts(
+            before=before,
+            after=after,
+            focus="all",
+            before_facts=before_facts,
+            after_facts=after_facts,
+        )
 
     def _scope_check_payload(
         self,
@@ -1449,7 +1594,7 @@ class _MCPSessionPatchContractMixin:
     def _partition_regressions(
         self,
         *,
-        after: MCPRunRecord,
+        after: PatchRun,
         regressions: Sequence[object],
         intent: IntentRecord | None,
     ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
@@ -1461,7 +1606,7 @@ class _MCPSessionPatchContractMixin:
                 ],
                 [],
             )
-        path_index = self._finding_path_index(after)
+        path_index = after.finding_path_index()
         intent_regressions: list[dict[str, object]] = []
         external_regressions: list[dict[str, object]] = []
         for regression in regressions:
@@ -1479,15 +1624,27 @@ class _MCPSessionPatchContractMixin:
         self,
         record: MCPRunRecord,
     ) -> dict[str, frozenset[str]]:
-        index: dict[str, frozenset[str]] = {}
         finding_session = _finding_session(self)
-        for finding in finding_session._base_findings(record):
+        return self._finding_path_index_for(
+            finding_session._base_findings(record),
+            canonical_to_short=finding_session._finding_id_maps(record)[0],
+        )
+
+    def _finding_path_index_for(
+        self,
+        findings: Sequence[Mapping[str, object]],
+        *,
+        canonical_to_short: Mapping[str, str],
+    ) -> dict[str, frozenset[str]]:
+        """Each finding's paths, under its canonical id and its short one."""
+        index: dict[str, frozenset[str]] = {}
+        for finding in findings:
             finding_id = str(finding.get("id", "")).strip()
             if not finding_id:
                 continue
             paths = self._finding_paths(finding)
             index[finding_id] = paths
-            index[finding_session._short_finding_id(record, finding_id)] = paths
+            index[canonical_to_short.get(finding_id, finding_id)] = paths
         return index
 
     def _finding_paths(self, finding: Mapping[str, object]) -> frozenset[str]:
@@ -1600,25 +1757,13 @@ class _MCPSessionPatchContractMixin:
     def _worsened_symbols(
         self,
         *,
-        before: MCPRunRecord,
-        after: MCPRunRecord,
+        before: PatchRun,
+        after: PatchRun,
     ) -> list[dict[str, object]]:
         worsened: list[dict[str, object]] = []
-        for family, value_keys in (
-            ("complexity", ("cyclomatic_complexity", "complexity", "value")),
-            ("coupling", ("cbo", "coupling", "value")),
-            ("cohesion", ("lcom4", "cohesion", "value")),
-        ):
-            before_items = self._metric_item_index(
-                before.served_report,
-                family=family,
-                value_keys=value_keys,
-            )
-            after_items = self._metric_item_index(
-                after.served_report,
-                family=family,
-                value_keys=value_keys,
-            )
+        for family in METRIC_VALUE_KEYS:
+            before_items = before.metric_item_index(family)
+            after_items = after.metric_item_index(family)
             for key, after_value in after_items.items():
                 before_value = before_items.get(key)
                 if before_value is not None and after_value > before_value:
@@ -1643,99 +1788,21 @@ class _MCPSessionPatchContractMixin:
             ),
         )[:MAX_WORSENED_ITEMS]
 
-    def _metric_item_index(
-        self,
-        document: Mapping[str, object],
-        *,
-        family: str,
-        value_keys: Sequence[str],
-    ) -> dict[tuple[str, str], int]:
-        result: dict[tuple[str, str], int] = {}
-        for item in self._metric_family_items(document, family=family):
-            path = self._item_path(item)
-            symbol = self._item_symbol(item)
-            value = self._first_int(item, keys=value_keys)
-            if path or symbol:
-                result[(path, symbol)] = value
-        return result
-
-    def _metric_family_items(
-        self,
-        document: Mapping[str, object],
-        *,
-        family: str,
-    ) -> tuple[Mapping[str, object], ...]:
-        metrics = _as_mapping(document.get("metrics"))
-        families = _as_mapping(metrics.get("families"))
-        family_payload = _as_mapping(families.get(family))
-        return tuple(
-            _as_mapping(item) for item in _as_sequence(family_payload.get("items"))
-        )
-
-    def _family_max(
-        self,
-        document: Mapping[str, object],
-        *,
-        family: str,
-        keys: Sequence[str],
-    ) -> int:
-        values = [
-            self._first_int(item, keys=keys)
-            for item in self._metric_family_items(document, family=family)
-        ]
-        return max(values, default=0)
-
-    def _dead_code_high_confidence(self, document: Mapping[str, object]) -> int:
-        return sum(
-            1
-            for item in self._metric_family_items(document, family="dead_code")
-            if str(item.get("confidence", "")).strip().lower() == "high"
-        )
-
-    def _dependency_cycles(
-        self,
-        document: Mapping[str, object],
-    ) -> tuple[object, ...]:
-        metrics = _as_mapping(document.get("metrics"))
-        families = _as_mapping(metrics.get("families"))
-        dependencies = _as_mapping(families.get("dependencies"))
-        return tuple(_as_sequence(dependencies.get("cycles")))
-
-    def _first_int(self, item: Mapping[str, object], *, keys: Sequence[str]) -> int:
-        for key in keys:
-            if key in item:
-                return _coerce_int(item.get(key))
-        return 0
-
-    def _item_path(self, item: Mapping[str, object]) -> str:
-        for key in ("relative_path", "path", "filepath", "file"):
-            value = str(item.get(key, "")).strip()
-            if value:
-                return value.replace("\\", "/")
-        return ""
-
-    def _item_symbol(self, item: Mapping[str, object]) -> str:
-        for key in ("qualname", "symbol", "name", "class_name", "function"):
-            value = str(item.get(key, "")).strip()
-            if value:
-                return value
-        return ""
-
     def _threshold_headroom(self, *, budget: int, current: int) -> int | None:
         return budget - current if budget >= 0 else None
 
-    def _run_ref_payload(self, record: MCPRunRecord) -> dict[str, object]:
+    def _run_ref_payload(self, run: PatchRun) -> dict[str, object]:
         return {
-            "run_id": _helpers._short_run_id(record.run_id),
-            "health": _helpers._summary_health_score(record.summary),
+            "run_id": _helpers._short_run_id(run.record.run_id),
+            "health": run.health(),
         }
 
     def _unverified_patch_contract(
         self,
         *,
         reason: str,
-        before: MCPRunRecord | None = None,
-        after: MCPRunRecord | None = None,
+        before: PatchRun | None = None,
+        after: PatchRun | None = None,
         structural_delta: Mapping[str, object] | None = None,
         classification: ClassificationResult | None = None,
         scope_check: dict[str, object] | None = None,
@@ -1770,9 +1837,10 @@ class _MCPSessionPatchContractMixin:
     def _expired_patch_contract(
         self,
         *,
-        before: MCPRunRecord,
-        after: MCPRunRecord,
+        before: PatchRun,
+        after: PatchRun,
         intent: IntentRecord,
+        emit: bool,
     ) -> dict[str, object]:
         reason = "report_digest_mismatch"
         from .messages import patch_contract as patch_msgs
@@ -1789,16 +1857,14 @@ class _MCPSessionPatchContractMixin:
             "claim_validation_recommended": False,
             "message": patch_msgs.PATCH_CONTRACT_EXPIRED_MESSAGE,
         }
-        intent_session = _intent_session(self)
-        intent_session._audit_emit(
-            root=after.root,
+        self._emit_patch_event(
+            run=after,
             event_type=EVENT_PATCH_EXPIRED,
             severity="warn",
-            run_id=_helpers._short_run_id(after.run_id),
             intent_id=intent.intent_id,
-            report_digest=intent_session._report_digest_value(after),
             status=PatchContractStatus.EXPIRED.value,
             payload=payload,
+            emit=emit,
         )
         return payload
 

@@ -36,6 +36,7 @@ import codeclone.surfaces.mcp._graph_search as mcp_graph_search_mod
 import codeclone.surfaces.mcp._implementation_context as mcp_context_projection_mod
 import codeclone.surfaces.mcp._intent as mcp_intent_mod
 import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
+import codeclone.surfaces.mcp._patch_contract_runs as mcp_patch_runs_mod
 import codeclone.surfaces.mcp._review_receipt as mcp_review_receipt_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
 import codeclone.surfaces.mcp._session_context_mixin as mcp_context_session_mod
@@ -8117,13 +8118,13 @@ def test_mcp_patch_contract_helper_edges(
         "scope_violation",
         "baseline_abuse:baseline_updated_without_intent",
     )
-    assert service._first_int({"value": "5"}, keys=("missing", "value")) == 5
-    assert service._first_int({}, keys=("value",)) == 0
-    assert service._item_path({"file": "pkg\\a.py"}) == "pkg/a.py"
-    assert service._item_path({}) == ""
-    assert service._item_symbol({"class_name": "Widget"}) == "Widget"
+    assert mcp_patch_runs_mod._first_int({"value": "5"}, keys=("missing", "value")) == 5
+    assert mcp_patch_runs_mod._first_int({}, keys=("value",)) == 0
+    assert mcp_patch_runs_mod._item_path({"file": "pkg\\a.py"}) == "pkg/a.py"
+    assert mcp_patch_runs_mod._item_path({}) == ""
+    assert mcp_patch_runs_mod._item_symbol({"class_name": "Widget"}) == "Widget"
     assert (
-        service._metric_item_index(
+        mcp_patch_runs_mod.record_metric_item_index(
             {"metrics": {"families": {"complexity": {"items": [{"value": 10}]}}}},
             family="complexity",
             value_keys=("value",),
@@ -8154,10 +8155,13 @@ def test_mcp_patch_contract_helper_edges(
         intent_available=True,
     )["triggers"] == ["baseline_changed_with_functional_code"]
 
+    run = mcp_patch_runs_mod.RecordPatchRun(
+        cast("mcp_patch_runs_mod.PatchSession", service), record
+    )
     incomparable = service._unverified_patch_contract(
         reason="incomparable_runs",
-        before=record,
-        after=record,
+        before=run,
+        after=run,
         structural_delta={"verdict": "incomparable"},
     )
     assert incomparable["before"] == {"run_id": "abcdef12", "health": 90}
@@ -8165,8 +8169,9 @@ def test_mcp_patch_contract_helper_edges(
     assert incomparable["structural_delta"] == {"verdict": "incomparable"}
 
     expired = service._expired_patch_contract(
-        before=record,
-        after=record,
+        before=run,
+        after=run,
+        emit=True,
         intent=mcp_intent_mod.IntentRecord(
             intent_id="intent-expired",
             run_id=record.run_id,
@@ -8375,7 +8380,7 @@ def test_mcp_patch_contract_verify_profile_and_resolver_edges(
 
     monkeypatch.setattr(
         partition_service,
-        "_compare_run_records",
+        "_compare_runs_on",
         unknown_regression_compare,
     )
     partitioned = partition_service.check_patch_contract(
@@ -8450,7 +8455,7 @@ def test_mcp_patch_contract_verify_incomparable_and_expired_edges(
             "verdict": "incomparable",
         }
 
-    monkeypatch.setattr(service, "_compare_run_records", incomparable_compare)
+    monkeypatch.setattr(service, "_compare_runs_on", incomparable_compare)
     incomparable = service.check_patch_contract(
         mode="verify",
         before_run_id="beforeedge",
@@ -8471,7 +8476,7 @@ def test_mcp_patch_contract_verify_incomparable_and_expired_edges(
     def always_expired(**kwargs: object) -> bool:
         return True
 
-    monkeypatch.setattr(service, "_compare_run_records", stable_compare)
+    monkeypatch.setattr(service, "_compare_runs_on", stable_compare)
     declared = service.manage_change_intent(
         action="declare",
         run_id="beforeedge",
@@ -19957,7 +19962,11 @@ def test_same_run_scope_violation_answers_typed_verify_payload(
         actual_changed_files=("pkg/x.py",),
     )
     assert outcome is not None
-    assert outcome.get("status") in {"violated", "unverified"}
+    run = mcp_patch_runs_mod.RecordPatchRun(
+        cast("mcp_patch_runs_mod.PatchSession", service), record
+    )
+    answer = outcome({"before": run, "after": run}, True)
+    assert answer.get("status") in {"violated", "unverified"}
 
 
 def test_get_run_summary_without_analysis_profile(tmp_path: Path) -> None:

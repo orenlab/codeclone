@@ -69,10 +69,10 @@ that moves onto the store next declares its own the same way.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, cast
+from typing import Final, cast, get_args
 
 from codeclone.canonical.authority_projection import candidate_rows_from_families
 from codeclone.canonical.comparison_projection import (
@@ -87,12 +87,18 @@ from codeclone.canonical.comparison_rows import (
     NOVELTY_KNOWN,
     NOVELTY_NEW,
     NOVELTY_UNAVAILABLE,
+    FindingNoveltyRow,
 )
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.evaluation_projection import (
     CLONES_ONLY_MODE,
     diff_health_delta,
     health_payload,
+    health_score,
+)
+from codeclone.canonical.finding_projection import (
+    PROJECTED_FAMILIES,
+    projected_finding_groups,
 )
 from codeclone.canonical.identity import (
     FileId,
@@ -110,6 +116,7 @@ from codeclone.canonical.model import (
     relationship_resolution_status,
 )
 from codeclone.canonical.store import (
+    FAMILY_ADOPTION_COUNT,
     FAMILY_ADOPTION_DELTA,
     FAMILY_ANALYSIS_POPULATION,
     FAMILY_API_SURFACE_DELTA,
@@ -121,6 +128,7 @@ from codeclone.canonical.store import (
     FAMILY_COMPARISON_AVAILABILITY,
     FAMILY_COMPLEXITY_HOTSPOT,
     FAMILY_COMPLEXITY_NOVELTY,
+    FAMILY_COUPLING_COHESION,
     FAMILY_COUPLING_HOTSPOT,
     FAMILY_COUPLING_NOVELTY,
     FAMILY_COVERAGE_JOIN,
@@ -131,10 +139,12 @@ from codeclone.canonical.store import (
     FAMILY_DEPENDENCY_CYCLE,
     FAMILY_DEPENDENCY_CYCLE_NOVELTY,
     FAMILY_FILE_MODULE,
+    FAMILY_FINDING_EVALUATION,
     FAMILY_GRAPH_NODE,
     FAMILY_HEALTH_DELTA,
     FAMILY_HEALTH_RESULT,
     FAMILY_IMPORT_OBSERVATION,
+    FAMILY_LANE_TRUST,
     FAMILY_METRICS_BASELINE_WITNESS,
     FAMILY_RELATIONSHIP_OBSERVATION,
     FAMILY_RISK_OBSERVATION,
@@ -152,13 +162,18 @@ from codeclone.canonical.store import (
 from codeclone.canonical.summary_projection import (
     analysis_mode,
     analysis_profile,
+    authority_counts,
     coverage_join,
     dead_code,
+    design_maxima,
     finding_counts,
     inventory,
     security_surfaces,
 )
+from codeclone.contracts import FAMILY_CLONES, ObservedPopulation
 from codeclone.contracts.report_identity import PRODUCER_STATE_COMPLETE
+from codeclone.domain.findings import FAMILY_CLONE
+from codeclone.metrics.coverage_join import permille
 from codeclone.models import (
     DependencyBinding,
     DependencyMechanism,
@@ -171,6 +186,7 @@ from codeclone.models import (
     RelationshipRecord,
     RelationshipResolutionStatus,
 )
+from codeclone.report.gates.evaluator import GateState
 
 
 @dataclass(frozen=True, slots=True)
@@ -624,6 +640,282 @@ def read_served_run_summary(store: RunStore, run_id: str) -> ServedRunSummary:
     return run_summary_from_model(model, run_id=run_id)
 
 
+# -- the patch contract (consumer migration C6) -----------------------------
+#
+# ``check_patch_contract`` (and the verification ``finish_controlled_change``
+# runs) reads, per run, the facts below and nothing else of the run: its
+# health score, the per-symbol complexity / coupling / cohesion values, the
+# budget's aggregates, the baseline status, its finding universe (id, kind,
+# severity, paths) and the inputs of a gate evaluated under the BUDGET's
+# request.  The verdicts -- the comparison of two runs, the gate under a
+# strictness profile, the scope partition -- are the session's arithmetic
+# over these facts (``evaluation_projection``: an answer under a request
+# other than the run's own is not projected), so this reading carries the
+# facts and the surface keeps computing.
+
+
+#: The metric families the verifier reads per symbol, and the stored
+#: dimension each one is: complexity off the risk lane, coupling and
+#: cohesion off the class lane.
+PATCH_METRIC_DIMENSIONS: Final[Mapping[str, str]] = {
+    "complexity": "cyclomatic_complexity",
+    "coupling": "cbo",
+    "cohesion": "lcom4",
+}
+#: The clone kinds the budget's ``clone_groups`` and the gate's clone total
+#: count (the surface's ``func_clones_count + block_clones_count``).
+PATCH_CLONE_KINDS: Final[tuple[str, ...]] = ("function", "block")
+#: The cycle kind the gate's import-cycle terms count.
+_IMPORT_CYCLE: Final = "import_cycle"
+#: The gate state's population when the run states none, as the document
+#: reader defaults it (``report.gates.evaluator``).
+_DEFAULT_POPULATION: Final = "complete_nonempty"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ServedPatchRun:
+    """The facts one run lends the patch contract, read out of the store.
+
+    ``metric_items`` maps each of :data:`PATCH_METRIC_DIMENSIONS` to the
+    run's ``(path, glued qualname) -> value`` index; ``findings`` maps each
+    tracked family (the document's key) to its groups, each carrying the
+    severity the run's evaluation stated; ``gate_state`` with ``lane_trust``
+    and ``enabled_lanes`` is everything the one gate evaluator needs to
+    answer under any request.  ``coverage_join_status`` is ``None`` for a
+    run that was handed no coverage report.
+    """
+
+    run_id: str
+    analysis_mode: str
+    health_score: int | None
+    metric_items: Mapping[str, Mapping[tuple[str, str], int]]
+    dependency_cycles: int
+    clone_groups: int
+    dead_code_high_confidence: int
+    baseline_status: str
+    findings: Mapping[str, tuple[Mapping[str, object], ...]]
+    gate_state: GateState
+    lane_trust: Mapping[str, str]
+    enabled_lanes: tuple[str, ...]
+    coverage_join_status: str | None
+    coverage_invalid_reason: str | None
+
+
+def _patch_metric_items(
+    model: CanonicalModel, heads: _Heads
+) -> dict[str, dict[tuple[str, str], int]]:
+    """Each metric family's per-symbol index, in the document's spelling.
+
+    The class lane drops a zero row, so a dimension a MEASURED class (one
+    the lane holds any row for) does not carry is its measured zero -- the
+    rule ``summary_projection.design_maxima`` states for the maxima, applied
+    per symbol so a coupling that rises from zero is a rise from zero.
+    """
+    facts = model.facts.analysis
+
+    def key(symbol: SymbolId) -> tuple[str, str]:
+        return symbol.file.path, heads.glued(symbol)
+
+    complexity = {
+        key(row.symbol): row.numerator
+        for row in facts.risk_observations
+        if row.dimension == PATCH_METRIC_DIMENSIONS["complexity"]
+    }
+    measured = {key(row.symbol) for row in facts.coupling_cohesion_observations}
+    items: dict[str, dict[tuple[str, str], int]] = {"complexity": complexity}
+    for family in ("coupling", "cohesion"):
+        values = {
+            key(row.symbol): row.numerator
+            for row in facts.coupling_cohesion_observations
+            if row.dimension == PATCH_METRIC_DIMENSIONS[family]
+        }
+        items[family] = {symbol: values.get(symbol, 0) for symbol in measured}
+    return items
+
+
+def _patch_findings(
+    model: CanonicalModel,
+) -> dict[str, tuple[Mapping[str, object], ...]]:
+    """The projected groups of every tracked family, under the document's
+    family key, each with the severity the run's evaluation stated."""
+    groups = projected_finding_groups(model)
+    severities = {
+        row.finding_id: row.severity
+        for row in model.facts.evaluation.finding_evaluation
+    }
+    return {
+        (FAMILY_CLONES if family == FAMILY_CLONE else family): tuple(
+            {**group, "severity": severities.get(str(group["id"]), "")}
+            for group in groups[family]
+        )
+        for family in PROJECTED_FAMILIES
+    }
+
+
+def _new_ids(rows: Iterable[FindingNoveltyRow]) -> set[str]:
+    return {row.finding_id for row in rows if row.novelty == NOVELTY_NEW}
+
+
+def _adoption_permille(model: CanonicalModel, feature: str) -> int:
+    rows = [
+        row for row in model.facts.analysis.adoption_counts if row.feature == feature
+    ]
+    return permille(
+        sum(row.numerator for row in rows), sum(row.denominator for row in rows)
+    )
+
+
+def _patch_gate_state(
+    model: CanonicalModel, findings: Mapping[str, tuple[Mapping[str, object], ...]]
+) -> GateState:
+    """The gate's input record off the stored rows -- every term the
+    document reader (``report.gates.evaluator``) takes off a document, the
+    clone counts the surface hands it, the diff terms its metrics diff
+    carries -- so the one evaluator can answer under the budget's request."""
+    facts = model.facts.analysis
+    comparison = model.facts.comparison
+    health = model.facts.evaluation.health_result
+    maxima = design_maxima(facts)
+    dead = dead_code(model)
+    coverage = coverage_join(model)
+    deltas = metric_deltas(comparison)
+    new_clones = new_clone_groups(comparison)
+    new_cycles = _new_ids(comparison.dependency_cycle_novelty)
+    cycle_kinds = {
+        str(group["id"]): group["kind"]
+        for group in findings["design"]
+        if group.get("category") == "dependency"
+    }
+    population = _DEFAULT_POPULATION if health is None else health.population
+    return GateState(
+        health_population=cast(
+            "ObservedPopulation",
+            population
+            if population in get_args(ObservedPopulation)
+            else _DEFAULT_POPULATION,
+        ),
+        clone_new_count=0 if new_clones is None else new_clones,
+        clone_total=sum(
+            1 for row in facts.clone_groups if row.clone_kind in PATCH_CLONE_KINDS
+        ),
+        complexity_max=maxima["complexity_max"],
+        coupling_max=maxima["coupling_max"],
+        cohesion_max=maxima["cohesion_max"],
+        dependency_cycles=len(facts.dependency_cycles),
+        import_dependency_cycles=sum(
+            1 for row in facts.dependency_cycles if row.kind == _IMPORT_CYCLE
+        ),
+        dead_high_confidence=int(cast("int", dead.get("high_confidence", 0))),
+        dead_unreachable_statements=len(facts.unreachable_statement_groups),
+        unresolved_external_override=int(
+            cast("int", dead.get("unresolved_external_override", 0))
+        ),
+        health_score=0 if health is None or health.score is None else health.score,
+        typing_param_permille=_adoption_permille(model, "typing.parameters"),
+        docstring_permille=_adoption_permille(model, "docstrings.public_symbols"),
+        coverage_join_status=str(coverage.get("status", "")),
+        coverage_hotspots=int(cast("int", coverage.get("coverage_hotspots", 0))),
+        api_breaking_changes=deltas["api_breaking_changes"],
+        authority_violations=authority_counts(facts)["violations"],
+        diff_new_high_risk_functions=len(_new_ids(comparison.complexity_novelty)),
+        diff_new_high_coupling_classes=len(_new_ids(comparison.coupling_novelty)),
+        diff_new_cycles=len(new_cycles),
+        diff_new_import_cycles=sum(
+            1
+            for finding_id in new_cycles
+            if cycle_kinds.get(finding_id) == _IMPORT_CYCLE
+        ),
+        diff_new_dead_code=len(_new_ids(comparison.dead_symbol_novelty)),
+        diff_health_delta=diff_health_delta(model) or 0,
+        diff_typing_param_permille_delta=deltas["typing_param_permille_delta"],
+        diff_typing_return_permille_delta=deltas["typing_return_permille_delta"],
+        diff_docstring_permille_delta=deltas["docstring_permille_delta"],
+    )
+
+
+def patch_run_from_model(model: CanonicalModel, *, run_id: str) -> ServedPatchRun:
+    """Arrange one stored run's facts into what the patch contract reads."""
+    heads = _Heads(
+        {relation.file.path: relation.module.module for relation in model.file_modules}
+    )
+    items = _patch_metric_items(model, heads)
+    findings = _patch_findings(model)
+    dead = dead_code(model)
+    coverage = model.facts.analysis.coverage_join
+    lane_trust = {row.lane: row.status for row in model.facts.comparison.lane_trust}
+    return ServedPatchRun(
+        run_id=run_id,
+        analysis_mode=analysis_mode(model),
+        health_score=health_score(model),
+        metric_items=items,
+        dependency_cycles=len(model.facts.analysis.dependency_cycles),
+        clone_groups=sum(
+            1
+            for row in model.facts.analysis.clone_groups
+            if row.clone_kind in PATCH_CLONE_KINDS
+        ),
+        dead_code_high_confidence=int(cast("int", dead.get("high_confidence", 0))),
+        baseline_status=str(baseline_state(model.facts.comparison).get("status", "")),
+        findings=findings,
+        gate_state=_patch_gate_state(model, findings),
+        lane_trust=dict(sorted(lane_trust.items())),
+        # One trust row per enabled lane, by construction
+        # (``report.document.builder._baseline_projection``).
+        enabled_lanes=tuple(sorted(lane_trust)),
+        coverage_join_status=None if coverage is None else coverage.status,
+        coverage_invalid_reason=None if coverage is None else coverage.invalid_reason,
+    )
+
+
+#: The families :func:`read_served_patch_run` reads -- every one, and none
+#: it could do without (``tests/test_patch_contract_declared_families.py``).
+#: Measured 2026-10-03 on the sixteen served populations and the 25 runs of
+#: the patch-contract battery: 33 of the store's 56 families.
+PATCH_CONTRACT_FAMILIES: Final = (
+    FAMILY_ADOPTION_COUNT,
+    FAMILY_ADOPTION_DELTA,
+    FAMILY_ANALYSIS_POPULATION,
+    FAMILY_API_SURFACE_DELTA,
+    FAMILY_BASELINE_WITNESS,
+    FAMILY_CLONE_GROUP,
+    FAMILY_CLONE_NOVELTY,
+    FAMILY_COHESION_HOTSPOT,
+    FAMILY_COMPARISON_AVAILABILITY,
+    FAMILY_COMPLEXITY_HOTSPOT,
+    FAMILY_COMPLEXITY_NOVELTY,
+    FAMILY_COUPLING_COHESION,
+    FAMILY_COUPLING_HOTSPOT,
+    FAMILY_COUPLING_NOVELTY,
+    FAMILY_COVERAGE_JOIN,
+    FAMILY_COVERAGE_UNIT,
+    FAMILY_DEAD_CODE_SUMMARY,
+    FAMILY_DEAD_SYMBOL_GROUP,
+    FAMILY_DEAD_SYMBOL_NOVELTY,
+    FAMILY_DEPENDENCY_CYCLE,
+    FAMILY_DEPENDENCY_CYCLE_NOVELTY,
+    FAMILY_FILE_MODULE,
+    FAMILY_FINDING_EVALUATION,
+    FAMILY_GRAPH_NODE,
+    FAMILY_HEALTH_DELTA,
+    FAMILY_HEALTH_RESULT,
+    FAMILY_LANE_TRUST,
+    FAMILY_RISK_OBSERVATION,
+    FAMILY_SEMANTIC_EDGE,
+    FAMILY_STRUCTURAL_GROUP,
+    FAMILY_SUPPRESSED_CLONE_GROUP,
+    FAMILY_UNREACHABLE_STATEMENT_GROUP,
+    FAMILY_VIOLATION,
+)
+
+
+def read_served_patch_run(store: RunStore, run_id: str) -> ServedPatchRun:
+    """Read the declared families of one published run and arrange what
+    the patch contract reads of it.  Bounded, as every reading here is:
+    :data:`PATCH_CONTRACT_FAMILIES` only."""
+    model = read_named_families(store, run_id, PATCH_CONTRACT_FAMILIES)
+    return patch_run_from_model(model, run_id=run_id)
+
+
 __all__ = [
     "AUTHORITY_PRODUCER_FAMILY",
     "RUN_SUMMARY_FAMILIES",
@@ -640,4 +932,12 @@ __all__ = [
     "read_served_run_summary",
     "relationship_record_order_key",
     "run_summary_from_model",
+]
+__all__ += [
+    "PATCH_CLONE_KINDS",
+    "PATCH_CONTRACT_FAMILIES",
+    "PATCH_METRIC_DIMENSIONS",
+    "ServedPatchRun",
+    "patch_run_from_model",
+    "read_served_patch_run",
 ]
