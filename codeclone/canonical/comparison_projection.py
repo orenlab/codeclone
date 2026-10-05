@@ -33,17 +33,33 @@ census row reads it, and the authority family's reason is a document
 literal with no comparison term.  Run-against-run facts (``compare_runs``,
 the PR summary's ``resolved``, the patch contract's structural delta) are
 not comparisons against a baseline and belong to a later wave.
+
+**Not compared -> null** (the maintainer's ruling, 2026-10-03): ``0`` means
+a measured comparison result equal to zero; if no comparison happened, ``0``
+is a false statement.  The nine comparison fields of ``get_run_summary``
+(:data:`SUMMARY_COMPARISON_FIELDS`) state a number only when their
+comparison ran, and ``None`` otherwise.  This module is the one owner of
+that decision for both answers: :func:`answered_if_compared` applies it,
+and it reads which comparisons ran -- never a value -- from the carrier
+each answer is built from: the store's rows (:func:`comparisons_made`) or
+the sealed report document the memory answer is built from
+(:func:`document_comparisons_made`).  Both read the same producer decision
+(``core.reporting`` writes ``baseline_diff_available`` per family and
+``core.comparison_snapshot`` turns that same flag into the availability
+row), so the two answers cannot disagree about a cell.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from itertools import chain
 from typing import Final
 
 from codeclone.canonical.comparison_rows import (
     AVAILABILITY_COMPARED,
     CLONE_KIND_LANES,
+    COMPARISON_LANE_FAMILIES,
+    DELTA_FAMILY_TERMS,
     NOVELTY_KNOWN,
     NOVELTY_NEW,
     NOVELTY_UNAVAILABLE,
@@ -231,23 +247,27 @@ def known_debt_paths(model: CanonicalModel) -> tuple[str, ...]:
 # -- Cmp4 under Cmp7, and Cmp5: the ``diff`` block ---------------------------------
 
 
-def new_clone_groups(comparison: ComparisonFacts) -> int | None:
-    """``diff.new_clones``: ``None`` when no clone lane was compared (not a
-    zero the run never measured), else the new clone groups."""
-    compared = {
+def _compared_lanes(comparison: ComparisonFacts) -> frozenset[str]:
+    """The lanes whose comparison ran, as the availability rows state it."""
+    return frozenset(
         row.lane
         for row in comparison.comparison_availability
         if row.availability == AVAILABILITY_COMPARED
-    }
-    if compared.isdisjoint(CLONE_KIND_LANES.values()):
+    )
+
+
+def new_clone_groups(comparison: ComparisonFacts) -> int | None:
+    """``diff.new_clones``: ``None`` when no clone lane was compared (not a
+    zero the run never measured), else the new clone groups."""
+    if COMPARISON_CLONES not in comparisons_made(comparison):
         return None
     return sum(1 for row in comparison.clone_novelty if row.novelty == NOVELTY_NEW)
 
 
 def metric_deltas(comparison: ComparisonFacts) -> dict[str, int]:
     """The six ``diff`` delta terms in the surface's order.  A family whose
-    comparison did not run has no rows; the surface answers ``0`` for its
-    terms, and so does the projection."""
+    comparison did not run has no rows and reads ``0`` here; the run
+    summary answers those terms ``None`` (:func:`answered_if_compared`)."""
     values = {
         row.delta: row.value
         for row in chain(comparison.adoption_delta, comparison.api_surface_delta)
@@ -255,12 +275,151 @@ def metric_deltas(comparison: ComparisonFacts) -> dict[str, int]:
     return {key: values.get(key, 0) for key in DIFF_DELTA_KEYS}
 
 
+# -- Not compared -> null: the one owner of the decision ----------------------------
+
+#: The comparisons whose results the run summary states.  The adoption and
+#: API comparisons are named by their lane (an availability row of the
+#: comparison house); the clone comparison is either clone lane; the health
+#: comparison is the health score's delta, which the house states by the
+#: presence of its ``health_delta`` row (no availability row carries it).
+COMPARISON_CLONES: Final = "clones"
+COMPARISON_ADOPTION: Final = "adoption_counts"
+COMPARISON_API_SURFACE: Final = "api_surface"
+COMPARISON_HEALTH: Final = "health"
+
+#: The two blocks of the run summary that carry comparison fields.
+SUMMARY_DIFF_BLOCK: Final = "diff"
+SUMMARY_HEALTH_BLOCK: Final = "health"
+
+#: The report document's metrics family whose ``baseline_diff_available``
+#: states the health comparison (``core.reporting._metrics_for_report``).
+_HEALTH_FAMILY: Final = "health"
+
+#: The lane whose comparison states each metric delta family -- the pairing
+#: both comparison producers write (a pin holds it equal to theirs).
+_DELTA_FAMILY_COMPARISONS: Final[Mapping[str, str]] = {
+    "adoption_delta": COMPARISON_ADOPTION,
+    "api_surface_delta": COMPARISON_API_SURFACE,
+}
+
+#: Every comparison field of ``get_run_summary``, as (block, key), and the
+#: comparison whose result it states: the eight terms of ``diff`` and
+#: ``health.delta``.
+SUMMARY_COMPARISON_FIELDS: Final[Mapping[tuple[str, str], str]] = {
+    (SUMMARY_DIFF_BLOCK, "new_clones"): COMPARISON_CLONES,
+    (SUMMARY_DIFF_BLOCK, "health_delta"): COMPARISON_HEALTH,
+    **{
+        (SUMMARY_DIFF_BLOCK, term): comparison
+        for family, comparison in _DELTA_FAMILY_COMPARISONS.items()
+        for term in DELTA_FAMILY_TERMS[family]
+    },
+    (SUMMARY_HEALTH_BLOCK, "delta"): COMPARISON_HEALTH,
+}
+
+
+def _made(*, lanes: Collection[str], clones: bool, health: bool) -> frozenset[str]:
+    made = {
+        comparison
+        for comparison in _DELTA_FAMILY_COMPARISONS.values()
+        if comparison in lanes
+    }
+    if clones:
+        made.add(COMPARISON_CLONES)
+    if health:
+        made.add(COMPARISON_HEALTH)
+    return frozenset(made)
+
+
+def comparisons_made(comparison: ComparisonFacts) -> frozenset[str]:
+    """The comparisons one stored run made, off its rows: a lane whose
+    availability row says ``compared`` (the model law holds its delta rows
+    present exactly then), either clone lane compared, and the health
+    comparison when its ``health_delta`` row exists."""
+    lanes = _compared_lanes(comparison)
+    return _made(
+        lanes=lanes,
+        clones=not lanes.isdisjoint(CLONE_KIND_LANES.values()),
+        health=bool(comparison.health_delta),
+    )
+
+
+def _family_compared(document: Mapping[str, object], family: str) -> bool:
+    families = as_mapping(as_mapping(document.get("metrics")).get("families"))
+    summary = as_mapping(as_mapping(families.get(family)).get("summary"))
+    return summary.get("baseline_diff_available") is True
+
+
+def document_comparisons_made(
+    document: Mapping[str, object], *, clones_compared: bool
+) -> frozenset[str]:
+    """The comparisons one run made, off the sealed report document its
+    memory answer is built from -- the two facts the producer turns into an
+    availability row: a metric lane's comparison ran when the lane is not a
+    disabled capability of the run (``baseline.disabled_capabilities``) and
+    its family says ``baseline_diff_available: true``; the health
+    comparison when the health family says so (the flag the health delta
+    row is written from).  A disabled lane is never compared, whatever its
+    family says: measured 2026-10-05, a run with the API lane not enabled
+    publishes ``api_surface.summary.baseline_diff_available: true`` beside
+    ``enabled: false``.  The clone comparison is the caller's own record of
+    it (``clones_compared``): the document states it per group, and cannot
+    state a trusted clone lane that was not compared when no group exists."""
+    disabled = {
+        str(lane)
+        for lane in as_sequence(
+            as_mapping(document.get("baseline")).get("disabled_capabilities")
+        )
+    }
+    lanes = {
+        lane
+        for lane in _DELTA_FAMILY_COMPARISONS.values()
+        if lane not in disabled
+        and _family_compared(document, COMPARISON_LANE_FAMILIES[lane])
+    }
+    return _made(
+        lanes=lanes,
+        clones=clones_compared,
+        health=_family_compared(document, _HEALTH_FAMILY),
+    )
+
+
+def answered_if_compared(
+    block: str, values: Mapping[str, object], made: Collection[str]
+) -> dict[str, object]:
+    """One block of the run summary with every comparison field whose
+    comparison this run did not make answered ``None``.
+
+    The decision reads ``made`` -- the comparisons that ran, as the answer's
+    own carrier states them -- and never the value: a measured zero stays
+    ``0``, and a number the run never measured is ``None`` whatever it is.
+    Every other key of the block is its own, unchanged and in its order.
+    """
+    answered: dict[str, object] = {}
+    for key, value in values.items():
+        comparison = SUMMARY_COMPARISON_FIELDS.get((block, key))
+        if comparison is not None and comparison not in made:
+            answered[key] = None
+        else:
+            answered[key] = value
+    return answered
+
+
 __all__ = [
+    "COMPARISON_ADOPTION",
+    "COMPARISON_API_SURFACE",
+    "COMPARISON_CLONES",
+    "COMPARISON_HEALTH",
     "DIFF_DELTA_KEYS",
     "SOURCE_KIND_BREAKDOWN",
+    "SUMMARY_COMPARISON_FIELDS",
+    "SUMMARY_DIFF_BLOCK",
+    "SUMMARY_HEALTH_BLOCK",
     "UNPROJECTED_BASELINE_KEYS",
     "UNPROJECTED_DIFF_KEYS",
+    "answered_if_compared",
     "baseline_state",
+    "comparisons_made",
+    "document_comparisons_made",
     "group_novelty",
     "known_debt_paths",
     "metric_deltas",

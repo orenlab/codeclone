@@ -31,6 +31,11 @@ from typing import NamedTuple
 
 import pytest
 
+from codeclone.canonical.comparison_projection import (
+    SUMMARY_HEALTH_BLOCK,
+    answered_if_compared,
+    comparisons_made,
+)
 from codeclone.canonical.evaluation_projection import (
     GATE_CONFIG_KEYS,
     authority_health,
@@ -117,6 +122,19 @@ def _answer(served: _Served, label: str) -> Mapping[str, object]:
     return as_mapping(served.answers[label])
 
 
+def _projected_health(served: _Served, label: str) -> Mapping[str, object]:
+    """The health block ``label`` answers from the stored run: the
+    projection, and for the run summary under the one comparison rule
+    (ruling 2026-10-03: ``delta`` is ``None`` for a health comparison the
+    run did not make).  The triage and the PR summary keep the projection's
+    word until their own ruling."""
+    health = health_payload(served.model)
+    if label != "run_summary":
+        return health
+    made = comparisons_made(served.model.facts.comparison)
+    return answered_if_compared(SUMMARY_HEALTH_BLOCK, health, made)
+
+
 # -- The accounting ---------------------------------------------------------------
 
 
@@ -165,7 +183,7 @@ def test_the_health_block_matches_the_mcp_surface(
 ) -> None:
     served = _served(request, name)
     assert _canonical(_answer(served, label)["health"]) == _canonical(
-        health_payload(served.model)
+        _projected_health(served, label)
     )
 
 
@@ -468,9 +486,10 @@ def test_the_withheld_populations_state_their_word_and_no_number(
     request: pytest.FixtureRequest,
 ) -> None:
     """The accounting of the two populations below: each answers a health
-    block that names its population and states no score, grade or dimensions
-    — neither the scored block of the serving corpus nor the no-verdict
-    block of the clones-only run."""
+    block that names its population and states no score, grade, dimensions
+    or delta — neither the scored block of the serving corpus nor the
+    no-verdict block of the clones-only run.  The delta is ``None``: no
+    health comparison ran (ruling 2026-10-03, "not compared -> null")."""
     blocks = {
         name: _answer(_served_withheld(request, name), "run_summary")["health"]
         for name in SERVED_WITHHELD_POPULATIONS
@@ -482,7 +501,7 @@ def test_the_withheld_populations_state_their_word_and_no_number(
             "dimensions": None,
             "population": name,
             "baseline_diff_available": False,
-            "delta": 0,
+            "delta": None,
         }
         for name in SERVED_WITHHELD_POPULATIONS
     }
@@ -503,7 +522,7 @@ def test_a_withheld_health_block_matches_the_mcp_surface(
     reads back withheld — not as "no verdict", not as a number."""
     served = _served_withheld(request, name)
     assert _canonical(_answer(served, label)["health"]) == _canonical(
-        health_payload(served.model)
+        _projected_health(served, label)
     )
 
 

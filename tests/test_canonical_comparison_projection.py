@@ -15,9 +15,11 @@ against a container of a foreign scope (refused by the surface's resolver),
 with the API lane not enabled, and the baseline-less serving corpus.
 
 Where the surface says something the store does not, the difference is
-pinned as measured and named — never fitted: the API deltas the surface
-states for a run whose API lane was not enabled
-(``test_the_surface_states_api_deltas_for_a_lane_the_run_disabled``).
+pinned as measured and named — never fitted.  The API deltas the surface
+once stated for a run whose API comparison did not run were such a
+difference (2026-09-27); since the ruling "not compared -> null"
+(2026-10-03) both answer ``None``
+(``test_an_api_comparison_that_did_not_run_answers_null_on_both_sides``).
 """
 
 from __future__ import annotations
@@ -32,9 +34,12 @@ import pytest
 from codeclone.canonical.comparison_projection import (
     DIFF_DELTA_KEYS,
     SOURCE_KIND_BREAKDOWN,
+    SUMMARY_DIFF_BLOCK,
     UNPROJECTED_BASELINE_KEYS,
     UNPROJECTED_DIFF_KEYS,
+    answered_if_compared,
     baseline_state,
+    comparisons_made,
     group_novelty,
     known_debt_paths,
     metric_deltas,
@@ -100,9 +105,10 @@ def served(request: pytest.FixtureRequest) -> _Served:
     return _served_population(request, request.param)
 
 
-#: The populations whose ``diff`` agrees with the store on every key: the
-#: API-disabled run is the measured divergence pinned on its own below.
-_DIFF_AGREEING = ("missing", "trusted", "foreign_scope")
+#: The populations whose ``diff`` agrees with the store on every key: all
+#: four, since the ruling "not compared -> null" (2026-10-03) closed the
+#: API divergence of the API-disabled and the partial run.
+_DIFF_AGREEING = ("missing", *SERVED_COMPARISON_POPULATIONS)
 
 
 @pytest.fixture(params=_DIFF_AGREEING)
@@ -181,10 +187,13 @@ def test_new_by_source_kind_matches_the_mcp_surface(
 
 
 def _projected_diff(comparison: ComparisonFacts) -> dict[str, object]:
-    return {
-        "new_clones": new_clone_groups(comparison),
-        **metric_deltas(comparison),
-    }
+    """The ``diff`` terms the run summary answers from the stored run: the
+    projections under the one comparison rule (ruling 2026-10-03)."""
+    return answered_if_compared(
+        SUMMARY_DIFF_BLOCK,
+        {"new_clones": new_clone_groups(comparison), **metric_deltas(comparison)},
+        comparisons_made(comparison),
+    )
 
 
 def _surface_diff(served: _Served) -> dict[str, object]:
@@ -198,7 +207,7 @@ def _surface_diff(served: _Served) -> dict[str, object]:
 def test_the_diff_block_matches_the_mcp_surface(served_diff: _Served) -> None:
     """``new_clones`` and the six deltas byte for byte, in the surface's
     order — on every population whose API lane ran or had nothing to
-    compare against (the API-disabled run is the divergence below)."""
+    compare against, and on the two whose API comparison did not run."""
     comparison = served_diff.model.facts.comparison
     assert _canonical(_projected_diff(comparison)) == _canonical(
         _surface_diff(served_diff)
@@ -208,12 +217,12 @@ def test_the_diff_block_matches_the_mcp_surface(served_diff: _Served) -> None:
 _API_TERMS = DELTA_FAMILY_TERMS["api_surface_delta"]
 
 
-#: The measured divergences (2026-09-27): for a run whose API comparison
-#: did not run, what the store says about the lane, and the ``diff`` terms
-#: the surface nevertheless states.
-_API_DIVERGENCE: dict[str, tuple[str, frozenset[str]]] = {
-    "api_disabled": ("disabled", frozenset({"api_breaking_changes"})),
-    "partial": ("not_compared", frozenset(_API_TERMS)),
+#: The runs whose API comparison did not run, and what the store says about
+#: the lane: not enabled (a disabled capability), or enabled over a partial
+#: population (trusted and not compared: the universe was not observed).
+_API_NOT_COMPARED: dict[str, str] = {
+    "api_disabled": "disabled",
+    "partial": "not_compared",
 }
 
 
@@ -227,28 +236,24 @@ def _api_lane_state(comparison: ComparisonFacts) -> str:
     )
 
 
-@pytest.mark.parametrize("name", list(_API_DIVERGENCE))
-def test_the_surface_states_api_deltas_for_an_api_comparison_that_did_not_run(
+@pytest.mark.parametrize("name", list(_API_NOT_COMPARED))
+def test_an_api_comparison_that_did_not_run_answers_null_on_both_sides(
     served_comparison_runs: dict[str, ServedComparisonRun], name: str
 ) -> None:
-    """DIVERGENCE on the desk, measured 2026-09-27, not fitted: when the
-    API comparison did not run — the lane not enabled (a disabled
-    capability), or enabled over a partial population (trusted and not
-    compared: the current universe was not observed) — the store carries
-    no API delta, while the surface's ``diff`` reads the metrics diff raw
-    and states API counts anyway (every baseline symbol as a breaking
-    change on the first; all three counts on the second).  Every other key
-    agrees byte for byte."""
+    """The divergence measured 2026-09-27 (the surface's ``diff`` read the
+    metrics diff raw and stated API counts for a comparison that did not
+    run -- every baseline symbol as a breaking change on the first, all
+    three counts on the second) is closed by the ruling "not compared ->
+    null" (2026-10-03): the store carries no API delta, and both answers
+    state ``None`` for the three API terms."""
     served = _comparison_served(served_comparison_runs[name])
     comparison = served.model.facts.comparison
-    state, divergent = _API_DIVERGENCE[name]
-    assert _api_lane_state(comparison) == state
+    assert _api_lane_state(comparison) == _API_NOT_COMPARED[name]
     assert not comparison.api_surface_delta
     projected = _projected_diff(comparison)
     surface = _surface_diff(served)
-    assert {key for key in projected if projected[key] != surface[key]} == divergent
-    assert [projected[term] for term in _API_TERMS] == [0, 0, 0]
-    assert all(isinstance(surface[term], int) for term in divergent)
+    assert [projected[term] for term in _API_TERMS] == [None, None, None]
+    assert _canonical(projected) == _canonical(surface)
 
 
 #: The two delta families the ``diff`` block's six deltas belong to.

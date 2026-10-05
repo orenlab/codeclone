@@ -25,6 +25,15 @@ answer is one constant over the whole population would let a projection
 answering that constant pass; the equivalence pins state the accounting
 before they count.
 
+Three populations were added for the ruling "not compared -> null"
+(2026-10-03), because the sixteen above hold no comparison that ran and
+measured zero, and no withheld health verdict under a trusted baseline: the
+stage-A tree against its own baseline (every comparison runs; all but the
+health score's measure zero), and the trusted tree with every Python file
+unparsable (``unmeasured``) or removed (``complete_empty``).  They are
+registered apart (``COMPARISON_STATE_POPULATIONS``), so a consumer that
+counts ``SUMMARY_POPULATIONS`` as its own population keeps the sixteen.
+
 This module is a helper, not a test module, so it may read the canonical
 store beside the surface (the Phase 39S test-import law binds
 ``tests/test_*.py`` only).
@@ -48,6 +57,7 @@ from codeclone.api.run_store_serving import (
 )
 from codeclone.canonical import store as store_module
 from codeclone.canonical.model import CanonicalModel
+from codeclone.surfaces.mcp._run_store_serving import memory_run_summary
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests import conftest as corpora
@@ -73,6 +83,23 @@ SUMMARY_POPULATIONS: dict[str, str] = {
     "clones_only_warm": "head_withheld",
 }
 
+#: The comparison-state populations of the ruling "not compared -> null"
+#: (2026-10-03), by name and publication.  Registered apart from
+#: ``SUMMARY_POPULATIONS``, which other consumers' pins count as their own
+#: population (patch verification, the blast radius): the run summary's
+#: pins read ``RUN_SUMMARY_POPULATIONS``, all nineteen.
+COMPARISON_STATE_POPULATIONS: dict[str, str] = {
+    "trusted_unchanged": "published",
+    "trusted_unmeasured": "head_withheld",
+    "trusted_complete_empty": "published",
+}
+
+#: Every population the run summary's own pins hold.
+RUN_SUMMARY_POPULATIONS: dict[str, str] = {
+    **SUMMARY_POPULATIONS,
+    **COMPARISON_STATE_POPULATIONS,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class SummaryPopulation:
@@ -88,9 +115,12 @@ class SummaryPopulation:
         return self.service._runs.resolve_any_root()
 
     def memory_answer(self) -> dict[str, object]:
-        """The answer the surface builds from the record alone."""
+        """The answer the surface builds from the record alone: its summary,
+        with ``null`` for a comparison the run did not make."""
         record = self.record
-        return self.service._summary_payload(record.summary, record=record)
+        return memory_run_summary(
+            record, self.service._summary_payload(record.summary, record=record)
+        )
 
     def answer(self, *, serve_from: str | None) -> dict[str, object]:
         """``get_run_summary`` under the rollout that published the run and
@@ -214,6 +244,9 @@ class SummaryPopulations:
             "coverage_ok": lambda: self._coverage(valid=True),
             "coverage_invalid": lambda: self._coverage(valid=False),
             "warm_rerun": lambda: self._no_baseline(analyses=2),
+            "trusted_unchanged": self._unchanged,
+            "trusted_unmeasured": lambda: self._trusted_unread(unparsable=True),
+            "trusted_complete_empty": lambda: self._trusted_unread(unparsable=False),
         }
         build = builders.get(name)
         if build is None:
@@ -276,6 +309,31 @@ class SummaryPopulations:
             corpora._write_unparsable(root)
         return root, {}, 1
 
+    def _unchanged(self) -> tuple[Path, dict[str, object], int]:
+        """Stage A against the baseline written from stage A: every
+        comparison runs, and every result but the health score's is zero."""
+        root = self._bare_tree("trusted_unchanged")
+        corpora.materialize_comparison_corpus(root, stage_b=False)
+        (root / "codeclone.baseline.json").write_bytes(
+            self._stage_a_baseline().read_bytes()
+        )
+        return root, {"api_surface": True}, 1
+
+    def _trusted_unread(
+        self, *, unparsable: bool
+    ) -> tuple[Path, dict[str, object], int]:
+        """The trusted tree with nothing to measure: every Python file
+        unparsable (``unmeasured``) or removed (``complete_empty``).  The
+        health verdict is withheld while the baseline stays trusted."""
+        name = "trusted_unmeasured" if unparsable else "trusted_complete_empty"
+        root = self._comparison_tree(name, "trusted")
+        for path in sorted(root.rglob("*.py")):
+            if unparsable:
+                path.write_text("def broken(:\n    pass\n", "utf-8")
+            else:
+                path.unlink()
+        return root, {"api_surface": True}, 1
+
     def _coverage(self, *, valid: bool) -> tuple[Path, dict[str, object], int]:
         """The trusted comparison tree joined with a Cobertura report that
         covers one of its two complexity hotspots a quarter and omits the
@@ -290,7 +348,7 @@ class SummaryPopulations:
         return root, {"coverage_xml": coverage.name, "api_surface": True}, 1
 
     def _serve(self, name: str) -> SummaryPopulation:
-        assert name in SUMMARY_POPULATIONS, name
+        assert name in RUN_SUMMARY_POPULATIONS, name
         root, request, analyses = self._tree(name)
         store_path = self._base / f"{name}.sqlite3"
         service = CodeCloneMCPService(history_limit=4)
@@ -301,7 +359,7 @@ class SummaryPopulations:
             name=name, root=root, store_path=store_path, service=service
         )
         corpora._published_store_run_id(
-            population.record, outcome=SUMMARY_POPULATIONS[name]
+            population.record, outcome=RUN_SUMMARY_POPULATIONS[name]
         )
         return population
 
@@ -522,6 +580,8 @@ def shared_populations(factory: pytest.TempPathFactory) -> SummaryPopulations:
 
 
 __all__ = [
+    "COMPARISON_STATE_POPULATIONS",
+    "RUN_SUMMARY_POPULATIONS",
     "STORE_ROW_PERTURBATIONS",
     "SUMMARY_POPULATIONS",
     "UNREAD_ROW_PERTURBATIONS",

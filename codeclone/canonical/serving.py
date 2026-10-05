@@ -78,7 +78,11 @@ from codeclone.canonical.authority_projection import candidate_rows_from_familie
 from codeclone.canonical.blast_radius_facts import BlastRadiusFacts
 from codeclone.canonical.blast_radius_projection import blast_radius_facts_from_model
 from codeclone.canonical.comparison_projection import (
+    SUMMARY_DIFF_BLOCK,
+    SUMMARY_HEALTH_BLOCK,
+    answered_if_compared,
     baseline_state,
+    comparisons_made,
     metric_deltas,
     metrics_baseline_state,
     new_by_source_kind,
@@ -572,18 +576,23 @@ def _security_block(model: CanonicalModel, mode: str) -> dict[str, object]:
 
 
 def run_summary_from_model(model: CanonicalModel, *, run_id: str) -> ServedRunSummary:
-    """Arrange one stored run's tier projections into the summary blocks."""
+    """Arrange one stored run's tier projections into the summary blocks.
+
+    The comparison fields of ``health`` and ``diff`` state a number only
+    for a comparison the stored run made (ruling 2026-10-03, one owner:
+    ``comparison_projection.answered_if_compared``)."""
     mode = analysis_mode(model)
     facts = model.facts.comparison
+    made = comparisons_made(facts)
     return ServedRunSummary(
         run_id=run_id,
         mode=mode,
         baseline=baseline_state(facts),
         metrics_baseline=metrics_baseline_state(facts),
         inventory=inventory(model),
-        health=health_payload(model),
+        health=answered_if_compared(SUMMARY_HEALTH_BLOCK, health_payload(model), made),
         findings=_findings_block(model),
-        diff=_diff_block(model),
+        diff=answered_if_compared(SUMMARY_DIFF_BLOCK, _diff_block(model), made),
         analysis_profile=analysis_profile(model),
         dead_code=dead_code(model),
         coverage_join=coverage_join(model),

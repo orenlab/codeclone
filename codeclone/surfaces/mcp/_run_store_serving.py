@@ -71,6 +71,8 @@ from ...api.run_store_serving import (
     SERVING_REASON_SERVED,
     SERVING_SOURCE_MEMORY,
     SERVING_SOURCE_RUN_STORE,
+    SUMMARY_DIFF_BLOCK,
+    SUMMARY_HEALTH_BLOCK,
     BlastRadiusFacts,
     RunStoreServingOutcome,
     ServedAuthorityCandidates,
@@ -78,6 +80,8 @@ from ...api.run_store_serving import (
     ServedRunSlices,
     ServedRunSummary,
     ServedUnitLocation,
+    answered_if_compared,
+    document_comparisons_made,
     read_run_store_authority_candidates,
     read_run_store_blast_radius_facts,
     read_run_store_patch_run,
@@ -240,6 +244,30 @@ def _place(payload: dict[str, object], key: str, block: Mapping[str, object]) ->
         payload.pop(key, None)
 
 
+def memory_run_summary(
+    record: MCPRunRecord, built: Mapping[str, object]
+) -> dict[str, object]:
+    """The run summary the record answers: the answer the surface ``built``
+    with every comparison field whose comparison this run did not make
+    answered ``None`` (ruling 2026-10-03, "not compared -> null").
+
+    Which comparisons ran is read off the sealed document the answer is
+    built from, and the clone comparison off the record's own account of it
+    (``None`` new-clone counts: no clone lane was compared) -- never off a
+    value -- through the one owner the store's answer applies too
+    (``canonical.comparison_projection``, behind the door).
+    """
+    baseline_diff = as_mapping(record.summary.get("baseline_diff"))
+    made = document_comparisons_made(
+        record.served_report,
+        clones_compared=baseline_diff.get("new_clone_groups_total") is not None,
+    )
+    payload = dict(built)
+    for block in (SUMMARY_DIFF_BLOCK, SUMMARY_HEALTH_BLOCK):
+        payload[block] = answered_if_compared(block, as_mapping(payload[block]), made)
+    return payload
+
+
 def store_summary_payload(
     memory: Mapping[str, object], stored: ServedRunSummary
 ) -> dict[str, object]:
@@ -400,6 +428,7 @@ __all__ = [
     "PRESENTATION_SECURITY_KEYS",
     "blast_radius_fields",
     "memory_authority_candidates",
+    "memory_run_summary",
     "memory_slices",
     "served_authority_candidates",
     "served_blast_radius",

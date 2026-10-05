@@ -14,7 +14,7 @@ exactly once: as a STORE field, answered from the run store's rows through
 not a store fact by ruling or by nature (identity, execution, presentation,
 live disk), with the source it keeps and why.
 
-The proof is held on sixteen live MCP executions, each with its own store
+The proof is held on nineteen live MCP executions, each with its own store
 (``tests/_run_summary_serving.py``), and the population is shown to
 DISTINGUISH before anything is counted (Probe Validity Law): every store
 field takes at least two values across it, and the named states a wrong
@@ -22,11 +22,11 @@ projection could hide behind -- the three novelty words, every health
 word, both coverage statuses, both inventory branches, the security block's
 three shapes -- are each present.
 
-Four (population, field) pairs disagree, measured 2026-10-03, and are
-pinned by name rather than fitted (``DECLARED_DIVERGENCES``).  On each of
-them the tool answers from memory, says ``divergent`` and names the fields;
-the controller's desk decides them.  Every other pair is equal byte for
-byte on the wire.
+A disagreement would be pinned by name rather than fitted
+(``DECLARED_DIVERGENCES``): on it the tool answers from memory, says
+``divergent`` and names the fields, and the controller's desk decides it.
+None is declared: since the ruling "not compared -> null" (2026-10-03)
+every pair is equal byte for byte on the wire.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ from codeclone.surfaces.mcp._run_store_serving import (
     summary_divergence,
 )
 from tests._run_summary_serving import (
-    SUMMARY_POPULATIONS,
+    RUN_SUMMARY_POPULATIONS,
     SummaryPopulations,
     shared_populations,
     stored_blocks,
@@ -127,25 +127,15 @@ MEMORY_HELD_KEYS: dict[str, str] = {
 #: The answer's own provenance, added by the serving edge.
 SERVING_KEY = "serving"
 
-#: The measured disagreements (2026-10-03), by population: the fields the
-#: store answers differently, in the answer's order.  Every one is on the
-#: controller's desk; none is fitted.
-DECLARED_DIVERGENCES: dict[str, tuple[str, ...]] = {
-    # Store more correct: a lane feeding health was recorded under an older
-    # schema, so the health comparison is withheld -- the memory's ``diff``
-    # says 0 beside its own ``health.baseline_diff_available: false``.
-    "older_schema_dead_code_lane": ("diff.health_delta",),
-    # Store more correct (desk 2026-09-27): the API lane is not enabled and
-    # the memory counts every baseline symbol as a breaking change.
-    "api_disabled": ("diff.api_breaking_changes",),
-    # Store more correct (desk 2026-09-27): an API comparison over a
-    # partial population did not run; the memory states its counts.
-    "partial": (
-        "diff.api_breaking_changes",
-        "diff.api_signature_changes",
-        "diff.new_api_symbols",
-    ),
-}
+#: The measured disagreements, by population: the fields the store answers
+#: differently, in the answer's order.  Every one goes to the controller's
+#: desk; none is fitted.  The three measured 2026-10-03 (``diff.health_delta``
+#: on ``older_schema_dead_code_lane``, ``diff.api_breaking_changes`` on
+#: ``api_disabled``, the three API terms on ``partial``) were each a number
+#: the memory stated for a comparison that did not run; the ruling "not
+#: compared -> null" (2026-10-03) answers them ``null`` on both sides
+#: (``tests/test_run_summary_not_compared_is_null.py``).
+DECLARED_DIVERGENCES: dict[str, tuple[str, ...]] = {}
 
 _ABSENT = "<absent>"
 
@@ -162,7 +152,7 @@ def pairs(populations: SummaryPopulations) -> dict[str, _Pair]:
     """Every population's memory answer beside the answer built from its
     store blocks."""
     built: dict[str, _Pair] = {}
-    for name in SUMMARY_POPULATIONS:
+    for name in RUN_SUMMARY_POPULATIONS:
         population = populations[name]
         memory = population.memory_answer()
         built[name] = (
@@ -187,7 +177,7 @@ def _at(payload: Mapping[str, object], path: str) -> str:
 
 
 def _store_cases() -> list[tuple[str, str]]:
-    return [(row, name) for row in STORE_FIELDS for name in SUMMARY_POPULATIONS]
+    return [(row, name) for row in STORE_FIELDS for name in RUN_SUMMARY_POPULATIONS]
 
 
 def test_the_registry_names_all_thirty_one_census_rows() -> None:
@@ -215,7 +205,7 @@ def _answer_paths(answer: Mapping[str, object]) -> set[str]:
     return paths
 
 
-@pytest.mark.parametrize("name", list(SUMMARY_POPULATIONS))
+@pytest.mark.parametrize("name", list(RUN_SUMMARY_POPULATIONS))
 def test_every_field_of_the_answer_is_registered_once(
     pairs: dict[str, _Pair], name: str
 ) -> None:
@@ -241,7 +231,7 @@ def test_every_store_field_equals_memory_byte_for_byte(
             assert _at(candidate, path) == _at(memory, path), (row, name, path)
 
 
-@pytest.mark.parametrize("name", list(SUMMARY_POPULATIONS))
+@pytest.mark.parametrize("name", list(RUN_SUMMARY_POPULATIONS))
 def test_the_store_answers_no_memory_field(pairs: dict[str, _Pair], name: str) -> None:
     """Every field that is not a store fact is memory's, byte for byte, in
     the answer built from the store."""
@@ -267,7 +257,7 @@ _STORE_BLOCKS = (
 )
 
 
-@pytest.mark.parametrize("name", list(SUMMARY_POPULATIONS))
+@pytest.mark.parametrize("name", list(RUN_SUMMARY_POPULATIONS))
 def test_the_store_blocks_carry_no_memory_held_key(
     populations: SummaryPopulations, name: str
 ) -> None:
@@ -280,7 +270,7 @@ def test_the_store_blocks_carry_no_memory_held_key(
         assert key not in getattr(stored, block), (name, path)
 
 
-@pytest.mark.parametrize("name", list(SUMMARY_POPULATIONS))
+@pytest.mark.parametrize("name", list(RUN_SUMMARY_POPULATIONS))
 def test_the_served_answer_is_memory_and_names_its_source(
     populations: SummaryPopulations, pairs: dict[str, _Pair], name: str
 ) -> None:

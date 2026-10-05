@@ -8,7 +8,7 @@
 
 The run summary is read with ``read_named_families`` over
 ``RUN_SUMMARY_FAMILIES``: every family outside the declaration is a typed
-absence, so the declaration is proven in both directions on the sixteen
+absence, so the declaration is proven in both directions on the nineteen
 served populations (``tests/_run_summary_serving.py``) --
 
 * complete: the bounded summary never refuses, and it equals the summary of
@@ -52,7 +52,7 @@ from codeclone.canonical.store import (
     read_named_families,
 )
 from tests._run_summary_serving import (
-    SUMMARY_POPULATIONS,
+    RUN_SUMMARY_POPULATIONS,
     UNREAD_ROW_PERTURBATIONS,
     SummaryPopulations,
     shared_populations,
@@ -80,7 +80,7 @@ def populations(tmp_path_factory: pytest.TempPathFactory) -> SummaryPopulations:
 def stored(populations: SummaryPopulations) -> list[_Stored]:
     """Every population's store and the run its execution published."""
     runs: list[_Stored] = []
-    for name in SUMMARY_POPULATIONS:
+    for name in RUN_SUMMARY_POPULATIONS:
         population = populations[name]
         link = population.record.execution.run_snapshot_link
         assert link is not None and link.store_run_id
