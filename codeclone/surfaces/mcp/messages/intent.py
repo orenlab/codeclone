@@ -20,6 +20,16 @@ PROMOTE_BEFORE_RUN_EVICTED: Final = (
     "Before-run was evicted from bounded history. Re-analyze and redeclare the intent."
 )
 
+#: An intent this session still knows whose before-run the server no longer
+#: holds.  Its next step is the patch-contract hint of the same reason word,
+#: so finish and manage_change_intent hand out one procedure.
+BEFORE_RUN_EVICTED: Final = (
+    "This intent is still known to the session, but the analysis run it was "
+    "declared against is no longer held by this MCP server, so it cannot be "
+    "checked or verified as declared. It stays known until it is recovered "
+    "or cleared."
+)
+
 PROMOTE_STILL_BLOCKED: Final = "Intent is still blocked by active workspace intents."
 
 PROMOTED_RECHECK: Final = (

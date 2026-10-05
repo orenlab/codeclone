@@ -42,6 +42,16 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
         "Governance config changes require a post-edit analysis."
         " Run analyze_repository(root=<repo root>) and pass after_run_id."
     ),
+    "before_run_evicted": (
+        "The intent's before-run is no longer held by this MCP server. Call "
+        "analyze_repository(root=<intent root>); if the files are unchanged "
+        "since the intent was declared, call "
+        "manage_change_intent(action='recover', root=<intent root>, "
+        "intent_id=<intent_id>, run_id=<the new run_id>) and finish again. "
+        "If recover is rejected because the tree moved, call "
+        "manage_change_intent(action='clear', intent_id=<intent_id>) and "
+        "start_controlled_change(root=<intent root>, ...) again."
+    ),
     "before_run_root_mismatch": (
         "The before-run belongs to a different repository root than the"
         " intent. Run analyze_repository(root=<intent root>) on the intent's"

@@ -7,12 +7,12 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final, Protocol, cast
 
 from ...audit import (
     EVENT_BLAST_RADIUS,
@@ -100,6 +100,7 @@ from ._workspace_intents import (
     write_workspace_intent_with_existing,
 )
 from .messages import intent as intent_msgs
+from .messages import patch_contract as patch_msgs
 from .messages import workflow as workflow_msgs
 
 if TYPE_CHECKING:
@@ -123,9 +124,85 @@ class _RecoveryRun:
     report_digest: str
 
 
+#: The one reason word for "this session knows the intent, and no longer
+#: holds the execution it was declared against".  ``no_before_run`` (the
+#: atomic verify: the REQUEST names no before-run it can resolve) and
+#: ``run_not_available`` (recover: the run the CALLER offered is not held)
+#: keep their own meanings and their own sites.
+BEFORE_RUN_EVICTED: Final = "before_run_evicted"
+
+
+def before_run_evicted_answer(intent: IntentRecord) -> dict[str, object]:
+    """The typed answer for an intent whose before-run this server lost.
+
+    A queued intent never held its run and cannot be recovered back into the
+    queue, so it keeps the redeclare road ``promote`` has always named, byte
+    for byte.  Every other intent is offered the recover road, with clear and
+    a fresh start as its fallback -- the patch-contract hint of the same word,
+    so finish and manage_change_intent hand out one procedure.
+    """
+
+    if intent.status is IntentStatus.QUEUED:
+        next_step = intent_msgs.PROMOTE_BEFORE_RUN_EVICTED_NEXT
+        message = intent_msgs.PROMOTE_BEFORE_RUN_EVICTED
+    else:
+        next_step = patch_msgs.NEXT_STEP_HINTS[BEFORE_RUN_EVICTED]
+        message = intent_msgs.BEFORE_RUN_EVICTED
+    return {
+        "intent_id": intent.intent_id,
+        "status": "unverified",
+        "reason": BEFORE_RUN_EVICTED,
+        "next_step": next_step,
+        "message": message,
+    }
+
+
+class MCPIntentBeforeRunEvictedError(MCPServiceContractError):
+    """An intent this session knows, whose before-run it no longer holds.
+
+    A contract error, so a surface that does not branch on it still refuses
+    in-band -- the reason word and its next step are in the text -- while the
+    intent-lifecycle surfaces catch it and answer the typed payload.
+    """
+
+    def __init__(self, intent: IntentRecord) -> None:
+        self.intent = intent
+        answer = before_run_evicted_answer(intent)
+        super().__init__(
+            f"{BEFORE_RUN_EVICTED}: intent {intent.intent_id}. "
+            f"{answer['message']} next_step: {answer['next_step']}"
+        )
+
+
+def _before_run_evicted(intent: IntentRecord) -> MCPIntentBeforeRunEvictedError:
+    return MCPIntentBeforeRunEvictedError(intent)
+
+
+def _typed_eviction(call: Callable[[], dict[str, object]]) -> dict[str, object]:
+    """Run an intent-addressed action; a lost before-run is its typed answer."""
+
+    try:
+        return call()
+    except MCPIntentBeforeRunEvictedError as evicted:
+        return before_run_evicted_answer(evicted.intent)
+
+
+class _SessionStatePrune(Protocol):
+    def _prune_session_state(self) -> None: ...
+
+
+def _run_state_prune(session: object) -> None:
+    """The next prune in the session's method order (the state session's)."""
+
+    cast(_SessionStatePrune, session)._prune_session_state()
+
+
 class _MCPSessionIntentMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
+    # Intents whose before-run the server stopped holding: known until clear
+    # or recover, never dropped silently.  Disjoint from ``_active_intents``.
+    _before_run_evicted_intents: dict[str, IntentRecord]
     _state_lock: _StateLock
     _intent_sequence: int
     _agent_pid: int
@@ -211,29 +288,31 @@ class _MCPSessionIntentMixin:
             case "promote":
                 return self._promote_queued_intent(intent_id=intent_id)
             case "get":
-                record, active_intent = self._resolve_intent(
-                    run_id=run_id,
-                    intent_id=intent_id,
-                    root=root,
-                )
-                return self._intent_payload_with_expiry(
-                    record=record,
-                    intent=active_intent,
+                return _typed_eviction(
+                    lambda: self._get_change_intent(
+                        run_id=run_id,
+                        intent_id=intent_id,
+                        root=root,
+                    )
                 )
             case "check":
-                return self._check_change_intent(
-                    run_id=run_id,
-                    intent_id=intent_id,
-                    root=root,
-                    diff_ref=diff_ref,
-                    changed_files=changed_files,
+                return _typed_eviction(
+                    lambda: self._check_change_intent(
+                        run_id=run_id,
+                        intent_id=intent_id,
+                        root=root,
+                        diff_ref=diff_ref,
+                        changed_files=changed_files,
+                    )
                 )
             case "clear":
                 return self._clear_change_intent(intent_id=intent_id)
             case "renew":
-                return self._renew_change_intent(
-                    intent_id=intent_id,
-                    lease_seconds=lease_seconds,
+                return _typed_eviction(
+                    lambda: self._renew_change_intent(
+                        intent_id=intent_id,
+                        lease_seconds=lease_seconds,
+                    )
                 )
             case "list_workspace":
                 return self._list_workspace_intents(root=root)
@@ -258,6 +337,20 @@ class _MCPSessionIntentMixin:
                     "gc_workspace, get, list_workspace, promote, recover, "
                     "renew, reset_workspace."
                 )
+
+    def _get_change_intent(
+        self,
+        *,
+        run_id: str | None,
+        intent_id: str | None,
+        root: str | None,
+    ) -> dict[str, object]:
+        record, active_intent = self._resolve_intent(
+            run_id=run_id,
+            intent_id=intent_id,
+            root=root,
+        )
+        return self._intent_payload_with_expiry(record=record, intent=active_intent)
 
     def _run_for_declared_root(
         self,
@@ -340,6 +433,7 @@ class _MCPSessionIntentMixin:
                 )
             for existing in superseded:
                 self._active_intents.pop(existing.intent_id, None)
+                # Released below, once the replacement holds its own pin.
             self._intent_sequence += 1
             intent_id = (
                 f"intent-{_helpers._short_run_id(record.run_id)}-"
@@ -365,7 +459,15 @@ class _MCPSessionIntentMixin:
                 before_execution_id=record.execution.execution_event_id,
             )
             self._active_intents[intent_id] = record_payload
+            # Ids restart when clear_session_runs resets the sequence; a
+            # retired intent that kept this id has just lost its registry row
+            # to the new one (same owner, same id), so it is no longer known.
+            self._before_run_evicted_intents.pop(intent_id, None)
             self._runs.pin_execution(record.execution.execution_event_id)
+            # After the new pin, never before: the superseded intent is
+            # usually bound to this very execution, and releasing its pin
+            # first could let the history bound forget the run in between.
+            self._release_superseded_pins(superseded)
         workspace_record = self._workspace_record_from_intent(
             record=record,
             intent=record_payload,
@@ -553,7 +655,7 @@ class _MCPSessionIntentMixin:
         if intent_id is None:
             raise MCPServiceContractError("action='promote' requires intent_id.")
         with self._state_lock:
-            queued_intent = self._active_intents.get(intent_id)
+            queued_intent = self._known_intent_record(intent_id)
         if queued_intent is None:
             raise MCPServiceContractError(f"Unknown change intent id: {intent_id}")
         if queued_intent.status != IntentStatus.QUEUED:
@@ -566,13 +668,7 @@ class _MCPSessionIntentMixin:
         try:
             record = self._intent_bound_run(queued_intent)
         except (MCPRunNotFoundError, MCPRunRootMismatchError):
-            return {
-                "intent_id": intent_id,
-                "status": "unverified",
-                "reason": "before_run_evicted",
-                "next_step": intent_msgs.PROMOTE_BEFORE_RUN_EVICTED_NEXT,
-                "message": intent_msgs.PROMOTE_BEFORE_RUN_EVICTED,
-            }
+            return before_run_evicted_answer(queued_intent)
         # Promotion grants edit authority just as declaration does, so it
         # asks the same question before re-checking conflicts it can read.
         refusal = workspace_admission_refusal(root=record.root, operation="promote")
@@ -792,33 +888,14 @@ class _MCPSessionIntentMixin:
 
     def _clear_change_intent(self, *, intent_id: str | None) -> dict[str, object]:
         with self._state_lock:
-            removed_ids: tuple[str, ...]
-            removed_intents: tuple[IntentRecord, ...]
-            if intent_id is not None:
-                if intent_id not in self._active_intents:
-                    raise MCPServiceContractError(
-                        f"Unknown change intent id: {intent_id}"
-                    )
-                removed_ids = (intent_id,)
-                removed = self._active_intents.pop(intent_id)
-                removed_intents = (removed,)
-            else:
-                removed_ids = tuple(self._active_intents)
-                removed_intents = tuple(self._active_intents.values())
-                self._active_intents.clear()
-            # The registry row to remove belongs to the *intent's* root. Reading
-            # it back off a resolved run record made clear follow whichever
-            # checkout happened to own that run id last.
-            workspace_targets: tuple[tuple[Path, IntentRecord, str], ...] = tuple(
-                (
-                    removed_intent.root,
-                    removed_intent,
-                    self._report_digest_value(record)
-                    if record is not None
-                    else removed_intent.report_digest,
-                )
-                for removed_intent in removed_intents
-                for record in (self._optional_intent_bound_run(removed_intent),)
+            # A retired intent holds no pin -- its execution, and the pin with
+            # it, are already gone -- so only the active ones are unpinned.
+            removed_intents, retired_intents = self._pop_cleared_intents(intent_id)
+            removed_ids = tuple(
+                intent.intent_id for intent in (*removed_intents, *retired_intents)
+            )
+            workspace_targets = self._clear_workspace_targets(
+                removed_intents, retired_intents
             )
             for removed_intent in removed_intents:
                 self._unpin_intent_run(removed_intent)
@@ -859,11 +936,8 @@ class _MCPSessionIntentMixin:
         root: str | None = None,
     ) -> tuple[MCPRunRecord, IntentRecord]:
         if intent_id is not None:
-            with self._state_lock:
-                active_intent = self._active_intents.get(intent_id)
-            if active_intent is None:
-                raise MCPServiceContractError(f"Unknown change intent id: {intent_id}")
-            return self._intent_bound_run(active_intent), active_intent
+            active_intent = self._held_intent(intent_id)
+            return self._bound_run_or_retire(active_intent), active_intent
         # A caller-supplied root binds the lookup; without one, resolution
         # still fails closed if the id is held under several checkouts.
         record = (
@@ -1194,6 +1268,9 @@ class _MCPSessionIntentMixin:
         if isinstance(workspace_update, dict):
             return workspace_update
         recovered_at, previous_removed = workspace_update
+        with self._state_lock:
+            # Recovered: the intent is bound to a held execution again.
+            self._before_run_evicted_intents.pop(recovered.intent_id, None)
         return self._recovered_payload(
             target=target,
             recovery_run=recovery_run,
@@ -1273,7 +1350,7 @@ class _MCPSessionIntentMixin:
             own_start_epoch=self._agent_start_epoch,
             now=now,
         )
-        if ownership not in {IntentOwnership.RECOVERABLE, IntentOwnership.OWN_STALE}:
+        if not self._recovery_admits(intent_id, ownership):
             return self._recovery_rejected(
                 intent_id=intent_id,
                 reason="not_recoverable",
@@ -1770,6 +1847,204 @@ class _MCPSessionIntentMixin:
             self._runs.unpin_execution(intent.before_execution_id)
         else:
             self._runs.unpin(intent.run_id, root=intent.root)
+
+    def _release_superseded_pins(self, superseded: Sequence[IntentRecord]) -> None:
+        """Release the pins superseded intents held -- and only held ones.
+
+        Popping a superseded intent without this left its pin standing until
+        the pin ceiling took it.  A queued intent holds none: its downgrade
+        released it, and releasing again would take the replacement's pin on
+        the same execution.
+        """
+
+        for intent in superseded:
+            if intent.status is not IntentStatus.QUEUED:
+                self._unpin_intent_run(intent)
+
+    def _prune_session_state(self) -> None:
+        """The session's prune, then the intents whose before-run went with it.
+
+        The state prune forgets what belonged to runs no longer held; an
+        intent is not forgotten that way.  It is retired here, by the owner
+        of intent state, so the drop that used to happen there silently --
+        no audit event, the registry row left saying ``active``, every later
+        call answering "Unknown change intent id" -- cannot happen at all.
+        """
+
+        _run_state_prune(super())
+        self._retire_intents_without_before_run()
+
+    def _retire_intents_without_before_run(self) -> None:
+        """Move every active intent whose before-run is gone to the retired map.
+
+        An intent is held by the execution it was declared against; one that
+        predates the binding is held by its report's name.  Each retirement
+        is announced once -- registry row and audit event -- and the intent
+        stays known until ``clear`` or ``recover``.
+        """
+
+        held_run_ids = {record.run_id for record in self._runs.records()}
+        with self._state_lock:
+            retired = tuple(
+                intent
+                for intent in self._active_intents.values()
+                if (
+                    not self._runs.holds_execution(intent.before_execution_id)
+                    if intent.before_execution_id is not None
+                    else intent.run_id not in held_run_ids
+                )
+            )
+            for intent in retired:
+                self._active_intents.pop(intent.intent_id, None)
+                self._before_run_evicted_intents[intent.intent_id] = intent
+        for intent in retired:
+            self._announce_retirement(intent)
+
+    def _announce_retirement(self, intent: IntentRecord) -> None:
+        # The row carries the fate: an intent that held scope now needs
+        # recovery; a queued one holds none and stays queued, or it would
+        # start blocking the very agents it was waiting behind.
+        lifecycle = (
+            WorkspaceIntentLifecycle.QUEUED
+            if intent.status is IntentStatus.QUEUED
+            else WorkspaceIntentLifecycle.NEEDS_RECOVERY
+        )
+        try:
+            workspace_synced = update_workspace_intent_status(
+                root=intent.root,
+                pid=self._agent_pid,
+                start_epoch=self._agent_start_epoch,
+                intent_id=intent.intent_id,
+                new_status=lifecycle.value,
+            )
+        except WorkspaceIntentRegistryUnreadableError:
+            # An analysis must not fail over a registry it cannot read; the
+            # audit event says the row was not moved.
+            workspace_synced = False
+        self._audit_emit(
+            root=intent.root,
+            event_type=EVENT_INTENT_EXPIRED,
+            severity="warn",
+            run_id=_helpers._short_run_id(intent.run_id),
+            intent_id=intent.intent_id,
+            report_digest=intent.report_digest,
+            status=BEFORE_RUN_EVICTED,
+            payload={
+                **intent.to_payload(short_run_id=_helpers._short_run_id(intent.run_id)),
+                **before_run_evicted_answer(intent),
+                "intent_description": intent.intent_description,
+                "workspace_synced": workspace_synced,
+            },
+        )
+
+    def _known_intent_record(self, intent_id: str) -> IntentRecord | None:
+        """The intent this session knows by ``intent_id``: active or retired."""
+
+        return self._active_intents.get(
+            intent_id
+        ) or self._before_run_evicted_intents.get(intent_id)
+
+    def _knows_intent(self, intent_id: str) -> bool:
+        with self._state_lock:
+            return self._known_intent_record(intent_id) is not None
+
+    def _held_intent(self, intent_id: str) -> IntentRecord:
+        """The active intent by id; a retired one is answered by its reason."""
+
+        with self._state_lock:
+            active_intent = self._active_intents.get(intent_id)
+            retired = self._before_run_evicted_intents.get(intent_id)
+        if active_intent is not None:
+            return active_intent
+        if retired is not None:
+            raise _before_run_evicted(retired)
+        raise MCPServiceContractError(f"Unknown change intent id: {intent_id}")
+
+    def _bound_run_or_retire(self, intent: IntentRecord) -> MCPRunRecord:
+        try:
+            return self._intent_bound_run(intent)
+        except (MCPRunNotFoundError, MCPRunRootMismatchError) as missing:
+            # Lost before any analysis noticed: make the same transition an
+            # analysis makes, so the answer, the audit trail and the registry
+            # row agree from here on.
+            self._retire_intents_without_before_run()
+            raise _before_run_evicted(intent) from missing
+
+    def _pop_cleared_intents(
+        self,
+        intent_id: str | None,
+    ) -> tuple[tuple[IntentRecord, ...], tuple[IntentRecord, ...]]:
+        """Remove what a clear names: (active intents, retired intents)."""
+
+        if intent_id is None:
+            active = tuple(self._active_intents.values())
+            retired = tuple(self._before_run_evicted_intents.values())
+            self._active_intents.clear()
+            self._before_run_evicted_intents.clear()
+            return active, retired
+        if intent_id in self._active_intents:
+            return (self._active_intents.pop(intent_id),), ()
+        if intent_id in self._before_run_evicted_intents:
+            return (), (self._before_run_evicted_intents.pop(intent_id),)
+        raise MCPServiceContractError(f"Unknown change intent id: {intent_id}")
+
+    def _clear_workspace_targets(
+        self,
+        removed_intents: Sequence[IntentRecord],
+        retired_intents: Sequence[IntentRecord],
+    ) -> tuple[tuple[Path, IntentRecord, str], ...]:
+        """The registry rows a clear removes, each at its intent's own root.
+
+        Reading the root back off a resolved run record made clear follow
+        whichever checkout happened to own that run id last.  A retired
+        intent's digest is its own: its run is gone.
+        """
+
+        held = tuple(
+            (
+                removed_intent.root,
+                removed_intent,
+                self._report_digest_value(record)
+                if record is not None
+                else removed_intent.report_digest,
+            )
+            for removed_intent in removed_intents
+            for record in (self._optional_intent_bound_run(removed_intent),)
+        )
+        return (
+            *held,
+            *(
+                (retired.root, retired, retired.report_digest)
+                for retired in retired_intents
+            ),
+        )
+
+    def _recovery_admits(self, intent_id: str, ownership: IntentOwnership) -> bool:
+        return ownership in {
+            IntentOwnership.RECOVERABLE,
+            IntentOwnership.OWN_STALE,
+        } or self._recovers_own_retired_intent(intent_id, ownership)
+
+    def _recovers_own_retired_intent(
+        self,
+        intent_id: str,
+        ownership: IntentOwnership,
+    ) -> bool:
+        """Whether ``recover`` may rebind this session's own retired intent.
+
+        Recovery reopens a row whose agent is gone; a retired intent is the
+        same situation inside one session -- the row is ours and live, the
+        execution it names is not -- and the next step of
+        ``before_run_evicted`` sends the agent here.  Every check recovery
+        makes after this one still applies.  A queued intent is never
+        admitted: recovery activates, and that would skip the queue.
+        """
+
+        if ownership is not IntentOwnership.OWN_ACTIVE:
+            return False
+        with self._state_lock:
+            retired = self._before_run_evicted_intents.get(intent_id)
+        return retired is not None and retired.status is not IntentStatus.QUEUED
 
     def _blast_radius_summary(
         self,

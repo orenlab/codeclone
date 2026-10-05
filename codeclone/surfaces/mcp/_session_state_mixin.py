@@ -1826,16 +1826,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             ]
             for digest in stale_context_projection_digests:
                 self._context_projection_pages.pop(digest, None)
-            # An intent is held by the execution it was declared against;
-            # one that predates the binding is held by its report's name.
-            stale_intent_ids = [
-                intent_id
-                for intent_id, intent in self._active_intents.items()
-                if (
-                    not self._runs.holds_execution(intent.before_execution_id)
-                    if intent.before_execution_id is not None
-                    else intent.run_id not in active_run_ids
-                )
-            ]
-            for intent_id in stale_intent_ids:
-                self._active_intents.pop(intent_id, None)
+            # Intents are not pruned here.  An intent whose before-run is gone
+            # is retired -- kept, announced, its registry row moved -- by the
+            # intent session's override of this method, which runs this one
+            # first (``_MCPSessionIntentMixin._prune_session_state``).

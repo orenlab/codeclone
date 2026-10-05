@@ -450,9 +450,19 @@ class _ContextSessionDependencies(Protocol):
     def get_relevant_memory(self, **params: object) -> dict[str, object]: ...
 
 
+#: One answer for "the intent is known, its analysis run is not": the bound
+#: execution missing under an active intent, and an intent the session has
+#: retired for exactly that reason.
+_INTENT_RUN_UNAVAILABLE = (
+    "The active intent's analysis run is no longer available. "
+    "Analyze again and declare a new intent."
+)
+
+
 class _MCPSessionContextMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
+    _before_run_evicted_intents: dict[str, IntentRecord]
     _context_projection_pages: dict[str, ContextProjectionArtifact]
     _state_lock: _StateLock
 
@@ -732,10 +742,7 @@ class _MCPSessionContextMixin:
                     intent
                 )
             except MCPRunNotFoundError as exc:
-                raise MCPServiceContractError(
-                    "The active intent's analysis run is no longer available. "
-                    "Analyze again and declare a new intent."
-                ) from exc
+                raise MCPServiceContractError(_INTENT_RUN_UNAVAILABLE) from exc
             if record.root.resolve() != root_path.resolve():
                 raise MCPServiceContractError(
                     "Active intent does not belong to the supplied root."
@@ -760,15 +767,21 @@ class _MCPSessionContextMixin:
             return None
         intent = self._active_intents.get(intent_id)
         if intent is None:
-            raise MCPServiceContractError(
-                f"Unknown implementation-context intent_id: {intent_id!r}."
-            )
+            raise MCPServiceContractError(self._missing_context_intent(intent_id))
         if intent.status is not IntentStatus.ACTIVE:
             raise MCPServiceContractError(
                 "Implementation context requires an active intent; "
                 f"{intent_id!r} is {intent.status.value}."
             )
         return intent
+
+    def _missing_context_intent(self, intent_id: str) -> str:
+        """Why an intent id names no active intent: a known intent whose run
+        was lost is told so, not called unknown."""
+
+        if intent_id in self._before_run_evicted_intents:
+            return _INTENT_RUN_UNAVAILABLE
+        return f"Unknown implementation-context intent_id: {intent_id!r}."
 
     def _validate_context_request(
         self,

@@ -233,7 +233,11 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
         """
         try:
             with self._state_lock:
-                snapshot = dict(self._active_intents)
+                # A retired intent still owns its row until clear or recover.
+                snapshot = {
+                    **self._active_intents,
+                    **self._before_run_evicted_intents,
+                }
             for intent_id, intent in snapshot.items():
                 # The intent's own root, not a run lookup: cleanup must target
                 # the checkout the intent was declared against even if its run

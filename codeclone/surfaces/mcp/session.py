@@ -205,6 +205,7 @@ class MCPSession(
         self._context_projection_pages: dict[str, ContextProjectionArtifact] = {}
         self._memory_continuation_requests: dict[str, dict[str, object]] = {}
         self._active_intents: dict[str, IntentRecord] = {}
+        self._before_run_evicted_intents: dict[str, IntentRecord] = {}
         self._start_replay_cache: dict[str, dict[str, object]] = {}
         self._intent_sequence = 0
         self._agent_pid = os.getpid()

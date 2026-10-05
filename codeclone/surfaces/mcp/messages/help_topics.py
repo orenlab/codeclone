@@ -533,6 +533,13 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "before_run_id, or pass intent_id to auto-resolve it."
             ),
             (
+                "before_run_evicted: the intent is still known, but this "
+                "server no longer holds the run it was declared against. Call "
+                "analyze_repository; on an unchanged tree "
+                "manage_change_intent(action='recover') rebinds the intent, "
+                "otherwise clear it and start again."
+            ),
+            (
                 "no_after_run: the after-run is missing. Call "
                 "analyze_repository(root=...) after editing and pass its run_id "
                 "as after_run_id."

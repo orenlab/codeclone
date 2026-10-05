@@ -54,7 +54,11 @@ from ._patch_trail_bridge import build_patch_trail_inputs
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
-from ._session_intent_mixin import _MCPSessionIntentMixin
+from ._session_intent_mixin import (
+    MCPIntentBeforeRunEvictedError,
+    _MCPSessionIntentMixin,
+    before_run_evicted_answer,
+)
 from ._session_memory_mixin import MemorySchemaError, _MCPSessionMemoryMixin
 from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
@@ -62,6 +66,7 @@ from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
     MCPRunRecord,
+    MCPRunRootMismatchError,
     MCPServiceContractError,
 )
 from ._workspace_hygiene import DirtySnapshot, WorkspaceHygieneResult
@@ -574,29 +579,11 @@ class _MCPSessionWorkflowMixin:
     ) -> dict[str, object]:
         intent_session = _intent_session(self)
         patch_session = _patch_session(self)
-        # 1. Resolve intent
-        record, active_intent = intent_session._resolve_intent(
-            run_id=None,
-            intent_id=intent_id,
-        )
-
-        # Queued intents cannot be verified
-        if active_intent.status == IntentStatus.QUEUED:
-            return _budgeted_finish_response(
-                {
-                    "intent_id": intent_id,
-                    "status": "unverified",
-                    "reason": "intent_not_active",
-                    "scope_check": None,
-                    "verification": None,
-                    "claims": None,
-                    "receipt": None,
-                    "intent_cleared": self._intent_cleared_fact(intent_id=intent_id),
-                    "user_action_required": False,
-                    "next_step": workflow_msgs.FINISH_PROMOTE_BEFORE_VERIFY,
-                    "message": workflow_msgs.FINISH_QUEUED_NOT_ACTIVE,
-                }
-            )
+        # 1. Resolve intent -- or answer for one that cannot be verified
+        resolved = self._finish_intent_or_answer(intent_id)
+        if isinstance(resolved, dict):
+            return resolved
+        record, active_intent = resolved
 
         # 2. Resolve changed files — exactly one source
         resolved_files = self._resolve_changed_files_once(
@@ -821,7 +808,13 @@ class _MCPSessionWorkflowMixin:
                     # covering the whole tree.
                     unverified_paths=finish_hygiene.unverified_python_unscoped_dirty,
                 )
-            except MCPServiceContractError as exc:
+            except (
+                MCPServiceContractError,
+                MCPRunNotFoundError,
+                MCPRunRootMismatchError,
+            ) as exc:
+                # A run the receipt needed was lost after the verification
+                # accepted: reported in-band, never raised out of finish.
                 receipt_error = str(exc)
 
         # 9. Memory side effects — the LAST fallible operations this finish's
@@ -1193,9 +1186,73 @@ class _MCPSessionWorkflowMixin:
         now reads the same authority ``_clear_change_intent`` mutates first,
         under the same lock, so a refusal that lost the intent says so.
         """
-        intent_session = _intent_session(self)
-        with intent_session._state_lock:
-            return intent_id not in intent_session._active_intents
+        return not _intent_session(self)._knows_intent(intent_id)
+
+    def _finish_intent_or_answer(
+        self,
+        intent_id: str,
+    ) -> tuple[MCPRunRecord, IntentRecord] | dict[str, object]:
+        """The intent finish verifies, or the typed answer for one it cannot.
+
+        A queued intent is answered as queued whatever became of its run:
+        that answer never needed the run, and promote is where its loss is
+        named.  Any other intent whose before-run is gone answers
+        ``before_run_evicted``.
+        """
+
+        try:
+            record, active_intent = _intent_session(self)._resolve_intent(
+                run_id=None,
+                intent_id=intent_id,
+            )
+        except MCPIntentBeforeRunEvictedError as evicted:
+            active_intent = evicted.intent
+            if active_intent.status != IntentStatus.QUEUED:
+                return self._finish_before_run_evicted_response(active_intent)
+            return self._finish_queued_response(intent_id)
+        if active_intent.status == IntentStatus.QUEUED:
+            return self._finish_queued_response(intent_id)
+        return record, active_intent
+
+    def _finish_queued_response(self, intent_id: str) -> dict[str, object]:
+        return _budgeted_finish_response(
+            {
+                "intent_id": intent_id,
+                "status": "unverified",
+                "reason": "intent_not_active",
+                "scope_check": None,
+                "verification": None,
+                "claims": None,
+                "receipt": None,
+                "intent_cleared": self._intent_cleared_fact(intent_id=intent_id),
+                "user_action_required": False,
+                "next_step": workflow_msgs.FINISH_PROMOTE_BEFORE_VERIFY,
+                "message": workflow_msgs.FINISH_QUEUED_NOT_ACTIVE,
+            }
+        )
+
+    def _finish_before_run_evicted_response(
+        self,
+        intent: IntentRecord,
+    ) -> dict[str, object]:
+        """The intent is known and its before-run is not: typed, not raised."""
+
+        answer = before_run_evicted_answer(intent)
+        return _budgeted_finish_response(
+            {
+                "intent_id": intent.intent_id,
+                "status": answer["status"],
+                "reason": answer["reason"],
+                "scope_check": None,
+                "verification": None,
+                "claims": None,
+                "receipt": None,
+                "intent_cleared": self._intent_cleared_fact(intent_id=intent.intent_id),
+                "user_action_required": False,
+                "next_step": answer["next_step"],
+                "message": answer["message"],
+            }
+        )
 
     @staticmethod
     def _finish_message(
