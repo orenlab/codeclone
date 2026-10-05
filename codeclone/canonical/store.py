@@ -2829,6 +2829,37 @@ def _object_id(namespace: str, family: str, payload: bytes) -> str:
     return hashlib.sha256(preimage).hexdigest()
 
 
+def _object_id_hasher(namespace: str, family: str) -> Callable[[bytes], str]:
+    """:func:`_object_id` of one ``(namespace, family)``, its prefix hashed once.
+
+    Publication only: the staging loop addresses every row of a run, and
+    all rows of one family share the preimage up to the payload, so the
+    prefix is absorbed into one SHA-256 state per family and each row only
+    hashes its own bytes on a copy of it.  The preimage is the one
+    :func:`_object_id` spells -- the same four parts, the same separators --
+    and every read still proves each stored address through
+    :func:`_object_id` itself, so a hasher that drifted from it could not
+    publish a run any reader accepts.
+    """
+    prefix = hashlib.sha256(
+        b"\x00".join(
+            (
+                _DOMAIN_OBJECT + namespace.encode("utf-8"),
+                family.encode("utf-8"),
+                _FAMILY_NAMESPACE[family].encode("utf-8"),
+                b"",
+            )
+        )
+    )
+
+    def object_id(payload: bytes) -> str:
+        digest = prefix.copy()
+        digest.update(payload)
+        return digest.hexdigest()
+
+    return object_id
+
+
 def analysis_scope_digest(analyzed_files: frozenset[FileId]) -> str:
     """Scope receipt digest (brief §7.1, wave-2 minimal honest input): the
     canonical digest of the analyzed-file identity set.
@@ -2852,6 +2883,21 @@ def _membership_digest(object_ids: Sequence[str]) -> str:
     agree.  Dropping the sort splits them and publish refuses.
     """
     joined = "\x00".join(sorted(object_ids)).encode("utf-8")
+    return hashlib.sha256(_DOMAIN_MEMBERSHIP + joined).hexdigest()
+
+
+def _sorted_membership_digest(sorted_ids: Sequence[str]) -> str:
+    """:func:`_membership_digest` of ids the publication has ALREADY sorted.
+
+    The publication sorts its staged ids once, for its insert order, and
+    digests that same list here instead of sorting it a second time.  The
+    sort is not given up, only shared: the caller's sorted list is the
+    precondition, and the publication's in-transaction verification
+    recomputes :func:`_membership_digest` -- which owns its own sort -- over
+    the rows it reads back, so an unsorted list here is a refused publish,
+    never a different run id.
+    """
+    joined = "\x00".join(sorted_ids).encode("utf-8")
     return hashlib.sha256(_DOMAIN_MEMBERSHIP + joined).hexdigest()
 
 
@@ -3362,6 +3408,102 @@ def _prepare_object_lookup(
         cursor.execute("ROLLBACK")
         raise
     return witness, known
+
+
+def _stage_model(
+    model: CanonicalModel, namespace: str
+) -> tuple[dict[str, tuple[str, bytes]], dict[str, int]]:
+    """Every storage row of one normalized model, keyed by its address.
+
+    Returns ``object_id -> (family, payload)`` and the per-family row
+    counts, both in :func:`_model_rows` order (the counts reach the receipt
+    as they are).  Each family's address prefix is hashed once
+    (:func:`_object_id_hasher`); the bytes and the addresses are exactly
+    :func:`_payload_bytes` and :func:`_object_id`.
+    """
+    staged: dict[str, tuple[str, bytes]] = {}
+    family_counts: dict[str, int] = {}
+    hashers: dict[str, Callable[[bytes], str]] = {}
+    for family, row in _model_rows(model):
+        payload = _payload_bytes(row)
+        object_id_of = hashers.get(family)
+        if object_id_of is None:
+            object_id_of = hashers[family] = _object_id_hasher(namespace, family)
+        staged[object_id_of(payload)] = (family, payload)
+        family_counts[family] = family_counts.get(family, 0) + 1
+    return staged, family_counts
+
+
+def _write_staged_run(
+    cursor: sqlite3.Cursor,
+    *,
+    namespace_pk: int,
+    existing_run_pk: int | None,
+    known: Mapping[str, int],
+    staged: Mapping[str, tuple[str, bytes]],
+    object_ids: Sequence[str],
+    family_counts: Mapping[str, int],
+    run_row: tuple[str, str, str],
+) -> tuple[int, int, int]:
+    """Write the objects the store lacks, then the run and its membership.
+
+    Inside the publication's own write transaction, in ``object_ids``
+    order.  ``run_row`` is ``(run_id, scope_digest, membership)``.  A run
+    row that already exists unpublished keeps its membership: only the
+    objects it lacks are written.  Returns ``(run_pk, new_objects,
+    membership_rows)``.
+    """
+    family_keys = _family_keys(cursor, list(family_counts))
+    new_objects = 0
+    object_pks: list[int] = []
+    for object_id_value in object_ids:
+        object_pk = known.get(object_id_value)
+        if object_pk is None:
+            family, payload = staged[object_id_value]
+            cursor.execute(
+                "INSERT INTO objects "
+                "(namespace_pk, object_id, family_pk, payload) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    namespace_pk,
+                    _address_bytes(object_id_value),
+                    family_keys[family],
+                    payload,
+                ),
+            )
+            object_pk = int(cursor.lastrowid or 0)
+            new_objects += 1
+        object_pks.append(object_pk)
+    if existing_run_pk is not None:
+        return existing_run_pk, new_objects, 0
+    cursor.execute(
+        "INSERT INTO runs "
+        "(namespace_pk, run_id, analysis_scope_digest, "
+        "membership_digest, published) VALUES (?, ?, ?, ?, 0)",
+        (namespace_pk, *run_row),
+    )
+    run_pk = int(cursor.lastrowid or 0)
+    cursor.executemany(
+        "INSERT INTO run_members (run_pk, object_pk) VALUES (?, ?)",
+        [(run_pk, object_pk) for object_pk in object_pks],
+    )
+    return run_pk, new_objects, len(object_pks)
+
+
+def _published_before_the_lock(connection: sqlite3.Connection, run_id: str) -> bool:
+    """Whether ``run_id`` already names a published run, read before the lock.
+
+    A hint and never a decision.  A content-addressed run that is published
+    holds exactly the staged objects -- its id is derived from their
+    membership digest -- so looking them up one by one before the lock would
+    find every one of them and write nothing.  Only the row read again
+    UNDER the lock decides the path (see ``_publish_full_run``): between
+    this read and the lock a collector may have taken the run.
+    """
+    row = connection.execute(
+        "SELECT published FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    return row is not None and int(row[0]) == 1
 
 
 def _objects_under_the_lock(
@@ -4567,31 +4709,34 @@ class RunStore:
         ingest_started = time.perf_counter()
         model = model.normalize()
 
-        staged: dict[str, tuple[str, bytes]] = {}
-        family_counts: dict[str, int] = {}
-        for family, row in _model_rows(model):
-            payload = _payload_bytes(row)
-            object_id = _object_id(namespace, family, payload)
-            staged[object_id] = (family, payload)
-            family_counts[family] = family_counts.get(family, 0) + 1
+        staged, family_counts = _stage_model(model, namespace)
         scope_digest = analysis_scope_digest(model.analyzed_files)
-        membership = _membership_digest(list(staged))
+        # Insertion order is insurance, not identity: it decides rowids
+        # only, and rowids never escape (wall 3); the C1 ruling keeps it out
+        # of identity.  One sort serves both the insert order and the
+        # membership digest.  The publication byte-identity test
+        # (``test_run_store_publication_byte_identity``) holds the stored
+        # tables, rowids included, so a change of this order is seen there.
+        object_ids = sorted(staged)
+        membership = _sorted_membership_digest(object_ids)
         run_id = _run_id(namespace, scope_digest, membership)
         publish_span.set_counter(
             "canonical_store_ingest_duration", _elapsed_us(ingest_started)
         )
 
-        # Insertion order is insurance, not identity: it decides rowids
-        # only, and rowids never escape (wall 3).  Measured — reversing
-        # this sort survives the full suite, so nothing pins it and the
-        # C1 ruling says nothing should.
-        object_ids = sorted(staged)
         # Read before the write lock is requested (ruling 2026-09-25,
         # protocol B; storage audit RS-13): one lookup per object inside the
         # lock was the larger half of its hold on a store that already holds
-        # the objects.  The lock only confirms the lookup still stands.
-        prepared = _prepare_object_lookup(self._connection, namespace, object_ids)
+        # the objects.  The lock only confirms the lookup still stands.  A
+        # run already published under this id needs no lookup at all; when
+        # the lock finds it gone, the lookup is taken there instead.
+        prepared = (
+            None
+            if _published_before_the_lock(self._connection, run_id)
+            else _prepare_object_lookup(self._connection, namespace, object_ids)
+        )
         cursor = self._connection.cursor()
+        new_objects = 0
         membership_rows = 0
         # Started before BEGIN IMMEDIATE on purpose: the wait for the write
         # lock is the contention this number exists to show.
@@ -4600,46 +4745,35 @@ class RunStore:
         try:
             _fence_guard(cursor, self._fence)
             namespace_pk = self._namespace_pk(cursor, namespace)
-            known = _objects_under_the_lock(cursor, prepared, namespace_pk, object_ids)
-            family_keys = _family_keys(cursor, list(family_counts))
-            new_objects = 0
-            object_pks: list[int] = []
-            for object_id_value in object_ids:
-                object_pk = known.get(object_id_value)
-                if object_pk is None:
-                    family, payload = staged[object_id_value]
-                    cursor.execute(
-                        "INSERT INTO objects "
-                        "(namespace_pk, object_id, family_pk, payload) "
-                        "VALUES (?, ?, ?, ?)",
-                        (
-                            namespace_pk,
-                            _address_bytes(object_id_value),
-                            family_keys[family],
-                            payload,
-                        ),
-                    )
-                    object_pk = int(cursor.lastrowid or 0)
-                    new_objects += 1
-                object_pks.append(object_pk)
             existing_run = cursor.execute(
                 "SELECT run_pk, published FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
-            if existing_run is None:
-                cursor.execute(
-                    "INSERT INTO runs "
-                    "(namespace_pk, run_id, analysis_scope_digest, "
-                    "membership_digest, published) VALUES (?, ?, ?, ?, 0)",
-                    (namespace_pk, run_id, scope_digest, membership),
-                )
-                run_pk = int(cursor.lastrowid or 0)
-                cursor.executemany(
-                    "INSERT INTO run_members (run_pk, object_pk) VALUES (?, ?)",
-                    [(run_pk, object_pk) for object_pk in object_pks],
-                )
-                membership_rows = len(object_pks)
-            else:
+            if existing_run is not None and int(existing_run[1]) == 1:
+                # Decided here, under the lock, and nowhere else: the run is
+                # published, so every staged object is stored and is its
+                # member, and there is nothing to write.  The verification
+                # below still proves that, byte for byte.
                 run_pk = int(existing_run[0])
+            else:
+                known = (
+                    _lookup_objects(cursor, namespace_pk, object_ids)
+                    if prepared is None
+                    else _objects_under_the_lock(
+                        cursor, prepared, namespace_pk, object_ids
+                    )
+                )
+                run_pk, new_objects, membership_rows = _write_staged_run(
+                    cursor,
+                    namespace_pk=namespace_pk,
+                    existing_run_pk=None
+                    if existing_run is None
+                    else int(existing_run[0]),
+                    known=known,
+                    staged=staged,
+                    object_ids=object_ids,
+                    family_counts=family_counts,
+                    run_row=(run_id, scope_digest, membership),
+                )
             self._before_publish()
             _verify_staged_membership(cursor, run_pk, staged, membership)
             cursor.execute("UPDATE runs SET published = 1 WHERE run_pk = ?", (run_pk,))
