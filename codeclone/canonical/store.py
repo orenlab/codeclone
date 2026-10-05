@@ -68,6 +68,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import sqlite3
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -4211,6 +4212,24 @@ def migrate_store_schema(path: str | Path) -> tuple[tuple[str, str], ...]:
     return missing
 
 
+#: What names one store FILE to a process: the path it was opened at,
+#: resolved; the file found there (device and inode -- a file replaced at the
+#: same path is another file); and the generation its open proved (the
+#: fence).  Two handles on one file share it; a run id read through either
+#: names the same immutable content.
+StoreFileIdentity = tuple[str, int, int, tuple[int, str, str]]
+
+
+def _store_file_identity(path: str, fence: tuple[int, str, str]) -> StoreFileIdentity:
+    """The identity of the file at ``path`` opened under ``fence``; a file no
+    longer there is the environment's fault, refused typed."""
+    try:
+        found = os.stat(path)
+    except OSError as fault:
+        raise StoreUnavailableError(path=path, fault=fault) from fault
+    return (str(Path(path).resolve()), found.st_dev, found.st_ino, fence)
+
+
 class RunStore:
     """The wave-2 canonical run-store over one SQLite file."""
 
@@ -4605,6 +4624,22 @@ class RunStore:
             generation=int(row[0]),
             run_id=str(row[1]),
         )
+
+    def file_identity(self) -> StoreFileIdentity:
+        """The identity of the file this handle opened (:data:`StoreFileIdentity`).
+
+        A file that is no longer at the path -- removed or replaced under an
+        open handle -- is a fault of the environment, refused typed
+        (:class:`StoreUnavailableError`), never a raw ``OSError``.
+        """
+        return _store_file_identity(self._path, self._fence)
+
+    def require_published(self, run_id: str) -> None:
+        """Refuse, typed, a run this store does not hold published
+        (``UnknownRunError``): the one question a fact kept from an earlier
+        read must still have answered by the store before it is served."""
+        with _typed_sqlite_faults(self._path):
+            _published_run_row(self._connection, run_id)
 
     def run_scope_digest(self, run_id: str) -> str:
         """The scope receipt of one published run (brief §7.1)."""
@@ -5258,6 +5293,7 @@ __all__ = [
     "RunReportEdge",
     "RunStore",
     "RunStoreGcJob",
+    "StoreFileIdentity",
     "StoredFamily",
     "UnreadFamilyError",
     "acquire_run_lease",

@@ -70,6 +70,18 @@ summary, patch verification and the blast radius today -- and is removed
 with the last consumer's cutover, no later than 2026-11-30.  The
 publication flag above stays the kill switch of every reading.
 
+**A run's served facts are kept for the life of the process.**  What the
+three migrated readings state of a published run is a pure function of its
+member rows, which the run's content address fixes, so the door keeps each
+run's facts once read (:class:`ServedFactsCache`, a bounded LRU over runs of
+:data:`SERVED_FACTS_CACHE_RUNS`) and a question asked again reads no family.
+A kept fact never answers on its own: the store is opened and the run proven
+published in it on every call before a kept fact is handed out, and the key
+is the store FILE and the run id -- another file, another generation of the
+same file, or another run of it is another entry.  Measured on the
+self-repository (serving-cost wave, 2026-10-06): one run's facts of all three
+kinds weigh a few MB, against 146.9 MiB for a run the session retains.
+
 **The run summary's comparison fields** state a number only for a
 comparison the run made (ruling 2026-10-03, "not compared -> null").  The
 decision has one owner, ``canonical.comparison_projection``, read by the
@@ -83,10 +95,12 @@ of the rule.
 from __future__ import annotations
 
 import os
+import threading
+from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, TypeVar
+from typing import Final, TypeVar, cast
 
 from ..canonical.blast_radius_facts import BlastRadiusFacts
 from ..canonical.comparison_projection import (
@@ -116,7 +130,7 @@ from ..canonical.serving import (
     read_served_run_slices,
     read_served_run_summary,
 )
-from ..canonical.store import RunStore
+from ..canonical.store import RunStore, StoreFileIdentity
 from ..core.canonical_snapshot import resolve_run_store_config, verified_linked_run
 from ..models import RunSnapshotLink
 
@@ -275,6 +289,99 @@ SERVE_FROM_SOURCES: Final[tuple[str, ...]] = (SERVE_FROM_MEMORY, SERVE_FROM_RUN_
 SERVE_FROM_DEFAULT: Final = SERVE_FROM_MEMORY
 
 
+#: How many runs' served facts one process keeps: the most runs one MCP
+#: session may retain at once (``surfaces.mcp._session_shared
+#: .MAX_MCP_HISTORY_LIMIT``, which this ring may not import; a test holds the
+#: two equal) -- every run a session can name is answered from the cache, and
+#: the cache never holds more runs than a session could.
+SERVED_FACTS_CACHE_RUNS: Final = 10
+
+#: The facts a run is kept with, one kind per migrated reading.
+SERVED_FACTS_RUN_SUMMARY: Final = "run_summary"
+SERVED_FACTS_PATCH_RUN: Final = "patch_run"
+SERVED_FACTS_BLAST_RADIUS: Final = "blast_radius"
+
+#: One kept run: the store file it was read from and its run id.
+_KeptRun = tuple[StoreFileIdentity, str]
+
+
+class ServedFactsCache:
+    """The served facts of the runs read most recently, kept for the life of
+    the process: a bounded LRU over runs, each run holding the facts of each
+    reading kind once read.
+
+    It decides nothing about serving: whether a kept fact may be handed out
+    is the door's question, answered against the store on every call
+    (:func:`_kept_facts`).
+    """
+
+    __slots__ = ("_entries", "_lock", "_runs")
+
+    def __init__(self, runs: int) -> None:
+        self._runs = runs
+        self._entries: OrderedDict[_KeptRun, dict[str, object]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def held(self, run: _KeptRun, kind: str) -> object | None:
+        """The ``kind`` facts kept for ``run``, or ``None``; a run asked for
+        becomes the most recently used."""
+        with self._lock:
+            facts = self._entries.get(run)
+            if facts is None:
+                return None
+            self._entries.move_to_end(run)
+            return facts.get(kind)
+
+    def keep(self, run: _KeptRun, kind: str, facts: object) -> None:
+        """Keep ``facts`` as ``run``'s ``kind``; past the bound, the run used
+        least recently goes."""
+        with self._lock:
+            self._entries.setdefault(run, {})[kind] = facts
+            self._entries.move_to_end(run)
+            while len(self._entries) > self._runs:
+                self._entries.popitem(last=False)
+
+    def runs(self) -> tuple[_KeptRun, ...]:
+        """The kept runs, least recently used first."""
+        with self._lock:
+            return tuple(self._entries)
+
+    def forget(self) -> None:
+        with self._lock:
+            self._entries.clear()
+
+
+#: The process's kept facts.
+_SERVED_FACTS: Final = ServedFactsCache(SERVED_FACTS_CACHE_RUNS)
+
+
+def forget_served_facts() -> None:
+    """Forget every kept run: the next question of each reads its store."""
+    _SERVED_FACTS.forget()
+
+
+def _kept_facts(
+    kind: str, read: Callable[[RunStore, str], _ReadT]
+) -> Callable[[RunStore, str], _ReadT]:
+    """``read``, answered from the facts the process kept for this run of
+    this store file when it has them -- and only once the store, open, has
+    answered that the run is still published in it."""
+
+    def kept(store: RunStore, run_id: str) -> _ReadT:
+        run = (store.file_identity(), run_id)
+        held = _SERVED_FACTS.held(run, kind)
+        if held is not None:
+            store.require_published(run_id)
+            # Each kind is kept by exactly one reading, so a kind's facts
+            # are that reading's type.
+            return cast("_ReadT", held)
+        facts = read(store, run_id)
+        _SERVED_FACTS.keep(run, kind, facts)
+        return facts
+
+    return kept
+
+
 def serving_source(environ: Mapping[str, str] | None = None) -> str:
     """The source the serving switch names, or the default for any other
     value (an unset or misspelled switch never reads a store it was not
@@ -302,7 +409,11 @@ def read_run_store_summary(
             store_run_id=link.store_run_id,
             detail=f"{ENV_SERVE_FROM}={source}",
         )
-    return _read_published(root=root, link=link, read=read_served_run_summary)
+    return _read_published(
+        root=root,
+        link=link,
+        read=_kept_facts(SERVED_FACTS_RUN_SUMMARY, read_served_run_summary),
+    )
 
 
 #: The store's own typed refusals and the reason each one is answered with,
@@ -436,12 +547,20 @@ def read_run_store_blast_radius_facts(
             store_run_id=link.store_run_id,
             detail=f"{ENV_SERVE_FROM}={source}",
         )
-    return _read_published(root=root, link=link, read=read_served_blast_radius_facts)
+    return _read_published(
+        root=root,
+        link=link,
+        read=_kept_facts(SERVED_FACTS_BLAST_RADIUS, read_served_blast_radius_facts),
+    )
 
 
 __all__ = [
     "ENV_SERVE_FROM",
     "MEMORY_BY_DESIGN_REASONS",
+    "SERVED_FACTS_BLAST_RADIUS",
+    "SERVED_FACTS_CACHE_RUNS",
+    "SERVED_FACTS_PATCH_RUN",
+    "SERVED_FACTS_RUN_SUMMARY",
     "SERVE_FROM_DEFAULT",
     "SERVE_FROM_MEMORY",
     "SERVE_FROM_RUN_STORE",
@@ -466,11 +585,13 @@ __all__ = [
     "BlastRadiusFacts",
     "RunStoreServingOutcome",
     "ServedAuthorityCandidates",
+    "ServedFactsCache",
     "ServedRunSlices",
     "ServedRunSummary",
     "ServedUnitLocation",
     "answered_if_compared",
     "document_comparison_state",
+    "forget_served_facts",
     "read_run_store_authority_candidates",
     "read_run_store_blast_radius_facts",
     "read_run_store_slices",
@@ -498,7 +619,11 @@ def read_run_store_patch_run(
             store_run_id=link.store_run_id,
             detail=f"{ENV_SERVE_FROM}={source}",
         )
-    return _read_published(root=root, link=link, read=read_served_patch_run)
+    return _read_published(
+        root=root,
+        link=link,
+        read=_kept_facts(SERVED_FACTS_PATCH_RUN, read_served_patch_run),
+    )
 
 
 __all__ += [
