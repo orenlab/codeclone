@@ -70,6 +70,7 @@ import hmac
 import json
 import os
 import sqlite3
+import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import closing, contextmanager
@@ -3453,10 +3454,34 @@ def _prove_run_digests(
     read path and the bounded exporter: the membership digest, the scope
     receipt, and the run identity must recompute from the stored rows —
     any disagreement is a typed refusal, never a silently different run."""
-    if _membership_digest(list(object_ids)) != membership:
+    _prove_membership(_membership_digest(list(object_ids)), membership, run_id)
+    _prove_scope_and_identity(
+        analyzed_files=analyzed_files,
+        namespace=namespace,
+        scope_digest=scope_digest,
+        membership=membership,
+        run_id=run_id,
+    )
+
+
+def _prove_membership(digest: str, membership: str, run_id: str) -> None:
+    """The member ids a reader found must reproduce the stored digest."""
+    if digest != membership:
         raise StoreIntegrityError(
             f"run {run_id!r} membership does not reproduce its digest"
         )
+
+
+def _prove_scope_and_identity(
+    *,
+    analyzed_files: frozenset[FileId],
+    namespace: str,
+    scope_digest: str,
+    membership: str,
+    run_id: str,
+) -> None:
+    """The scope receipt must recompute from the analyzed files, and the run
+    identity from its parts."""
     if analysis_scope_digest(analyzed_files) != scope_digest:
         raise StoreIntegrityError(
             f"run {run_id!r} scope receipt does not reproduce its digest"
@@ -3709,6 +3734,114 @@ def _scan_met_conditions(
             )
             scanned.add(entry.family)
     return frozenset(scanned)
+
+
+#: The member ids of one run in content-address order, read off two
+#: covering indexes and nothing else: the run's namespace walked through the
+#: objects' ``(namespace_pk, object_id)`` key -- already in id order, so
+#: SQLite sorts nothing -- and each object's membership proven by one probe
+#: of ``idx_run_members_object``.  No payload page is touched.  ``CROSS
+#: JOIN`` fixes that loop order (``tests/test_run_membership_proof.py`` reads
+#: the executed plan).  A run's members all live in its namespace (a
+#: publication looks its objects up there); a member that did not would be
+#: missed and the digest would refuse -- the safe side.
+_MEMBER_IDS_SQL: Final = (
+    "SELECT o.object_id FROM runs r CROSS JOIN objects o CROSS JOIN run_members m "
+    "WHERE r.run_pk = ? AND o.namespace_pk = r.namespace_pk "
+    "AND m.object_pk = o.object_pk AND m.run_pk = r.run_pk "
+    "ORDER BY o.object_id"
+)
+
+
+def _streamed_membership_digest(connection: sqlite3.Connection, run_pk: int) -> str:
+    """:func:`_membership_digest` of one run's member ids, streamed: the ids
+    arrive in the order the digest sorts them in (a stored address's 32
+    bytes order as its lowercase hex does), so no id is held."""
+    hasher = hashlib.sha256(_DOMAIN_MEMBERSHIP)
+    separator = b""
+    for (object_id_value,) in connection.execute(_MEMBER_IDS_SQL, (run_pk,)):
+        hasher.update(separator)
+        hasher.update(_address_hex(object_id_value).encode("utf-8"))
+        separator = b"\x00"
+    return hasher.hexdigest()
+
+
+#: The (store file, run) pairs whose membership this process has proven:
+#: one entry per run a process served out of a store file, a few hundred
+#: bytes each, kept for the life of the process.
+_PROVEN_MEMBERSHIPS: Final[set[tuple[StoreFileIdentity, str]]] = set()
+_PROVEN_MEMBERSHIPS_LOCK: Final = threading.Lock()
+
+
+def prove_run_membership(store: RunStore, run_id: str) -> None:
+    """Prove ONE published run whole by its object ids, once per process
+    per store file and run.
+
+    The bounded reads prove every row they read against its content
+    address, and cannot prove what only the whole run can.  This proves it
+    without decoding a payload of it: the run's member ids, streamed in the
+    order the digest sorts them, reproduce its membership digest -- a member
+    added or removed since the run was published is refused; its analyzed
+    files, read and proven, reproduce its scope receipt; and its run id
+    recomputes from its parts.  Together with the per-row address proof of
+    the bounded reads: every row served is a member of a run whose
+    membership, scope and identity recompute.  What it does not prove: the
+    cross-family assembly laws, and the bytes of rows nobody read.
+
+    A run proven once is not proven again by this process for the same store
+    file (:data:`StoreFileIdentity`): its rows are immutable content, and a
+    caller that serves it still asks the store whether it is published.  A
+    refusal is typed (``StoreIntegrityError``; ``UnknownRunError`` for a run
+    that is not published) and is never remembered.
+    """
+    proven = (store.file_identity(), run_id)
+    with _PROVEN_MEMBERSHIPS_LOCK:
+        if proven in _PROVEN_MEMBERSHIPS:
+            return
+    _prove_membership_by_ids(store, run_id)
+    with _PROVEN_MEMBERSHIPS_LOCK:
+        _PROVEN_MEMBERSHIPS.add(proven)
+
+
+def _prove_membership_by_ids(store: RunStore, run_id: str) -> None:
+    """The proof of :func:`prove_run_membership`, in one read transaction."""
+    connection = store._connection
+    with _typed_sqlite_faults(store._path):
+        cursor = connection.cursor()
+        cursor.execute("BEGIN")
+        try:
+            run_pk, namespace, scope_digest, membership = _published_run_row(
+                connection, run_id
+            )
+            _prove_membership(
+                _streamed_membership_digest(connection, run_pk), membership, run_id
+            )
+            collected: dict[str, list[object]] = {}
+            _scan_run_family(
+                connection,
+                run_pk,
+                namespace,
+                FAMILY_ANALYZED_FILE.family,
+                [],
+                collected,
+            )
+            _prove_scope_and_identity(
+                analyzed_files=frozenset(FAMILY_ANALYZED_FILE.rows(collected)),
+                namespace=namespace,
+                scope_digest=scope_digest,
+                membership=membership,
+                run_id=run_id,
+            )
+            cursor.execute("COMMIT")
+        except BaseException:
+            cursor.execute("ROLLBACK")
+            raise
+
+
+def forget_proven_memberships() -> None:
+    """Forget every proof: the next serving of each run proves it again."""
+    with _PROVEN_MEMBERSHIPS_LOCK:
+        _PROVEN_MEMBERSHIPS.clear()
 
 
 def read_named_families(
@@ -5301,9 +5434,11 @@ __all__ = [
     "collect_garbage",
     "export_head",
     "export_run",
+    "forget_proven_memberships",
     "link_run_report",
     "linked_run",
     "migrate_store_schema",
+    "prove_run_membership",
     "read_named_families",
     "release_retained_run",
     "release_run_lease",

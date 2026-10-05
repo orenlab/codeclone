@@ -76,7 +76,9 @@ member rows, which the run's content address fixes, so the door keeps each
 run's facts once read (:class:`ServedFactsCache`, a bounded LRU over runs of
 :data:`SERVED_FACTS_CACHE_RUNS`) and a question asked again reads no family.
 A kept fact never answers on its own: the store is opened and the run proven
-published in it on every call before a kept fact is handed out, and the key
+published in it on every call before a kept fact is handed out -- and the
+run's membership is proven by its object ids once per process before its
+first fact is read -- and the key
 is the store FILE and the run id -- another file, another generation of the
 same file, or another run of it is another entry.  Measured on the
 self-repository (serving-cost wave, 2026-10-06): one run's facts of all three
@@ -130,7 +132,7 @@ from ..canonical.serving import (
     read_served_run_slices,
     read_served_run_summary,
 )
-from ..canonical.store import RunStore, StoreFileIdentity
+from ..canonical.store import RunStore, StoreFileIdentity, prove_run_membership
 from ..core.canonical_snapshot import resolve_run_store_config, verified_linked_run
 from ..models import RunSnapshotLink
 
@@ -365,9 +367,13 @@ def _kept_facts(
 ) -> Callable[[RunStore, str], _ReadT]:
     """``read``, answered from the facts the process kept for this run of
     this store file when it has them -- and only once the store, open, has
-    answered that the run is still published in it."""
+    answered that the run is still published in it.  The run's membership is
+    proven by its object ids first, once per process for this store file
+    (``canonical.store.prove_run_membership``): a run whose members no longer
+    reproduce its digest is refused ``integrity``, whatever was kept."""
 
     def kept(store: RunStore, run_id: str) -> _ReadT:
+        prove_run_membership(store, run_id)
         run = (store.file_identity(), run_id)
         held = _SERVED_FACTS.held(run, kind)
         if held is not None:
