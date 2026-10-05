@@ -148,8 +148,13 @@ def _tampered(
     remaining members, so only the later proofs can see the loss."""
     copy = directory / f"{population.name}-{family}-{reseal}.sqlite3"
     shutil.copy(population.store_path, copy)
-    run_id = _run_id(population)
-    with sqlite3.connect(copy) as raw:
+    _drop_member(copy, _run_id(population), family, reseal=reseal)
+    return copy
+
+
+def _drop_member(path: Path, run_id: str, family: str, *, reseal: bool) -> None:
+    """Delete, in place, one membership row of ``family`` from ``run_id``."""
+    with sqlite3.connect(path) as raw:
         run_pk = raw.execute(
             "SELECT run_pk FROM runs WHERE run_id = ?", (run_id,)
         ).fetchone()[0]
@@ -179,7 +184,6 @@ def _tampered(
                 (store_module._membership_digest(ids), run_pk),
             )
     raw.close()
-    return copy
 
 
 def _ask(
@@ -206,6 +210,39 @@ def test_a_member_removed_since_publication_is_refused_and_memory_answers(
         assert answer is None
         assert refused.reason == "integrity", refused
         assert "membership does not reproduce" in refused.detail
+
+
+def test_a_proven_run_vouches_for_no_other_run_of_its_store_file(
+    tmp_path_factory: pytest.TempPathFactory, tmp_path: Path
+) -> None:
+    """The memo remembers the run as well as the file: run A of one store
+    file proven and served by this process, then run B of the SAME file --
+    same path, inode and fence -- loses a membership row; B is refused
+    ``integrity`` (the patch battery's ``improved`` cycle: two runs, one
+    store)."""
+    cycle = shared_cycles(tmp_path_factory)["improved"]
+    assert cycle.after is not None
+    proven, tampered = (
+        record.execution.run_snapshot_link for record in (cycle.before, cycle.after)
+    )
+    assert proven is not None and tampered is not None
+    assert proven.store_run_id and tampered.store_run_id
+    assert proven.store_run_id != tampered.store_run_id
+    copy = tmp_path / "two_runs.sqlite3"
+    shutil.copy(cycle.store_path, copy)
+    with serving_environment(copy, serve_from="run_store"):
+        facts, served = read_run_store_patch_run(root=cycle.root, link=proven)
+    assert facts is not None and served.reason == "served", served
+    with RunStore(copy, create=False) as store:
+        identity = store.file_identity()
+    _drop_member(copy, tampered.store_run_id, "unit_span", reseal=False)
+    with RunStore(copy, create=False) as store:
+        assert store.file_identity() == identity
+    with serving_environment(copy, serve_from="run_store"):
+        answer, refused = read_run_store_patch_run(root=cycle.root, link=tampered)
+    assert answer is None
+    assert refused.reason == "integrity", refused
+    assert "membership does not reproduce" in refused.detail
 
 
 @pytest.mark.parametrize(
