@@ -46,6 +46,7 @@ from ..report.gates.evaluator import evaluate_gate_state as _evaluate_gate_state
 from ..report.gates.evaluator import (
     gate_state_from_project_metrics as _gate_state_from_metrics,
 )
+from ..report.gates.evaluator import with_comparison_inputs as _with_comparison_inputs
 from ..report.renderers.json import render_json_report_document
 from ..report.renderers.text import render_text_report_document
 from ..utils.coerce import as_int as _as_int
@@ -521,6 +522,8 @@ def _report_gate(
     new_func: Collection[str] | None,
     new_block: Collection[str] | None,
     metrics_diff: object | None,
+    coverage_adoption_diff_available: bool,
+    api_surface_diff_available: bool,
     trust: Callable[[], TrustVector | None],
     gate_config: MetricGateConfig | None,
     gate_result: GateResult | None,
@@ -537,6 +540,8 @@ def _report_gate(
         new_func=new_func,
         new_block=new_block,
         metrics_diff=_coerce_metrics_diff(metrics_diff),
+        coverage_adoption_diff_available=coverage_adoption_diff_available,
+        api_surface_diff_available=api_surface_diff_available,
         baseline_trust=trust(),
         files_skipped=processing.files_skipped,
         # Computed here, from the one owner, because this fallback is the only
@@ -656,6 +661,8 @@ def report(
             new_func=new_func,
             new_block=new_block,
             metrics_diff=metrics_diff,
+            coverage_adoption_diff_available=coverage_adoption_diff_available,
+            api_surface_diff_available=api_surface_diff_available,
             trust=trust,
             gate_config=gate_config,
             gate_result=gate_result,
@@ -900,6 +907,8 @@ def gate_with_config(
     new_func: Collection[str] | None,
     new_block: Collection[str] | None,
     metrics_diff: MetricsDiff | None,
+    coverage_adoption_diff_available: bool,
+    api_surface_diff_available: bool,
     clone_threshold_total: int | None = None,
     baseline_trust: TrustVector | None = None,
     gate_config: MetricGateConfig | None = None,
@@ -923,18 +932,34 @@ def gate_with_config(
         if clone_threshold_total is None
         else max(clone_threshold_total, 0)
     )
+    # Every comparison input of the gate is the run's normalized comparison
+    # state, decided by the one producer the document is written from: a
+    # delta the run did not compare is ``None``, and a requested gate over it
+    # takes the evaluator's unavailable-lane branch.
+    comparison = run_comparison_state(
+        analysis=analysis,
+        metrics_diff=metrics_diff,
+        new_func=new_func,
+        new_block=new_block,
+        coverage_adoption_diff_available=coverage_adoption_diff_available,
+        api_surface_diff_available=api_surface_diff_available,
+        baseline_trust=baseline_trust,
+    )
     if analysis.project_metrics is None:
-        state = GateState(
-            clone_new_count=clone_new_count,
-            clone_total=clone_total,
-            files_skipped=max(files_skipped, 0),
-            health_population=analysis_population,
+        state = _with_comparison_inputs(
+            GateState(
+                clone_new_count=clone_new_count,
+                clone_total=clone_total,
+                files_skipped=max(files_skipped, 0),
+                health_population=analysis_population,
+            ),
+            comparison.value,
         )
     else:
         state = _gate_state_from_metrics(
             project_metrics=analysis.project_metrics,
             coverage_join=analysis.coverage_join,
-            metrics_diff=metrics_diff,
+            comparison=comparison.value,
             clone_new_count=clone_new_count,
             clone_total=clone_total,
             files_skipped=files_skipped,
@@ -964,6 +989,8 @@ def gate(
     new_func: Collection[str] | None,
     new_block: Collection[str] | None,
     metrics_diff: MetricsDiff | None,
+    coverage_adoption_diff_available: bool,
+    api_surface_diff_available: bool,
     baseline_trust: TrustVector | None = None,
     analysis_population: ObservedPopulation = "complete_nonempty",
 ) -> GatingResult:
@@ -973,6 +1000,8 @@ def gate(
         new_func=new_func,
         new_block=new_block,
         metrics_diff=metrics_diff,
+        coverage_adoption_diff_available=coverage_adoption_diff_available,
+        api_surface_diff_available=api_surface_diff_available,
         baseline_trust=baseline_trust,
         analysis_population=analysis_population,
     )

@@ -14,7 +14,7 @@ exactly once: as a STORE field, answered from the run store's rows through
 not a store fact by ruling or by nature (identity, execution, presentation,
 live disk), with the source it keeps and why.
 
-The proof is held on nineteen live MCP executions, each with its own store
+The proof is held on twenty live MCP executions, each with its own store
 (``tests/_run_summary_serving.py``), and the population is shown to
 DISTINGUISH before anything is counted (Probe Validity Law): every store
 field takes at least two values across it, and the named states a wrong
@@ -46,7 +46,7 @@ from codeclone.surfaces.mcp._run_store_serving import (
     summary_divergence,
 )
 from tests._run_summary_serving import (
-    RUN_SUMMARY_POPULATIONS,
+    SUMMARY_POPULATIONS,
     SummaryPopulations,
     shared_populations,
     stored_blocks,
@@ -152,7 +152,7 @@ def pairs(populations: SummaryPopulations) -> dict[str, _Pair]:
     """Every population's memory answer beside the answer built from its
     store blocks."""
     built: dict[str, _Pair] = {}
-    for name in RUN_SUMMARY_POPULATIONS:
+    for name in SUMMARY_POPULATIONS:
         population = populations[name]
         memory = population.memory_answer()
         built[name] = (
@@ -177,7 +177,7 @@ def _at(payload: Mapping[str, object], path: str) -> str:
 
 
 def _store_cases() -> list[tuple[str, str]]:
-    return [(row, name) for row in STORE_FIELDS for name in RUN_SUMMARY_POPULATIONS]
+    return [(row, name) for row in STORE_FIELDS for name in SUMMARY_POPULATIONS]
 
 
 def test_the_registry_names_all_thirty_one_census_rows() -> None:
@@ -205,7 +205,7 @@ def _answer_paths(answer: Mapping[str, object]) -> set[str]:
     return paths
 
 
-@pytest.mark.parametrize("name", list(RUN_SUMMARY_POPULATIONS))
+@pytest.mark.parametrize("name", list(SUMMARY_POPULATIONS))
 def test_every_field_of_the_answer_is_registered_once(
     pairs: dict[str, _Pair], name: str
 ) -> None:
@@ -231,7 +231,7 @@ def test_every_store_field_equals_memory_byte_for_byte(
             assert _at(candidate, path) == _at(memory, path), (row, name, path)
 
 
-@pytest.mark.parametrize("name", list(RUN_SUMMARY_POPULATIONS))
+@pytest.mark.parametrize("name", list(SUMMARY_POPULATIONS))
 def test_the_store_answers_no_memory_field(pairs: dict[str, _Pair], name: str) -> None:
     """Every field that is not a store fact is memory's, byte for byte, in
     the answer built from the store."""
@@ -257,7 +257,7 @@ _STORE_BLOCKS = (
 )
 
 
-@pytest.mark.parametrize("name", list(RUN_SUMMARY_POPULATIONS))
+@pytest.mark.parametrize("name", list(SUMMARY_POPULATIONS))
 def test_the_store_blocks_carry_no_memory_held_key(
     populations: SummaryPopulations, name: str
 ) -> None:
@@ -270,7 +270,7 @@ def test_the_store_blocks_carry_no_memory_held_key(
         assert key not in getattr(stored, block), (name, path)
 
 
-@pytest.mark.parametrize("name", list(RUN_SUMMARY_POPULATIONS))
+@pytest.mark.parametrize("name", list(SUMMARY_POPULATIONS))
 def test_the_served_answer_is_memory_and_names_its_source(
     populations: SummaryPopulations, pairs: dict[str, _Pair], name: str
 ) -> None:

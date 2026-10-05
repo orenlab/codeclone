@@ -6,7 +6,7 @@
 
 """The populations behind the blast-radius serving pins (consumer migration C7).
 
-The run summary's sixteen populations (``tests/_run_summary_serving.py``) are
+The run summary's twenty populations (``tests/_run_summary_serving.py``) are
 reused as they are -- the same executions, built once per session -- and one
 population is added that only a blast radius distinguishes: ``fanout``, the
 projection corpus (an import cycle, a dynamic load, a security surface, a

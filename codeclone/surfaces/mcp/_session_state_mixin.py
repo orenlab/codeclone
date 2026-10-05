@@ -1180,7 +1180,6 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             report_document=record.served_report,
             enabled_lanes=record.served_report.contract.enabled_lanes,
             config=gate_config(request),
-            metrics_diff=record.metrics_diff,
             clone_new_count=len(record.new_func) + len(record.new_block),
             clone_total=record.func_clones_count + record.block_clones_count,
         )

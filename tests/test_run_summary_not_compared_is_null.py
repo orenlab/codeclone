@@ -38,7 +38,7 @@ import pytest
 
 from codeclone.api.run_store_serving import SERVE_FROM_MEMORY, SERVE_FROM_RUN_STORE
 from tests._run_summary_serving import (
-    RUN_SUMMARY_POPULATIONS,
+    SUMMARY_POPULATIONS,
     SummaryPopulations,
     shared_populations,
     stored_blocks,
@@ -135,7 +135,7 @@ def _cases() -> list[tuple[str, str, str]]:
 
 
 def test_the_table_covers_every_population_and_field() -> None:
-    assert list(STATE_TABLE) == list(RUN_SUMMARY_POPULATIONS)
+    assert list(STATE_TABLE) == list(SUMMARY_POPULATIONS)
     assert all(len(cells) == len(FIELDS) for cells in STATE_TABLE.values())
 
 

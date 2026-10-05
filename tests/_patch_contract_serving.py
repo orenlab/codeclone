@@ -905,7 +905,6 @@ def document_gate_state(record: MCPRunRecord) -> dict[str, object]:
 
     state = _gate_state_from_report_document(
         report_document=record.served_report,
-        metrics_diff=record.metrics_diff,
         clone_new_count=len(record.new_func) + len(record.new_block),
         clone_total=record.func_clones_count + record.block_clones_count,
     )

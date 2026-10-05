@@ -10,7 +10,7 @@
 condition of ``PATCH_CONTRACT_READ_WHEN`` with ``read_named_families``:
 every family outside the declaration is a typed absence.  The declaration
 is held in both directions (consumer migration C6), per branch of its
-condition, on every run of the patch-contract battery and the sixteen
+condition, on every run of the patch-contract battery and the twenty
 served populations of the run summary --
 
 * complete: the bounded reading never refuses and equals the reading of
@@ -118,23 +118,15 @@ def gate_inputs(tmp_path_factory: pytest.TempPathFactory) -> list[_GateInputs]:
     return inputs
 
 
-#: The runs whose stored gate input disagrees with the document's, by term:
-#: the run summary's declared disagreements (desk 2026-09-27) reaching the
-#: gate's record.  On each the memory's metrics diff counts what the store,
-#: whose comparison of that lane did not run, states as no delta.
-DECLARED_GATE_DISAGREEMENTS: dict[str, frozenset[str]] = {
-    "api_breaking_changes": frozenset(
-        {
-            "api_disabled",
-            "partial",
-            "api_lane_off.before",
-            "api_lane_off.after",
-            "truncated_api.before",
-            "truncated_api.after",
-        }
-    ),
-    "diff_new_dead_code": frozenset({"older_schema_dead_code_lane"}),
-}
+#: The runs whose stored gate input disagrees with the document's, by term.
+#: Empty since 2026-10-05: every comparison input of the gate is the run's
+#: normalized comparison state on both sides -- read off the document and
+#: off the stored rows -- so the five terms the memory once read off its
+#: metrics diff for a comparison the store said did not run (the API terms
+#: on ``api_disabled``, ``partial``, ``api_lane_off``, ``truncated_api``,
+#: ``trusted_unmeasured``; the dead-code term on
+#: ``older_schema_dead_code_lane``) are ``None`` on both.
+DECLARED_GATE_DISAGREEMENTS: dict[str, frozenset[str]] = {}
 #: Terms no run of the population moves off one value: held equal, and named
 #: so the population's blind spot is on the record, not assumed away.
 CONSTANT_GATE_TERMS: frozenset[str] = frozenset({"files_skipped"})
@@ -218,10 +210,10 @@ def test_the_population_is_every_battery_run_and_every_served_one(
     stored: list[_Stored],
 ) -> None:
     """The accounting: 31 battery runs (one cycle analyses once) and the
-    sixteen populations, all published.  One pair shares a store run: the
+    twenty populations, all published.  One pair shares a store run: the
     contract-B cycle analyses the same bytes twice (measured; the invariant
     cycle's comment edit moves the scope receipt, so it is two)."""
-    assert len(stored) == 47
+    assert len(stored) == 51
     by_address: dict[tuple[Path, str], list[str]] = {}
     for run in stored:
         by_address.setdefault((run.path, run.run_id), []).append(run.name)

@@ -44,7 +44,7 @@ from codeclone.canonical.store import (
 )
 from tests._patch_contract_serving import CYCLE_BUILDERS, shared_cycles
 from tests._run_summary_serving import (
-    RUN_SUMMARY_POPULATIONS,
+    SUMMARY_POPULATIONS,
     SummaryPopulation,
     serving_environment,
     shared_populations,
@@ -105,7 +105,7 @@ def test_every_published_run_of_the_populations_proves_its_membership(
     populations = shared_populations(tmp_path_factory)
     runs: list[tuple[Path, str]] = [
         (populations[name].store_path, _run_id(populations[name]))
-        for name in RUN_SUMMARY_POPULATIONS
+        for name in SUMMARY_POPULATIONS
     ]
     cycles = shared_cycles(tmp_path_factory)
     for name in CYCLE_BUILDERS:
@@ -114,7 +114,7 @@ def test_every_published_run_of_the_populations_proves_its_membership(
             link = None if record is None else record.execution.run_snapshot_link
             if link is not None and link.store_run_id:
                 runs.append((cycle.store_path, link.store_run_id))
-    assert len(runs) == 50
+    assert len(runs) == 51
     for path, run_id in runs:
         with RunStore(path, create=False) as store:
             prove_run_membership(store, run_id)

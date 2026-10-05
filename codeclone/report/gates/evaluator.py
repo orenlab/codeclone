@@ -17,7 +17,26 @@ from ...contracts import (
     ExitCode,
     ObservedPopulation,
 )
-from ...contracts.comparison_state import COMPARISON_HEALTH, COMPARISON_LANES
+from ...contracts.comparison_state import (
+    COMPARISON_ADOPTION,
+    COMPARISON_API_SURFACE,
+    COMPARISON_COMPLEXITY,
+    COMPARISON_COUPLING,
+    COMPARISON_DEAD_CODE,
+    COMPARISON_DEPENDENCIES,
+    COMPARISON_HEALTH,
+    COMPARISON_LANES,
+    TERM_BREAKING_CHANGES,
+    TERM_DOCSTRING_DELTA,
+    TERM_NEW_CYCLES,
+    TERM_NEW_HIGH_RISK,
+    TERM_NEW_IMPORT_CYCLES,
+    TERM_NEW_ITEMS,
+    TERM_SCORE_DELTA,
+    TERM_TYPING_PARAM_DELTA,
+    TERM_TYPING_RETURN_DELTA,
+    ComparisonKey,
+)
 from ...metrics.registry import METRIC_FAMILIES
 from ...models import ObservationLaneName, cycle_kind_counts
 from ...observability import span
@@ -93,20 +112,24 @@ class GateState:
     docstring_permille: int = 0
     coverage_join_status: str = ""
     coverage_hotspots: int = 0
-    api_breaking_changes: int = 0
+    #: The comparison deltas (:data:`GATE_COMPARISON_TERMS`): each is the
+    #: run's normalized comparison state -- the measured delta, zero
+    #: included, or ``None`` when its comparison did not run.  A requested
+    #: gate never reads a ``None`` as a number (``_uncompared_lanes``).
+    api_breaking_changes: int | None = 0
     authority_violations: int = 0
-    diff_new_high_risk_functions: int = 0
-    diff_new_high_coupling_classes: int = 0
+    diff_new_high_risk_functions: int | None = 0
+    diff_new_high_coupling_classes: int | None = 0
     #: New cycles of either kind — the visibility count.
-    diff_new_cycles: int = 0
+    diff_new_cycles: int | None = 0
     #: Cycles that are import-time now and were not before, including a
     #: deferred cycle that hardened into one. The only cycle novelty that gates.
-    diff_new_import_cycles: int = 0
-    diff_new_dead_code: int = 0
-    diff_health_delta: int = 0
-    diff_typing_param_permille_delta: int = 0
-    diff_typing_return_permille_delta: int = 0
-    diff_docstring_permille_delta: int = 0
+    diff_new_import_cycles: int | None = 0
+    diff_new_dead_code: int | None = 0
+    diff_health_delta: int | None = 0
+    diff_typing_param_permille_delta: int | None = 0
+    diff_typing_return_permille_delta: int | None = 0
+    diff_docstring_permille_delta: int | None = 0
     #: What the run observed of the population it found. Every predicate below
     #: counts observed debt, so on a population that was never read — and on
     #: one that does not exist — they are all vacuously satisfied, and the gate
@@ -153,6 +176,79 @@ _COMPARISON_GATE_NAMES = frozenset(
         "health_delta",
     }
 )
+
+#: Every gate input that is a comparison delta, by the normalized comparison
+#: state's key (``contracts.comparison_state``): the one table every gate
+#: state builder reads the state through (:func:`with_comparison_inputs`).
+GATE_COMPARISON_TERMS: Mapping[str, ComparisonKey] = {
+    "api_breaking_changes": (COMPARISON_API_SURFACE, TERM_BREAKING_CHANGES),
+    "diff_new_high_risk_functions": (COMPARISON_COMPLEXITY, TERM_NEW_HIGH_RISK),
+    "diff_new_high_coupling_classes": (COMPARISON_COUPLING, TERM_NEW_HIGH_RISK),
+    "diff_new_cycles": (COMPARISON_DEPENDENCIES, TERM_NEW_CYCLES),
+    "diff_new_import_cycles": (COMPARISON_DEPENDENCIES, TERM_NEW_IMPORT_CYCLES),
+    "diff_new_dead_code": (COMPARISON_DEAD_CODE, TERM_NEW_ITEMS),
+    "diff_health_delta": (COMPARISON_HEALTH, TERM_SCORE_DELTA),
+    "diff_typing_param_permille_delta": (COMPARISON_ADOPTION, TERM_TYPING_PARAM_DELTA),
+    "diff_typing_return_permille_delta": (
+        COMPARISON_ADOPTION,
+        TERM_TYPING_RETURN_DELTA,
+    ),
+    "diff_docstring_permille_delta": (COMPARISON_ADOPTION, TERM_DOCSTRING_DELTA),
+}
+
+#: The comparison gates of the lane matrix, each with the comparison inputs
+#: its predicates read.  The clone gate reads no delta of the state: it
+#: requires both clone lanes trusted, and a trusted clone lane is always
+#: compared (``api.comparison.build_comparison_context``).
+_COMPARISON_GATE_INPUTS: Mapping[str, tuple[str, ...]] = {
+    "adoption_regression": (
+        "diff_typing_param_permille_delta",
+        "diff_typing_return_permille_delta",
+        "diff_docstring_permille_delta",
+    ),
+    "api_compatibility": ("api_breaking_changes",),
+    "complexity_delta": ("diff_new_high_risk_functions",),
+    "coupling_cohesion_delta": ("diff_new_high_coupling_classes",),
+    "dead_code_delta": ("diff_new_dead_code",),
+    "dependency_delta": ("diff_new_import_cycles",),
+    "health_delta": ("diff_health_delta",),
+}
+
+
+#: One normalized comparison state's reading: ``ComparisonState.value``,
+#: the measured delta of ``(comparison, term)`` or ``None``.
+ComparisonValue = Callable[[str, str], "int | None"]
+
+
+def with_comparison_inputs(state: GateState, value: ComparisonValue) -> GateState:
+    """``state`` with every comparison input read off one normalized
+    comparison state (:data:`GATE_COMPARISON_TERMS`): the measured delta, or
+    ``None`` for a comparison the run did not make -- never a ``0`` it did
+    not measure.  The one door every gate state builder takes."""
+    term = {field: value(*key) for field, key in GATE_COMPARISON_TERMS.items()}
+    return replace(
+        state,
+        api_breaking_changes=term["api_breaking_changes"],
+        diff_new_high_risk_functions=term["diff_new_high_risk_functions"],
+        diff_new_high_coupling_classes=term["diff_new_high_coupling_classes"],
+        diff_new_cycles=term["diff_new_cycles"],
+        diff_new_import_cycles=term["diff_new_import_cycles"],
+        diff_new_dead_code=term["diff_new_dead_code"],
+        diff_health_delta=term["diff_health_delta"],
+        diff_typing_param_permille_delta=term["diff_typing_param_permille_delta"],
+        diff_typing_return_permille_delta=term["diff_typing_return_permille_delta"],
+        diff_docstring_permille_delta=term["diff_docstring_permille_delta"],
+    )
+
+
+def _measured(value: int | None) -> int:
+    """A comparison input a requested predicate reads.  The evaluator
+    refuses every requested gate over an uncompared input before any
+    predicate runs (:func:`_uncompared_lanes`), so ``None`` here is a caller
+    that skipped that refusal -- never read as a number."""
+    if value is None:
+        raise ValueError("a requested gate read a delta its run did not compare")
+    return value
 
 
 def active_gate_lane_requirements(
@@ -319,13 +415,15 @@ def gate_state_from_project_metrics(
     *,
     project_metrics: ProjectMetrics,
     coverage_join: CoverageJoinResult | None,
-    metrics_diff: object | None,
+    comparison: ComparisonValue,
     clone_new_count: int = 0,
     clone_total: int = 0,
     files_skipped: int = 0,
 ) -> GateState:
-    diff_summary = summarize_metrics_diff(metrics_diff) or {}
-    return GateState(
+    """The gate's inputs off the run's project metrics; its comparison
+    inputs are the run's normalized comparison state, ``comparison`` its
+    ``value`` (:func:`with_comparison_inputs`), never the raw metrics diff."""
+    state = GateState(
         health_population=project_metrics.health.population,
         files_skipped=max(files_skipped, 0),
         clone_new_count=max(clone_new_count, 0),
@@ -366,37 +464,13 @@ def gate_state_from_project_metrics(
         coverage_hotspots=(
             int(coverage_join.coverage_hotspots) if coverage_join is not None else 0
         ),
-        api_breaking_changes=_as_int(diff_summary.get("api_breaking_changes"), 0),
         authority_violations=(
             len(project_metrics.semantic_authority.violations)
             if project_metrics.semantic_authority is not None
             else 0
         ),
-        diff_new_high_risk_functions=_as_int(
-            diff_summary.get("new_high_risk_functions"),
-            0,
-        ),
-        diff_new_high_coupling_classes=_as_int(
-            diff_summary.get("new_high_coupling_classes"),
-            0,
-        ),
-        diff_new_cycles=_as_int(diff_summary.get("new_cycles"), 0),
-        diff_new_import_cycles=_as_int(diff_summary.get("new_import_cycles"), 0),
-        diff_new_dead_code=_as_int(diff_summary.get("new_dead_code"), 0),
-        diff_health_delta=_as_int(diff_summary.get("health_delta"), 0),
-        diff_typing_param_permille_delta=_as_int(
-            diff_summary.get("typing_param_permille_delta"),
-            0,
-        ),
-        diff_typing_return_permille_delta=_as_int(
-            diff_summary.get("typing_return_permille_delta"),
-            0,
-        ),
-        diff_docstring_permille_delta=_as_int(
-            diff_summary.get("docstring_permille_delta"),
-            0,
-        ),
     )
+    return with_comparison_inputs(state, comparison)
 
 
 def metric_gate_reasons_for_state(
@@ -575,7 +649,8 @@ def _new_high_risk_functions_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_on_new_metrics and state.diff_new_high_risk_functions > 0,
+        config.fail_on_new_metrics
+        and _measured(state.diff_new_high_risk_functions) > 0,
         f"{gate_msgs.GATE_REASON_NEW_HIGH_RISK_FUNCTIONS}{state.diff_new_high_risk_functions}.",
     )
 
@@ -586,7 +661,8 @@ def _new_high_coupling_classes_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_on_new_metrics and state.diff_new_high_coupling_classes > 0,
+        config.fail_on_new_metrics
+        and _measured(state.diff_new_high_coupling_classes) > 0,
         f"{gate_msgs.GATE_REASON_NEW_HIGH_COUPLING}{state.diff_new_high_coupling_classes}.",
     )
 
@@ -597,7 +673,7 @@ def _new_dependency_cycles_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_on_new_metrics and state.diff_new_import_cycles > 0,
+        config.fail_on_new_metrics and _measured(state.diff_new_import_cycles) > 0,
         f"{gate_msgs.GATE_REASON_NEW_CYCLES}{state.diff_new_import_cycles}.",
     )
 
@@ -608,7 +684,7 @@ def _new_dead_code_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_on_new_metrics and state.diff_new_dead_code > 0,
+        config.fail_on_new_metrics and _measured(state.diff_new_dead_code) > 0,
         f"{gate_msgs.GATE_REASON_NEW_DEAD_CODE}{state.diff_new_dead_code}.",
     )
 
@@ -619,7 +695,7 @@ def _health_regression_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_on_new_metrics and state.diff_health_delta < 0,
+        config.fail_on_new_metrics and _measured(state.diff_health_delta) < 0,
         f"{gate_msgs.GATE_REASON_HEALTH_REGRESSION}{state.diff_health_delta}.",
     )
 
@@ -661,8 +737,8 @@ def _typing_regression_reason(
     return _reason_if(
         config.fail_on_typing_regression
         and (
-            state.diff_typing_param_permille_delta < 0
-            or state.diff_typing_return_permille_delta < 0
+            _measured(state.diff_typing_param_permille_delta) < 0
+            or _measured(state.diff_typing_return_permille_delta) < 0
         ),
         gate_msgs.GATE_REASON_TYPING_REGRESSION
         + f"params_delta={state.diff_typing_param_permille_delta}, "
@@ -676,7 +752,8 @@ def _docstring_regression_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_on_docstring_regression and state.diff_docstring_permille_delta < 0,
+        config.fail_on_docstring_regression
+        and _measured(state.diff_docstring_permille_delta) < 0,
         f"{gate_msgs.GATE_REASON_DOCSTRING_REGRESSION}{state.diff_docstring_permille_delta}.",
     )
 
@@ -687,7 +764,7 @@ def _api_breaking_changes_reason(
     config: MetricGateConfig,
 ) -> tuple[str, ...]:
     return _reason_if(
-        config.fail_on_api_break and state.api_breaking_changes > 0,
+        config.fail_on_api_break and _measured(state.api_breaking_changes) > 0,
         f"{gate_msgs.GATE_REASON_API_BREAKING}{state.api_breaking_changes}.",
     )
 
@@ -759,37 +836,15 @@ def _evaluate_gate_state_result(
         )
     )
     if unavailable_lanes:
-        return GateResult(
-            exit_code=int(ExitCode.CONTRACT_ERROR),
-            reasons=tuple(f"lane:unavailable:{lane}" for lane in unavailable_lanes),
-            required_lanes=required_lanes,
-            unavailable_lanes=unavailable_lanes,
-        )
-
-    if _any_gate_requested(config):
-        # Ordered after the lane check so a configuration fault keeps its own
-        # exit code, and before every predicate below because none of them can
-        # be answered from either population here. Thirteen gates would pass on
-        # counters that are zero only because nothing was counted; the two
-        # coverage thresholds would fail quoting 0.0 % of a population that was
-        # never read. One honest outcome replaces both shapes.
-        #
-        # The two refusals share an exit code and nothing else. ``unmeasured``
-        # is a broken run — files exist and none were read, so look for the
-        # dead worker or the permission fault. ``complete_empty`` is a run that
-        # worked and found no source file, so look at the root and the include
-        # patterns. Both refuse rather than answer, because the "at most" gates
-        # would be vacuously true and the "at least" gates (health floor,
-        # typing and docstring minima) ask for a floor on a quantity that is
-        # undefined over an empty set — and answering that with a fabricated 0
-        # is the same invention in the other direction.
-        refusal = _POPULATION_REFUSALS.get(state.health_population)
-        if refusal is not None:
-            return GateResult(
-                exit_code=int(ExitCode.GATING_FAILURE),
-                reasons=(f"metric:{refusal}",),
-                required_lanes=required_lanes,
-            )
+        return _unavailable(unavailable_lanes, required_lanes=required_lanes)
+    refused = _refused(
+        state=state,
+        config=config,
+        requirements=requirements,
+        required_lanes=required_lanes,
+    )
+    if refused is not None:
+        return refused
 
     effective_config = replace(
         config,
@@ -850,6 +905,96 @@ def _evaluate_gate_state_result(
     )
 
 
+def _unavailable(
+    lanes: tuple[ObservationLaneName, ...],
+    *,
+    required_lanes: tuple[ObservationLaneName, ...],
+) -> GateResult:
+    """The evaluator's one honest outcome for a comparison it cannot make."""
+    return GateResult(
+        exit_code=int(ExitCode.CONTRACT_ERROR),
+        reasons=tuple(f"lane:unavailable:{lane}" for lane in lanes),
+        required_lanes=required_lanes,
+        unavailable_lanes=lanes,
+    )
+
+
+def _uncompared_lanes(
+    *,
+    state: GateState,
+    requirements: tuple[tuple[str, tuple[ObservationLaneName, ...]], ...],
+) -> tuple[ObservationLaneName, ...]:
+    """The lanes of every requested comparison gate whose input the run did
+    not compare (ruling 2026-10-03/05: not compared is ``None``, never a
+    ``0``).  Measured 2026-10-05: a partial run with ``--fail-on-api-break``
+    failed on ``breaking: 2`` beside a document stating no API comparison,
+    and ``--fail-on-new-metrics`` decided on four raw set-difference counts
+    the document called not compared."""
+    return tuple(
+        sorted(
+            {
+                lane
+                for gate_name, lanes in requirements
+                if any(
+                    getattr(state, field) is None
+                    for field in _COMPARISON_GATE_INPUTS.get(gate_name, ())
+                )
+                for lane in lanes
+            }
+        )
+    )
+
+
+def _refused(
+    *,
+    state: GateState,
+    config: MetricGateConfig,
+    requirements: tuple[tuple[str, tuple[ObservationLaneName, ...]], ...],
+    required_lanes: tuple[ObservationLaneName, ...],
+) -> GateResult | None:
+    """The run's refusal to answer the request, after the lane check and
+    before every predicate, or ``None``.
+
+    The population first.  Ordered after the lane check so a configuration
+    fault keeps its own exit code, and before every predicate because none
+    of them can be answered from either population here.  Thirteen gates
+    would pass on counters that are zero only because nothing was counted;
+    the two coverage thresholds would fail quoting 0.0 % of a population that
+    was never read.  One honest outcome replaces both shapes.
+
+    The two refusals share an exit code and nothing else.  ``unmeasured`` is
+    a broken run — files exist and none were read, so look for the dead
+    worker or the permission fault.  ``complete_empty`` is a run that worked
+    and found no source file, so look at the root and the include patterns.
+    Both refuse rather than answer, because the "at most" gates would be
+    vacuously true and the "at least" gates (health floor, typing and
+    docstring minima) ask for a floor on a quantity that is undefined over
+    an empty set — and answering that with a fabricated 0 is the same
+    invention in the other direction.
+
+    Then a requested comparison gate whose delta the run did not compare:
+    the same outcome as an unavailable lane, the evaluator's existing honest
+    branch -- never a pass on ``0``, never a fail on a raw count.  After the
+    population, so a population nobody measured (every comparison withheld)
+    keeps its own refusal.
+    """
+    refusal = (
+        _POPULATION_REFUSALS.get(state.health_population)
+        if _any_gate_requested(config)
+        else None
+    )
+    if refusal is not None:
+        return GateResult(
+            exit_code=int(ExitCode.GATING_FAILURE),
+            reasons=(f"metric:{refusal}",),
+            required_lanes=required_lanes,
+        )
+    uncompared = _uncompared_lanes(state=state, requirements=requirements)
+    if uncompared:
+        return _unavailable(uncompared, required_lanes=required_lanes)
+    return None
+
+
 def evaluate_gate_state(
     *,
     state: GateState,
@@ -876,12 +1021,8 @@ def metric_gate_reasons(
     *,
     report_document: Mapping[str, object],
     config: MetricGateConfig,
-    metrics_diff: object | None = None,
 ) -> tuple[str, ...]:
-    state = _gate_state_from_report_document(
-        report_document=report_document,
-        metrics_diff=metrics_diff,
-    )
+    state = _gate_state_from_report_document(report_document=report_document)
     return metric_gate_reasons_for_state(state=state, config=config)
 
 
@@ -890,7 +1031,6 @@ def evaluate_gates(
     report_document: Mapping[str, object],
     config: MetricGateConfig,
     enabled_lanes: Sequence[str],
-    metrics_diff: object | None = None,
     clone_new_count: int | None = None,
     clone_total: int | None = None,
 ) -> GateResult:
@@ -907,7 +1047,6 @@ def evaluate_gates(
 
     state = _gate_state_from_report_document(
         report_document=report_document,
-        metrics_diff=metrics_diff,
         clone_new_count=clone_new_count,
         clone_total=clone_total,
     )
@@ -930,10 +1069,17 @@ def evaluate_gates(
 def _gate_state_from_report_document(
     *,
     report_document: Mapping[str, object],
-    metrics_diff: object | None,
     clone_new_count: int | None = None,
     clone_total: int | None = None,
 ) -> GateState:
+    """The gate's inputs off one report document; its comparison inputs are
+    the document's normalized comparison state, read back
+    (``canonical.comparison_state.document_comparison_state``) -- never a
+    metrics diff handed beside it.  Imported here: the ``canonical``
+    package loads its serving owner, which imports this module."""
+    from ...canonical.comparison_state import document_comparison_state
+
+    comparison = document_comparison_state(report_document, new_clone_groups=None)
     findings = _as_mapping(report_document.get("findings"))
     groups = _as_mapping(findings.get("groups"))
     clone_groups = _as_mapping(groups.get("clones"))
@@ -970,18 +1116,13 @@ def _gate_state_from_report_document(
     coverage_adoption_summary = _as_mapping(
         _as_mapping(families.get("coverage_adoption")).get("summary")
     )
-    api_surface_summary = _as_mapping(
-        _as_mapping(families.get("api_surface")).get("summary")
-    )
     semantic_authority_summary = _as_mapping(
         _as_mapping(families.get("semantic_authority")).get("summary")
     )
     coverage_join_summary = _as_mapping(
         _as_mapping(families.get("coverage_join")).get("summary")
     )
-    diff_summary = summarize_metrics_diff(metrics_diff) or {}
-    prefer_diff_summary = metrics_diff is not None
-    return GateState(
+    state = GateState(
         health_population=health_population,
         clone_new_count=max(
             clone_new_count if clone_new_count is not None else derived_clone_new_count,
@@ -1027,43 +1168,12 @@ def _gate_state_from_report_document(
             coverage_join_summary.get("coverage_hotspots"),
             0,
         ),
-        api_breaking_changes=(
-            _as_int(diff_summary.get("api_breaking_changes"), 0)
-            if prefer_diff_summary
-            else _as_int(api_surface_summary.get("breaking"), 0)
-        ),
         authority_violations=_as_int(
             semantic_authority_summary.get("violations"),
             0,
         ),
-        diff_new_high_risk_functions=_as_int(
-            diff_summary.get("new_high_risk_functions"),
-            0,
-        ),
-        diff_new_high_coupling_classes=_as_int(
-            diff_summary.get("new_high_coupling_classes"),
-            0,
-        ),
-        diff_new_cycles=_as_int(diff_summary.get("new_cycles"), 0),
-        diff_new_import_cycles=_as_int(diff_summary.get("new_import_cycles"), 0),
-        diff_new_dead_code=_as_int(diff_summary.get("new_dead_code"), 0),
-        diff_health_delta=_as_int(diff_summary.get("health_delta"), 0),
-        diff_typing_param_permille_delta=(
-            _as_int(diff_summary.get("typing_param_permille_delta"), 0)
-            if prefer_diff_summary
-            else _as_int(coverage_adoption_summary.get("param_delta"), 0)
-        ),
-        diff_typing_return_permille_delta=(
-            _as_int(diff_summary.get("typing_return_permille_delta"), 0)
-            if prefer_diff_summary
-            else _as_int(coverage_adoption_summary.get("return_delta"), 0)
-        ),
-        diff_docstring_permille_delta=(
-            _as_int(diff_summary.get("docstring_permille_delta"), 0)
-            if prefer_diff_summary
-            else _as_int(coverage_adoption_summary.get("docstring_delta"), 0)
-        ),
     )
+    return with_comparison_inputs(state, comparison.value)
 
 
 def _permille(numerator: int, denominator: int) -> int:
@@ -1073,6 +1183,7 @@ def _permille(numerator: int, denominator: int) -> int:
 
 
 __all__ = [
+    "GATE_COMPARISON_TERMS",
     "HEALTH_INPUT_LANES",
     "GateResult",
     "GateState",
@@ -1085,4 +1196,5 @@ __all__ = [
     "metric_gate_reasons",
     "metric_gate_reasons_for_state",
     "summarize_metrics_diff",
+    "with_comparison_inputs",
 ]

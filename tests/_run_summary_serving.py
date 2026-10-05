@@ -30,14 +30,16 @@ Three populations were added for the ruling "not compared -> null"
 measured zero, and no withheld health verdict under a trusted baseline: the
 stage-A tree against its own baseline (every comparison runs; all but the
 health score's measure zero), and the trusted tree with every Python file
-unparsable (``unmeasured``) or removed (``complete_empty``).  They are
-registered apart (``COMPARISON_STATE_POPULATIONS``), so a consumer that
-counts ``SUMMARY_POPULATIONS`` as its own population keeps the sixteen.
-A fourth joined them (2026-10-05, acceptance of the normalized comparison
+unparsable (``unmeasured``) or removed (``complete_empty``).  A fourth
+joined them (2026-10-05, acceptance of the normalized comparison
 state): the trusted tree with the block clone lane under an older algorithm
 revision, the one population whose clone comparison ran over exactly one of
 its two lanes -- without it a reader that required both lanes and a reader
-that required either agree on every population.
+that required either agree on every population.  The four were first
+registered apart, so the pins of other consumers (patch verification, the
+blast radius) kept the sixteen; they rejoined the one registry when the
+gate inputs moved onto the normalized comparison state (2026-10-05), and
+every consumer now holds all twenty.
 
 This module is a helper, not a test module, so it may read the canonical
 store beside the surface (the Phase 39S test-import law binds
@@ -97,24 +99,10 @@ SUMMARY_POPULATIONS: dict[str, str] = {
     "coverage_invalid": "published",
     "warm_rerun": "published",
     "clones_only_warm": "head_withheld",
-}
-
-#: The comparison-state populations of the ruling "not compared -> null"
-#: (2026-10-03), by name and publication.  Registered apart from
-#: ``SUMMARY_POPULATIONS``, which other consumers' pins count as their own
-#: population (patch verification, the blast radius): the run summary's
-#: pins read ``RUN_SUMMARY_POPULATIONS``, all nineteen.
-COMPARISON_STATE_POPULATIONS: dict[str, str] = {
     "trusted_unchanged": "published",
     "trusted_unmeasured": "head_withheld",
     "trusted_complete_empty": "published",
     "older_revision_block_clone_lane": "published",
-}
-
-#: Every population the run summary's own pins hold.
-RUN_SUMMARY_POPULATIONS: dict[str, str] = {
-    **SUMMARY_POPULATIONS,
-    **COMPARISON_STATE_POPULATIONS,
 }
 
 
@@ -426,7 +414,7 @@ class SummaryPopulations:
         return root, {"coverage_xml": coverage.name, "api_surface": True}, 1
 
     def _serve(self, name: str) -> SummaryPopulation:
-        assert name in RUN_SUMMARY_POPULATIONS, name
+        assert name in SUMMARY_POPULATIONS, name
         root, request, analyses = self._tree(name)
         store_path = self._base / f"{name}.sqlite3"
         service = CodeCloneMCPService(history_limit=4)
@@ -436,7 +424,7 @@ class SummaryPopulations:
             name=name, root=root, store_path=store_path, service=service
         )
         corpora._published_store_run_id(
-            population.record, outcome=RUN_SUMMARY_POPULATIONS[name]
+            population.record, outcome=SUMMARY_POPULATIONS[name]
         )
         return population
 
@@ -679,8 +667,6 @@ def shared_populations(factory: pytest.TempPathFactory) -> SummaryPopulations:
 
 
 __all__ = [
-    "COMPARISON_STATE_POPULATIONS",
-    "RUN_SUMMARY_POPULATIONS",
     "STORE_ROW_PERTURBATIONS",
     "SUMMARY_POPULATIONS",
     "UNREAD_ROW_PERTURBATIONS",

@@ -69,7 +69,7 @@ that moves onto the store next declares its own the same way.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast, get_args
@@ -93,7 +93,6 @@ from codeclone.canonical.comparison_rows import (
     NOVELTY_KNOWN,
     NOVELTY_NEW,
     NOVELTY_UNAVAILABLE,
-    FindingNoveltyRow,
 )
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.evaluation_projection import (
@@ -198,7 +197,7 @@ from codeclone.models import (
     RelationshipRecord,
     RelationshipResolutionStatus,
 )
-from codeclone.report.gates.evaluator import GateState
+from codeclone.report.gates.evaluator import GateState, with_comparison_inputs
 
 
 @dataclass(frozen=True, slots=True)
@@ -803,10 +802,6 @@ def _patch_findings(
     }
 
 
-def _new_ids(rows: Iterable[FindingNoveltyRow]) -> set[str]:
-    return {row.finding_id for row in rows if row.novelty == NOVELTY_NEW}
-
-
 def _adoption_permille(model: CanonicalModel, feature: str) -> int:
     rows = [
         row for row in model.facts.analysis.adoption_counts if row.feature == feature
@@ -816,29 +811,21 @@ def _adoption_permille(model: CanonicalModel, feature: str) -> int:
     )
 
 
-def _patch_gate_state(
-    model: CanonicalModel, findings: Mapping[str, tuple[Mapping[str, object], ...]]
-) -> GateState:
+def _patch_gate_state(model: CanonicalModel) -> GateState:
     """The gate's input record off the stored rows -- every term the
     document reader (``report.gates.evaluator``) takes off a document, the
-    clone counts the surface hands it, the diff terms its metrics diff
-    carries -- so the one evaluator can answer under the budget's request."""
+    clone counts the surface hands it, and the comparison inputs as the
+    stored run's normalized comparison state (``stored_comparison_state``:
+    ``None`` for a delta the run did not compare) -- so the one evaluator
+    can answer under the budget's request."""
     facts = model.facts.analysis
-    comparison = model.facts.comparison
     health = model.facts.evaluation.health_result
     maxima = design_maxima(facts)
     dead = dead_code(model)
     coverage = coverage_join(model)
-    deltas = metric_deltas(comparison)
-    new_clones = new_clone_groups(comparison)
-    new_cycles = _new_ids(comparison.dependency_cycle_novelty)
-    cycle_kinds = {
-        str(group["id"]): group["kind"]
-        for group in findings["design"]
-        if group.get("category") == "dependency"
-    }
+    new_clones = new_clone_groups(model.facts.comparison)
     population = _DEFAULT_POPULATION if health is None else health.population
-    return GateState(
+    state = GateState(
         health_population=cast(
             "ObservedPopulation",
             population
@@ -866,22 +853,9 @@ def _patch_gate_state(
         docstring_permille=_adoption_permille(model, "docstrings.public_symbols"),
         coverage_join_status=str(coverage.get("status", "")),
         coverage_hotspots=int(cast("int", coverage.get("coverage_hotspots", 0))),
-        api_breaking_changes=deltas["api_breaking_changes"],
         authority_violations=authority_counts(facts)["violations"],
-        diff_new_high_risk_functions=len(_new_ids(comparison.complexity_novelty)),
-        diff_new_high_coupling_classes=len(_new_ids(comparison.coupling_novelty)),
-        diff_new_cycles=len(new_cycles),
-        diff_new_import_cycles=sum(
-            1
-            for finding_id in new_cycles
-            if cycle_kinds.get(finding_id) == _IMPORT_CYCLE
-        ),
-        diff_new_dead_code=len(_new_ids(comparison.dead_symbol_novelty)),
-        diff_health_delta=diff_health_delta(model) or 0,
-        diff_typing_param_permille_delta=deltas["typing_param_permille_delta"],
-        diff_typing_return_permille_delta=deltas["typing_return_permille_delta"],
-        diff_docstring_permille_delta=deltas["docstring_permille_delta"],
     )
+    return with_comparison_inputs(state, stored_comparison_state(model).value)
 
 
 def patch_run_from_model(model: CanonicalModel, *, run_id: str) -> ServedPatchRun:
@@ -914,7 +888,7 @@ def _patch_run(model: CanonicalModel, *, run_id: str) -> ServedPatchRun:
         dead_code_high_confidence=int(cast("int", dead.get("high_confidence", 0))),
         baseline_status=str(baseline_state(model.facts.comparison).get("status", "")),
         findings=findings,
-        gate_state=_patch_gate_state(model, findings),
+        gate_state=_patch_gate_state(model),
         lane_trust=dict(sorted(lane_trust.items())),
         # One trust row per enabled lane, by construction
         # (``report.document.builder._baseline_projection``).
@@ -931,7 +905,10 @@ def _patch_run(model: CanonicalModel, *, run_id: str) -> ServedPatchRun:
 #: populations and the 25 runs of the patch-contract battery: 33 of the
 #: store's 56 families; the graph moved behind its condition 2026-10-05.
 #: The risk observations stay unconditional: the per-symbol complexity
-#: index and the complexity maximum are read off them on every run.
+#: index and the complexity maximum are read off them on every run.  The
+#: disabled capabilities joined the unconditional families (2026-10-05)
+#: when the gate's comparison inputs moved onto the stored comparison
+#: state, which names a reason off them.
 PATCH_CONTRACT_FAMILIES: Final = (
     FAMILY_ADOPTION_COUNT,
     FAMILY_ADOPTION_DELTA,
@@ -954,6 +931,7 @@ PATCH_CONTRACT_FAMILIES: Final = (
     FAMILY_DEAD_SYMBOL_NOVELTY,
     FAMILY_DEPENDENCY_CYCLE,
     FAMILY_DEPENDENCY_CYCLE_NOVELTY,
+    FAMILY_DISABLED_CAPABILITY,
     FAMILY_FILE_MODULE,
     FAMILY_FINDING_EVALUATION,
     FAMILY_HEALTH_DELTA,

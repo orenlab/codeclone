@@ -723,6 +723,10 @@ def _main_impl() -> None:
                 new_func=gate_new_func,
                 new_block=gate_new_block,
                 metrics_diff=diff_context.metrics_diff,
+                coverage_adoption_diff_available=(
+                    diff_context.coverage_adoption_diff_available
+                ),
+                api_surface_diff_available=diff_context.api_surface_diff_available,
                 clone_threshold_total=(
                     changed_clone_gate.total_clone_groups
                     if changed_clone_gate

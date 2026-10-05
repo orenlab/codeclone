@@ -76,7 +76,7 @@ from codeclone.canonical.store import (
 from codeclone.domain.findings import FAMILY_AUTHORITY, FAMILY_STRUCTURAL
 from tests._blast_radius_serving import BLAST_POPULATIONS, shared_blast_populations
 from tests._patch_contract_serving import CYCLE_BUILDERS, shared_cycles
-from tests._run_summary_serving import RUN_SUMMARY_POPULATIONS, shared_populations
+from tests._run_summary_serving import SUMMARY_POPULATIONS, shared_populations
 from tests.test_run_summary_declared_families import scanned
 
 __all__ = ["scanned"]
@@ -105,7 +105,7 @@ def _run(name: str, path: Path, run_id: str) -> _Run:
 def summary_runs(tmp_path_factory: pytest.TempPathFactory) -> list[_Run]:
     populations = shared_populations(tmp_path_factory)
     runs = []
-    for name in RUN_SUMMARY_POPULATIONS:
+    for name in SUMMARY_POPULATIONS:
         population = populations[name]
         link = population.record.execution.run_snapshot_link
         assert link is not None and link.store_run_id

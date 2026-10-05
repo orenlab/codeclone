@@ -17,7 +17,6 @@ from codeclone.contracts import ObservedPopulation
 from codeclone.core._types import AnalysisResult, BootstrapResult, OutputPaths
 from codeclone.core.reporting import gate as cli_gate
 from codeclone.models import (
-    ApiBreakingChange,
     DeadItem,
     HealthScore,
     LaneTrust,
@@ -147,6 +146,12 @@ def _assert_gate(
     assert (result.exit_code, result.reasons) == (exit_code, reasons)
 
 
+def _nothing_compared(_comparison: str, _term: str) -> int | None:
+    """A run none of whose comparisons against the baseline ran: every
+    comparison input of the gate is ``None``."""
+    return None
+
+
 def _analysis_result(project_metrics: ProjectMetrics) -> AnalysisResult:
     """One analysis result, so the gate and the summary read the same run.
 
@@ -207,6 +212,8 @@ def _cli_gate_result(
         new_func=set(),
         new_block=set(),
         metrics_diff=None,
+        coverage_adoption_diff_available=False,
+        api_surface_diff_available=False,
         baseline_trust=TrustVector(
             root_verified=True,
             lanes=tuple(
@@ -599,7 +606,7 @@ def test_cli_gate_state_carries_the_unreachable_statement_lane() -> None:
     state = gate_state_from_project_metrics(
         project_metrics=metrics,
         coverage_join=None,
-        metrics_diff=None,
+        comparison=_nothing_compared,
     )
 
     assert state.dead_high_confidence == 0
@@ -778,7 +785,7 @@ def test_cli_dead_code_summary_never_understates_the_gate(tmp_path: Path) -> Non
     state = gate_state_from_project_metrics(
         project_metrics=metrics,
         coverage_join=None,
-        metrics_diff=None,
+        comparison=_nothing_compared,
     )
 
     assert snapshot.dead_code_count == 1
@@ -964,50 +971,49 @@ def test_api_gate_from_a_document_counts_breaking_changes_only(
         "dict[str, object]",
         cast("dict[str, object]", document["metrics"])["families"],
     )
-    families["api_surface"] = {"summary": {"breaking": breaking, "changed": changed}}
+    families["api_surface"] = {
+        "summary": {
+            "baseline_diff_available": True,
+            "breaking": breaking,
+            "changed": changed,
+            "added": 0,
+        }
+    }
 
-    state = gate_state_from_report_document(
-        report_document=document,
-        metrics_diff=None,
-    )
+    state = gate_state_from_report_document(report_document=document)
     assert state.api_breaking_changes == expected
 
 
-def test_api_gate_from_a_document_and_its_diff_counts_breaking_changes_only() -> None:
-    """The diff road of the same builder: compatible changes never gate.
-
-    MCP hands the run's own diff beside the document; its compatible
-    ``new_api_signature_changes`` must stay out of ``api_breaking_changes``.
-    """
-
-    compatible = tuple(
-        ApiBreakingChange(
-            qualname=f"pkg.mod:{name}",
-            filepath="pkg/mod.py",
-            start_line=1,
-            end_line=1,
-            symbol_kind="function",
-            change_kind="signature_changed",
-            detail="Added optional parameter limit.",
-        )
-        for name in ("grown", "widened", "extended")
+def _document_stating_the_comparisons(
+    deltas: dict[tuple[str, str], int],
+) -> dict[str, object]:
+    """The gating document with the four set-difference families and health
+    stating their comparisons -- the pair, ``baseline_diff_available`` beside
+    the measured delta -- the way the producer writes a run that compared."""
+    document = _report_document()
+    families = cast(
+        "dict[str, dict[str, dict[str, object]]]",
+        cast("dict[str, object]", document["metrics"])["families"],
     )
-    state = gate_state_from_report_document(
-        report_document=_report_document(),
-        metrics_diff=MetricsDiff(
-            new_high_risk_functions=(),
-            new_high_coupling_classes=(),
-            new_cycles=(),
-            new_dead_code=(),
-            health_delta=0,
-            new_api_signature_changes=compatible,
-        ),
-    )
-    assert state.api_breaking_changes == 0
+    for (family, key), value in deltas.items():
+        summary = families[family]["summary"]
+        summary["baseline_diff_available"] = True
+        summary[key] = value
+    return document
 
 
 def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
-    report_document = _report_document()
+    report_document = _document_stating_the_comparisons(
+        {
+            ("complexity", "new_high_risk"): 0,
+            ("coupling", "new_high_risk"): 0,
+            ("dependencies", "new_cycles"): 0,
+            ("dependencies", "new_import_cycles"): 0,
+            ("dependencies", "new_deferred_cycles"): 0,
+            ("dead_code", "new_items"): 1,
+            ("health", "delta"): -1,
+        }
+    )
     project_metrics = _project_metrics()
     metrics_diff = MetricsDiff(
         new_high_risk_functions=(),
@@ -1065,7 +1071,9 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
         segment_clones_count=0,
         files_analyzed_or_cached=1,
         project_metrics=project_metrics,
-        metrics_payload=None,
+        # A published health verdict: the comparison against the baseline
+        # is made over a run that measured its population.
+        metrics_payload={"health": {"score": 90, "population": "complete_nonempty"}},
         suggestions=(),
         segment_groups_raw_digest="",
         observation_bundle=TEST_OBSERVATION_BUNDLE,
@@ -1084,6 +1092,8 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
         new_func={"clone:function:new"},
         new_block=set(),
         metrics_diff=metrics_diff,
+        coverage_adoption_diff_available=False,
+        api_surface_diff_available=False,
         baseline_trust=baseline_trust,
     )
 
@@ -1127,7 +1137,6 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
         report_document=report_document,
         enabled_lanes=TEST_OBSERVATION_BUNDLE.contract.enabled_lanes,
         config=config,
-        metrics_diff=metrics_diff,
         clone_new_count=1,
         clone_total=1,
     )
@@ -1166,7 +1175,7 @@ def test_gate_state_carries_the_population_the_score_was_measured_over() -> None
     state = gate_state_from_project_metrics(
         project_metrics=unmeasured,
         coverage_join=None,
-        metrics_diff=None,
+        comparison=_nothing_compared,
     )
 
     assert state.health_population == "unmeasured"
@@ -1178,7 +1187,7 @@ def test_gate_state_reports_a_measured_population_as_measured() -> None:
     state = gate_state_from_project_metrics(
         project_metrics=_project_metrics(),
         coverage_join=None,
-        metrics_diff=None,
+        comparison=_nothing_compared,
     )
 
     assert state.health_population == "complete_nonempty"
@@ -1194,7 +1203,7 @@ def test_gate_state_carries_the_skipped_file_count() -> None:
     state = gate_state_from_project_metrics(
         project_metrics=_project_metrics(),
         coverage_join=None,
-        metrics_diff=None,
+        comparison=_nothing_compared,
         files_skipped=29,
     )
 
@@ -1244,6 +1253,8 @@ def _cli_gate_without_metrics(
         new_func=set(),
         new_block=set(),
         metrics_diff=None,
+        coverage_adoption_diff_available=False,
+        api_surface_diff_available=False,
         baseline_trust=TrustVector(
             root_verified=True,
             lanes=tuple(

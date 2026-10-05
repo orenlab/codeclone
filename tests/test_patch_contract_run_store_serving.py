@@ -241,12 +241,12 @@ EXPECTED: dict[str, tuple[str, str | None]] = {
         "served",
     ),
     "truncated_api/budget:ci": ("budget:-:-:-", "served"),
-    "truncated_api/budget:strict": ("budget:-:-:-", "divergent"),
+    "truncated_api/budget:strict": ("budget:-:-:-", "served"),
     "truncated_api/budget:relaxed": ("budget:-:-:-", "served"),
     "truncated_api/structural:ci": ("verify:accepted:-:python_structural", "served"),
     "truncated_api/structural:strict": (
         "verify:accepted:-:python_structural",
-        "divergent",
+        "served",
     ),
     "truncated_api/structural:relaxed": (
         "verify:accepted:-:python_structural",
@@ -427,18 +427,29 @@ def test_the_store_answers_every_question_as_memory_does(
     assert memory_serving["reason"] in {"store_disabled", "not_published"}
 
 
-def test_the_store_disagreement_on_a_truncated_run_serves_memory_named(
+def test_a_truncated_runs_strict_gate_is_one_answer_on_both_roads(
     cycles: PatchCycles,
 ) -> None:
-    """The one natural disagreement of the battery: a truncated run's API
-    delta, gated by the strict budget -- memory is served, both runs read,
-    the gate fields named."""
+    """Until 2026-10-05 the one natural disagreement of the battery: memory
+    gated a truncated run's API delta off its metrics diff, where the store,
+    whose API comparison did not run, stated none -- memory was served,
+    ``diverging: before_gate.reasons, gate_preview.reasons``.  Both roads
+    now read the run's normalized comparison state: the API comparison did
+    not run, the strict budget's API gate takes the unavailable-lane branch
+    on both, and the store's answer is served."""
+    memory = cycles["truncated_api"].ask("structural:strict", serve_from="memory")
     stored = cycles["truncated_api"].ask("structural:strict", serve_from="run_store")
     serving = stored["serving"]
     assert isinstance(serving, dict)
-    assert serving["source"] == "memory" and serving["reason"] == "divergent"
-    assert serving["detail"] == "diverging: before_gate.reasons, gate_preview.reasons"
-    assert {run["reason"] for run in serving["runs"].values()} == {"served"}
+    assert (serving["source"], serving["reason"]) == ("run_store", "served")
+    for answer in (memory, stored):
+        for block in ("before_gate", "gate_preview"):
+            gate = answer[block]
+            assert isinstance(gate, dict)
+            assert (gate["exit_code"], gate["reasons"]) == (
+                2,
+                ["lane:unavailable:api_surface"],
+            ), (block, gate)
 
 
 @pytest.mark.parametrize("carrier", list(PATCH_ROW_PERTURBATIONS))

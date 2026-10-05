@@ -52,7 +52,7 @@ from codeclone.contracts.comparison_state import (
 from codeclone.report.gates.evaluator import HEALTH_INPUT_LANES
 from codeclone.utils.coerce import as_mapping, as_sequence
 from tests._run_summary_serving import (
-    RUN_SUMMARY_POPULATIONS,
+    SUMMARY_POPULATIONS,
     SummaryPopulations,
     produced_by,
     shared_populations,
@@ -133,7 +133,7 @@ def population_states(
     off the sealed document, and the document's API family summary."""
     populations = shared_populations(tmp_path_factory)
     states = {}
-    for name in RUN_SUMMARY_POPULATIONS:
+    for name in SUMMARY_POPULATIONS:
         record = populations[name].record
         link = record.execution.run_snapshot_link
         assert link is not None and link.store_run_id
@@ -191,27 +191,20 @@ def test_the_producer_states_what_the_store_and_the_document_read(
     the state the store rows and the document state back.  A producer answer
     no reader reads could drift unseen (measured 2026-10-05: a producer
     counting a clone set under an untrusted lane survived the whole suite).
-    The metrics never ran on the two clones-only populations: the producer
-    is never asked there, and the accounting says so."""
+    Every execution asks the producer -- the gate reads its state too, so a
+    clones-only run, whose metrics never ran, is asked as well -- and every
+    state it built during one execution is the same state."""
     populations = shared_populations(tmp_path_factory)
-    unasked = set()
-    for name in RUN_SUMMARY_POPULATIONS:
+    clone_outcomes = set()
+    for name in SUMMARY_POPULATIONS:
         produced = produced_by(populations[name])
-        if not produced:
-            unasked.add(name)
-            continue
         stored, document, _api = population_states[name]
+        assert produced, name
         assert {state == produced[0] for state in produced} == {True}, name
         assert produced[0].results == stored.results, name
         assert produced[0].results == document.results, name
-    assert unasked == {"clones_only", "clones_only_warm"}
-    clone_outcomes = {
-        produced_by(populations[name])[0]
-        .result(COMPARISON_CLONES, TERM_NEW_GROUPS)
-        .reason
-        or "compared"
-        for name in set(RUN_SUMMARY_POPULATIONS) - unasked
-    }
+        clone = produced[0].result(COMPARISON_CLONES, TERM_NEW_GROUPS)
+        clone_outcomes.add(clone.reason or "compared")
     assert clone_outcomes == {"compared", NOT_COMPARED_UNAVAILABLE}
 
 
@@ -264,7 +257,7 @@ def _raw_runs(
         (f"cli.{name}", run.document, run.stored)
         for name, run in comparison_runs.items()
     ]
-    for name in RUN_SUMMARY_POPULATIONS:
+    for name in SUMMARY_POPULATIONS:
         record = populations[name].record
         link = record.execution.run_snapshot_link
         assert link is not None and link.store_run_id
@@ -434,7 +427,7 @@ _READS_AROUND_THE_CARRIER: dict[str, int] = {
     "codeclone/core/reporting.py": 1,
     "codeclone/report/document/_common.py": 4,
     "codeclone/report/document/metrics.py": 14,
-    "codeclone/report/gates/evaluator.py": 15,
+    "codeclone/report/gates/evaluator.py": 13,
     "codeclone/report/html/sections/_overview.py": 7,
     "codeclone/surfaces/cli/patch_verify.py": 1,
     "codeclone/surfaces/cli/summary.py": 3,

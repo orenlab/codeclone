@@ -413,6 +413,8 @@ def _report_case(
         new_func=(),
         new_block=(),
         metrics_diff=None,
+        coverage_adoption_diff_available=False,
+        api_surface_diff_available=False,
         baseline_trust=None,
         files_skipped=processing.files_skipped,
         gate_config=gate_config,

@@ -24,6 +24,7 @@ from codeclone.core._types import (
     _module_dep_sort_key,
 )
 from codeclone.core.bootstrap import _resolve_optional_runtime_path
+from codeclone.core.comparison_state import _values as _comparison_values
 from codeclone.core.coverage_payload import _coverage_join_rows, _coverage_join_summary
 from codeclone.core.discovery_cache import (
     _api_param_kind,
@@ -298,9 +299,23 @@ def _metric_gate_reasons_from_metrics(
     state = gate_state_from_project_metrics(
         project_metrics=project_metrics,
         coverage_join=coverage_join,
-        metrics_diff=metrics_diff,
+        comparison=_every_comparison_made(metrics_diff),
     )
     return metric_gate_reasons_for_state(state=state, config=config)
+
+
+def _every_comparison_made(
+    metrics_diff: MetricsDiff | None,
+) -> Callable[[str, str], int | None]:
+    """A run every comparison of which ran, measuring ``metrics_diff``'s
+    deltas (no diff: every delta a measured zero) -- the comparison state
+    these reason pins read, spelled by the producer's own term table."""
+    values = _comparison_values(metrics_diff)
+
+    def value(comparison: str, term: str) -> int | None:
+        return values.get(comparison, {}).get(term, 0)
+
+    return value
 
 
 def test_pipeline_basic_helpers_and_sort_keys() -> None:

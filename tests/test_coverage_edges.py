@@ -220,7 +220,6 @@ def test_metric_gate_reasons_wrapper_uses_report_document_snapshot() -> None:
             fail_on_new=True,
             fail_threshold=0,
         ),
-        metrics_diff={"new_dead_code": 1, "health_delta": -1},
     )
 
     assert "Complexity threshold exceeded: max CC=30, threshold=20." in reasons
