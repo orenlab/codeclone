@@ -1450,12 +1450,17 @@ def _clear_workspace_intent_store_cache() -> Generator[None, None, None]:
 @pytest.fixture(autouse=True)
 def _cold_served_facts() -> Generator[None, None, None]:
     """Every test starts as a fresh process does: no run's served facts
-    kept from another test (``api.run_store_serving.ServedFactsCache``)."""
+    kept from another test (``api.run_store_serving.ServedFactsCache``) and
+    no run's membership proven by one (``canonical.store
+    .prove_run_membership``)."""
     from codeclone.api.run_store_serving import forget_served_facts
+    from codeclone.canonical.store import forget_proven_memberships
 
     forget_served_facts()
+    forget_proven_memberships()
     yield
     forget_served_facts()
+    forget_proven_memberships()
 
 
 @pytest.fixture(autouse=True)
