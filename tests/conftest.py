@@ -1448,6 +1448,17 @@ def _clear_workspace_intent_store_cache() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def _cold_served_facts() -> Generator[None, None, None]:
+    """Every test starts as a fresh process does: no run's served facts
+    kept from another test (``api.run_store_serving.ServedFactsCache``)."""
+    from codeclone.api.run_store_serving import forget_served_facts
+
+    forget_served_facts()
+    yield
+    forget_served_facts()
+
+
+@pytest.fixture(autouse=True)
 def _track_sqlite_connections(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Generator[None, None, None]:

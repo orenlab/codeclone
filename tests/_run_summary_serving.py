@@ -53,10 +53,16 @@ from codeclone.api.run_store_serving import (
     ENV_SERVE_FROM,
     SERVE_FROM_RUN_STORE,
     ServedRunSummary,
+    forget_served_facts,
     read_run_store_summary,
 )
 from codeclone.canonical import store as store_module
 from codeclone.canonical.model import CanonicalModel
+from codeclone.canonical.serving import (
+    read_served_blast_radius_facts,
+    read_served_patch_run,
+    read_served_run_summary,
+)
 from codeclone.surfaces.mcp._run_store_serving import memory_run_summary
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -542,12 +548,33 @@ UNREAD_ROW_PERTURBATIONS: dict[str, tuple[str, _Perturb]] = {
 }
 
 
+#: The three store-served readings, by the kind the door keeps their facts
+#: under (``api.run_store_serving.SERVED_FACTS_*``).
+_FRESH_READINGS: dict[str, Callable[[store_module.RunStore, str], object]] = {
+    "run_summary": read_served_run_summary,
+    "patch_run": read_served_patch_run,
+    "blast_radius": read_served_blast_radius_facts,
+}
+
+
+def fresh_served_facts(kind: str, store_path: Path, run_id: str) -> object:
+    """One run's facts of ``kind`` read straight off its store by the
+    canonical reading -- past the door and every fact it keeps."""
+    with store_module.RunStore(store_path, create=False) as store:
+        return _FRESH_READINGS[kind](store, run_id)
+
+
 @contextmanager
 def store_row_replaced(perturb: _Perturb) -> Iterator[None]:
     """Every model the store assembles -- whole or bounded -- is assembled
-    with one decoded row replaced, for as long as the context lasts."""
+    with one decoded row replaced, for as long as the context lasts.
+
+    The process's kept facts are forgotten on the way in and on the way
+    out, so every answer inside is read from the store with the row
+    replaced, and no answer after it was kept from inside."""
     original = store_module._collected_model
     patch = pytest.MonkeyPatch()
+    forget_served_facts()
 
     def _assembled(
         collected: Mapping[str, list[object]], loaded: frozenset[str] | None = None
@@ -561,6 +588,7 @@ def store_row_replaced(perturb: _Perturb) -> Iterator[None]:
         yield
     finally:
         patch.undo()
+        forget_served_facts()
 
 
 #: One set of populations per pytest session, whichever module asks first:
@@ -587,6 +615,7 @@ __all__ = [
     "UNREAD_ROW_PERTURBATIONS",
     "SummaryPopulation",
     "SummaryPopulations",
+    "fresh_served_facts",
     "serving_environment",
     "shared_populations",
     "store_row_replaced",

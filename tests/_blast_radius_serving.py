@@ -38,6 +38,7 @@ from typing import Any
 
 import pytest
 
+from codeclone.api.run_store_serving import forget_served_facts
 from codeclone.canonical.identity import FileId, ModuleId
 from codeclone.surfaces.mcp._blast_radius import blast_radius_to_payload
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
@@ -193,10 +194,12 @@ def policy_requests(population: SummaryPopulation) -> list[PolicyRequest]:
 
 
 def forget_answers(population: SummaryPopulation) -> None:
-    """Drop every cached blast radius of the execution, so the next question
-    is computed -- and read from the store -- afresh."""
+    """Drop every cached blast radius of the execution and every fact the
+    process kept, so the next question is computed -- and read from the
+    store -- afresh."""
     with population.service._state_lock:
         population.service._blast_radius_cache.clear()
+    forget_served_facts()
 
 
 def blast_answer(
