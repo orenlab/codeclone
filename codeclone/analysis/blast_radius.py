@@ -12,6 +12,11 @@ sources: :func:`blast_radius_facts` reads it off a canonical report document
 (the parent's memory), and the run store's projection reads it off a stored
 run (consumer migration C7).  :func:`compute_blast_radius` is the document
 road kept whole: the carrier of the document, computed.
+
+A file is matched to the import edges by the module the run's module
+identity names for it (:func:`file_module`), on both roads -- the identity
+that named the edges' endpoints.  ``src/pkg/core.py`` is ``pkg.core``; its
+path's spelling, ``src.pkg.core``, is a module no edge names.
 """
 
 from __future__ import annotations
@@ -123,23 +128,95 @@ def _normalize_relative_path(path: object) -> str:
     return text.rstrip("/")
 
 
-def _path_to_module(path: str) -> str:
+def document_file_modules(
+    report_document: Mapping[str, object],
+) -> tuple[tuple[str, str], ...]:
+    """The run's module identity, off a report document's module registry.
+
+    Every ``(path, module)`` pair of ``source_facts.module_registry``
+    (``entries_by_path``), sorted by path: the same pairs the run store holds
+    as its FILE-MODULE relation (``core.canonical_snapshot._identity_index``),
+    and the identity that named the endpoints of the run's import edges.  A
+    file the identity gave no module -- not Python, outside every import
+    mount, a name no import can spell -- is absent, never named by its path;
+    a document without a registry has no pairs.  A served projection
+    withholds ``source_facts`` and refuses the read: it carries these pairs
+    lifted (``api.served_projection.ServingAnalysisContract.file_modules``).
+    """
+
+    source_facts = _as_mapping(report_document.get("source_facts"))
+    registry = _as_mapping(source_facts.get("module_registry"))
+    entries = _as_mapping(registry.get("entries_by_path"))
+    return tuple(
+        sorted(
+            {
+                pair
+                for row in _as_sequence(entries.get("rows"))
+                if (pair := _registry_pair(row)) is not None
+            }
+        )
+    )
+
+
+def _registry_pair(row: object) -> tuple[str, str] | None:
+    """One ``[path, entry]`` registry row as ``(path, module)``, or ``None``
+    when its identity names no module."""
+    pair = _as_sequence(row)
+    if len(pair) != 2:
+        return None
+    identity = _as_mapping(_as_mapping(pair[1]).get("identity"))
+    path = _as_mapping(identity.get("file")).get("path")
+    module = _as_mapping(identity.get("python_module")).get("module")
+    if isinstance(path, str) and path and isinstance(module, str) and module:
+        return path, module
+    return None
+
+
+def module_index(
+    file_modules: Sequence[tuple[str, str]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """The run's module identity, both ways: each file's module, and each
+    module's file (the first by path, should a module ever name two).
+
+    ``file_modules`` is the identity's own ``(path, module)`` relation (the
+    carrier's ``file_modules``): the identity that named the endpoints of the
+    run's import edges.  Nothing here derives a module from a path's
+    spelling -- ``src/pkg/core.py`` is ``pkg.core`` because the identity says
+    so, and a file the identity names no module has none.
+    """
+
+    module_of = dict(file_modules)
+    file_of: dict[str, str] = {}
+    for path, module in sorted(file_modules):
+        file_of.setdefault(module, path)
+    return module_of, file_of
+
+
+def file_module(path: str, module_of: Mapping[str, str]) -> str | None:
+    """The module the run's module identity names for one requested path.
+
+    A file stands for its own module.  A directory stands for its regular
+    package: the module of its ``__init__.py`` (a declared directory tree,
+    ``pkg/``, reaches the computation as ``pkg``).  Anything else -- a file
+    that is not Python, outside every import mount, unknown to the run, or a
+    namespace package's directory, which has no file to name -- has no
+    module: ``None``, never a name made from the path.
+    """
+
     normalized = _normalize_relative_path(path)
-    if not normalized.endswith(".py"):
-        return normalized.replace("/", ".")
-    without_suffix = normalized[:-3]
-    if without_suffix.endswith("/__init__"):
-        without_suffix = without_suffix[: -len("/__init__")]
-    if without_suffix == "__init__":
-        without_suffix = ""
-    return without_suffix.replace("/", ".").strip(".")
+    if not normalized:
+        return None
+    module = module_of.get(normalized)
+    if module is None:
+        module = module_of.get(f"{normalized}/__init__.py")
+    return module
 
 
 # Path honesty: there is deliberately no module-to-candidate-path helper
-# here. A module the document's path index cannot place keeps its dotted
-# identity; ``module.replace(".", "/") + ".py"`` was the phantom-path bug
-# (a package module projected to a file that does not exist). The single
-# projection owner is ``codeclone.paths.module_identity.projection``.
+# here. A module the run's identity cannot place keeps its dotted identity;
+# ``module.replace(".", "/") + ".py"`` was the phantom-path bug (a package
+# module projected to a file that does not exist). The single projection
+# owner is ``codeclone.paths.module_identity.projection``.
 
 
 def _dedupe_sorted(values: Sequence[str] | set[str]) -> tuple[str, ...]:
@@ -154,39 +231,10 @@ def _item_path(item: Mapping[str, object]) -> str:
     return ""
 
 
-def _module_path_index(report_document: Mapping[str, object]) -> dict[str, str]:
-    modules: dict[str, str] = {}
-    inventory = _as_mapping(report_document.get("inventory"))
-    file_registry = _as_mapping(inventory.get("file_registry"))
-    for raw_path in _as_sequence(file_registry.get("items")):
-        path = _normalize_relative_path(raw_path)
-        module = _path_to_module(path)
-        if module and path:
-            modules.setdefault(module, path)
-    metrics = _as_mapping(report_document.get("metrics"))
-    families = _as_mapping(metrics.get("families"))
-    for family_name in (
-        "complexity",
-        "coupling",
-        "cohesion",
-        "coverage_join",
-        "overloaded_modules",
-        "security_surfaces",
-        "api_surface",
-        "coverage_adoption",
-    ):
-        family = _as_mapping(families.get(family_name))
-        for raw_item in _as_sequence(family.get("items")):
-            item = _as_mapping(raw_item)
-            path = _item_path(item)
-            module = str(item.get("module", "")).strip() or _path_to_module(path)
-            if module and path:
-                modules.setdefault(module, path)
-    return modules
-
-
-def _module_to_output(module: str, module_paths: Mapping[str, str]) -> str:
-    return module_paths.get(module, module)
+def _module_to_output(module: str, file_of: Mapping[str, str]) -> str:
+    """A dependent as the answer names it: its file, or the endpoint itself
+    -- the edges spell a file the identity names no module by its path."""
+    return file_of.get(module, module)
 
 
 def _build_reverse_import_graph(
@@ -700,24 +748,28 @@ def _guardrails(
     return tuple(guardrails)
 
 
-def blast_radius_facts(report_document: Mapping[str, object]) -> BlastRadiusFacts:
-    """The facts of one run a blast radius reads, off its report document."""
-    edges = _edge_pairs(_dependency_edges(report_document))
-    module_paths = _module_path_index(report_document)
+def blast_radius_facts(
+    report_document: Mapping[str, object],
+    file_modules: Sequence[tuple[str, str]] | None = None,
+) -> BlastRadiusFacts:
+    """The facts of one run a blast radius reads, off its report document.
+
+    ``file_modules`` is the run's module identity.  Left out, it is read off
+    the document's own module registry (:func:`document_file_modules`) -- a
+    whole report document carries it; a served projection withholds it,
+    refuses that read, and its caller hands the lifted pairs over instead.
+    The identity is never re-derived from any other section of the document.
+    """
+    identity = (
+        document_file_modules(report_document) if file_modules is None else file_modules
+    )
     high_complexity, high_coupling, low_coverage, overloaded_candidates = (
         _risk_signal_paths(report_document)
     )
     security_surfaces, overloaded_modules = _report_only_paths(report_document)
     return BlastRadiusFacts(
-        dependent_paths=tuple(
-            sorted(
-                {
-                    (source, _module_to_output(source, module_paths))
-                    for source, _ in edges
-                }
-            )
-        ),
-        dependency_edges=edges,
+        file_modules=tuple(sorted(set(identity))),
+        dependency_edges=_edge_pairs(_dependency_edges(report_document)),
         dependency_cycles=_dependency_cycles(report_document),
         clone_groups=_clone_group_paths(report_document),
         suppressed_clone_paths=_suppressed_clone_paths(report_document),
@@ -740,11 +792,13 @@ def compute_blast_radius(
     depth: BlastRadiusDepth = "direct",
     forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
     allowed_scope: Sequence[str] = (),
+    file_modules: Sequence[tuple[str, str]] | None = None,
 ) -> BlastRadiusResult:
-    """The blast radius of ``files`` over one report document."""
+    """The blast radius of ``files`` over one report document and the run's
+    module identity (``file_modules``, see :func:`blast_radius_facts`)."""
     return compute_blast_radius_from_facts(
         run_id=run_id,
-        facts=blast_radius_facts(report_document),
+        facts=blast_radius_facts(report_document, file_modules),
         files=files,
         depth=depth,
         forbidden_patterns=forbidden_patterns,
@@ -765,12 +819,12 @@ def compute_blast_radius_from_facts(
     origin_paths = _dedupe_sorted(
         tuple(_normalize_relative_path(path) for path in files)
     )
-    module_paths = dict(facts.dependent_paths)
+    module_of, module_paths = module_index(facts.file_modules)
     origin_by_module = {
         module: path
         for path in origin_paths
-        for module in (_path_to_module(path),)
-        if module
+        for module in (file_module(path, module_of),)
+        if module is not None
     }
     origin_modules = tuple(sorted(origin_by_module))
     reverse_graph = _build_reverse_import_graph(facts.dependency_edges)
@@ -859,4 +913,7 @@ __all__ = [
     "blast_radius_facts",
     "compute_blast_radius",
     "compute_blast_radius_from_facts",
+    "document_file_modules",
+    "file_module",
+    "module_index",
 ]

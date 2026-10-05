@@ -17,11 +17,10 @@ to each other, and the computation can run on the store's.
 
 * ``dependency_edges`` -- the dependency relations (both endpoints spelled as
   the document spells them: a module by its dotted name, a file by its path);
-* ``dependent_paths`` -- every importing endpoint through the FILE-MODULE
-  relation: the module's file, or the endpoint itself when the run placed it
-  in no file.  The document's own module index is a wider, legacy reading
-  (it also names modules no edge ever starts from); the computation looks up
-  importing endpoints only, and only those are carried;
+* ``file_modules`` -- the FILE-MODULE relation, whole: the run's module
+  identity, the same one that named the endpoints of the edges.  The
+  document's source is its module registry (``source_facts.module_registry``),
+  the producer of this very relation;
 * ``dependency_cycles`` -- the dependency-cycle rows, members sorted;
 * ``clone_groups`` / ``suppressed_clone_paths`` -- the active and the
   suppressed clone-group rows, by their sites' files;
@@ -81,19 +80,14 @@ def _dependency_edges(facts: AnalysisFacts) -> tuple[tuple[str, str], ...]:
     )
 
 
-def _dependent_paths(
-    model: CanonicalModel, edges: tuple[tuple[str, str], ...]
-) -> tuple[tuple[str, str], ...]:
-    """The path each importing endpoint answers as a dependent.  A module the
-    relation gives two files is placed in the first by path: deterministic,
-    and a run that differs from the document there is a divergence the
-    serving edge names, never a silent guess it serves."""
-    file_of: dict[str, str] = {}
-    for relation in sorted(
-        model.file_modules, key=lambda item: (item.module.module, item.file.path)
-    ):
-        file_of.setdefault(relation.module.module, relation.file.path)
-    return tuple(sorted({(source, file_of.get(source, source)) for source, _ in edges}))
+def _file_modules(model: CanonicalModel) -> tuple[tuple[str, str], ...]:
+    """Every stored ``(path, module)`` pair of the FILE-MODULE relation."""
+    return tuple(
+        sorted(
+            (relation.file.path, relation.module.module)
+            for relation in model.file_modules
+        )
+    )
 
 
 def _dependency_cycles(facts: AnalysisFacts) -> tuple[tuple[str, ...], ...]:
@@ -143,10 +137,9 @@ def blast_radius_facts_from_model(model: CanonicalModel) -> BlastRadiusFacts:
     """The facts of one stored run a blast radius reads."""
     facts = model.facts.analysis
     evaluation = model.facts.evaluation
-    edges = _dependency_edges(facts)
     return BlastRadiusFacts(
-        dependent_paths=_dependent_paths(model, edges),
-        dependency_edges=edges,
+        file_modules=_file_modules(model),
+        dependency_edges=_dependency_edges(facts),
         dependency_cycles=_dependency_cycles(facts),
         clone_groups=tuple(
             sorted(_site_files(row.items) for row in facts.clone_groups)

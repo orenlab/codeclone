@@ -22,7 +22,7 @@ from ...models import RelationshipRecord
 from ...paths import classify_source_kind
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-from ._blast_radius import _path_to_module
+from ._blast_radius import _normalize_relative_path, file_module, module_index
 from ._implementation_context_pages import (
     ContextProjectionArtifact,
     build_context_projection_artifact,
@@ -578,15 +578,17 @@ def build_implementation_context(
             projected_change_control=projected_change_control,
             request=request_projection,
         )
-    module_paths = _module_path_index(record)
-    selected_modules = frozenset(_path_to_module(path) for path in normalized_paths)
+    module_of, module_paths, known_files = _run_module_identity(record)
+    selected_modules = frozenset(
+        _graph_node(path, module_of) for path in normalized_paths
+    )
     structural_context: dict[str, object] = {}
 
     if "module_role" in include_set:
         module_roles = tuple(
             {
                 "path": path,
-                "module": _path_to_module(path),
+                "module": file_module(path, module_of),
                 "source_kind": classify_source_kind(path),
                 "evidence": "structural",
             }
@@ -608,6 +610,7 @@ def build_implementation_context(
         dependency_rows=dependency_rows,
         selected_modules=selected_modules,
         module_paths=module_paths,
+        known_files=known_files,
     )
     if {"imports", "importers", "tests"}.intersection(include_set):
         _attach_bounded(
@@ -633,6 +636,7 @@ def build_implementation_context(
             items=_dynamic_boundaries(
                 record,
                 selected_modules=selected_modules,
+                module_of=module_of,
             ),
             budget=entry_budget,
         )
@@ -1367,10 +1371,45 @@ def _dependency_rows(record: MCPRunRecord) -> tuple[dict[str, object], ...]:
     )
 
 
+def _run_module_identity(
+    record: MCPRunRecord,
+) -> tuple[dict[str, str], dict[str, str], frozenset[str]]:
+    """The run's module identity both ways -- each file's module, each
+    module's file -- off the pairs the served projection lifted out of the
+    report's module registry, and the files the run scanned."""
+
+    module_of, module_paths = module_index(record.served_report.contract.file_modules)
+    return module_of, module_paths, frozenset(record.execution.manifest or ())
+
+
+def _graph_node(path: str, module_of: Mapping[str, str]) -> str:
+    """How the run's import edges spell ``path``: the module the run's
+    module identity names for it, or the path itself for a file the
+    identity names no module -- the producer's own rule
+    (``analysis._module_walk._source_module_key``), so a subject outside
+    every import mount still finds the edges it starts."""
+
+    module = file_module(path, module_of)
+    return _normalize_relative_path(path) if module is None else module
+
+
+def _endpoint_path(
+    endpoint: str, module_paths: Mapping[str, str], known_files: frozenset[str]
+) -> str | None:
+    """The file an edge endpoint stands for: a module's file, or the
+    endpoint itself when the edge spells a file by its path."""
+
+    path = module_paths.get(endpoint)
+    if path is None and endpoint in known_files:
+        return endpoint
+    return path
+
+
 def _dynamic_boundaries(
     record: MCPRunRecord,
     *,
     selected_modules: frozenset[str],
+    module_of: Mapping[str, str],
 ) -> tuple[dict[str, object], ...]:
     """Subject sites where the import frontier is honestly under-approximated.
 
@@ -1385,7 +1424,7 @@ def _dynamic_boundaries(
         site = _as_mapping(raw)
         source = _as_mapping(site.get("source"))
         path = str(_as_mapping(source.get("file")).get("path", "")).strip()
-        if not path or _path_to_module(path) not in selected_modules:
+        if not path or _graph_node(path, module_of) not in selected_modules:
             continue
         rows.append(
             {
@@ -1439,24 +1478,33 @@ def _imports_for_modules(
     )
 
 
+def _importer_row(
+    row: Mapping[str, object],
+    *,
+    module_paths: Mapping[str, str],
+    known_files: frozenset[str],
+) -> dict[str, object]:
+    source_path = _endpoint_path(str(row["source"]), module_paths, known_files)
+    return {
+        "source_module": str(row["source"]),
+        "source_path": source_path,
+        "source_kind": classify_source_kind(source_path or ""),
+        "target_module": str(row["target"]),
+        "import_type": str(row["import_type"]),
+        "line": _as_int(row["line"]),
+        "evidence": "structural",
+    }
+
+
 def _importers_for_modules(
     *,
     dependency_rows: Sequence[Mapping[str, object]],
     selected_modules: frozenset[str],
     module_paths: Mapping[str, str],
+    known_files: frozenset[str],
 ) -> tuple[dict[str, object], ...]:
     rows: list[dict[str, object]] = [
-        {
-            "source_module": str(row["source"]),
-            "source_path": module_paths.get(str(row["source"])),
-            "source_kind": classify_source_kind(
-                module_paths.get(str(row["source"]), "")
-            ),
-            "target_module": str(row["target"]),
-            "import_type": str(row["import_type"]),
-            "line": _as_int(row["line"]),
-            "evidence": "structural",
-        }
+        _importer_row(row, module_paths=module_paths, known_files=known_files)
         for row in dependency_rows
         if str(row["target"]) in selected_modules
     ]
@@ -1553,16 +1601,6 @@ def _attach_bounded(
     projected, summary = budget.take(items)
     payload[key] = projected
     payload[f"{key}_summary"] = summary
-
-
-def _module_path_index(record: MCPRunRecord) -> dict[str, str]:
-    if record.execution.manifest is None:
-        return {}
-    return {
-        module: path
-        for path in sorted(record.execution.manifest)
-        if (module := _path_to_module(path))
-    }
 
 
 def _context_artifact_digest(

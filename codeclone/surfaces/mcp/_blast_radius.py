@@ -24,6 +24,9 @@ DEFAULT_DO_NOT_TOUCH_PATTERNS = _core.DEFAULT_DO_NOT_TOUCH_PATTERNS
 MAX_CONTEXT_ITEMS = _core.MAX_CONTEXT_ITEMS
 compute_blast_radius = _core.compute_blast_radius
 compute_blast_radius_from_facts = _core.compute_blast_radius_from_facts
+document_file_modules = _core.document_file_modules
+file_module = _core.file_module
+module_index = _core.module_index
 
 # Re-export core helpers for MCP contract tests and backward compatibility.
 _append_boundary_entry = _core._append_boundary_entry
@@ -33,7 +36,6 @@ _compute_transitive_dependents = _core._compute_transitive_dependents
 _guardrails = _core._guardrails
 _item_path = _core._item_path
 _normalize_relative_path = _core._normalize_relative_path
-_path_to_module = _core._path_to_module
 
 BlastRadiusInclude = Literal[
     "imports",

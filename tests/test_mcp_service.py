@@ -6315,7 +6315,6 @@ def test_mcp_blast_radius_high_scope_boundary_and_helper_edges() -> None:
     )
     assert mcp_blast_radius_mod._as_int(True) == 1
     assert mcp_blast_radius_mod._as_int("bad", default=7) == 7
-    assert mcp_blast_radius_mod._path_to_module("__init__.py") == ""
 
 
 def test_mcp_blast_radius_private_edge_helpers() -> None:
@@ -6323,7 +6322,6 @@ def test_mcp_blast_radius_private_edge_helpers() -> None:
     assert mcp_blast_radius_mod._as_int(2.9) == 2
     assert mcp_blast_radius_mod._as_int(object(), default=4) == 4
     assert mcp_blast_radius_mod._normalize_relative_path(".") == ""
-    assert mcp_blast_radius_mod._path_to_module("pkg/data.txt") == "pkg.data.txt"
     assert mcp_blast_radius_mod._item_path({}) == ""
     assert mcp_blast_radius_mod._compute_transitive_dependents(
         origin_modules=("pkg.a",),

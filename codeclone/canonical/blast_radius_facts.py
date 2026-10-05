@@ -36,10 +36,11 @@ from dataclasses import dataclass
 class BlastRadiusFacts:
     """The facts of one run a blast radius reads, each in one canonical order.
 
-    * ``dependent_paths`` -- every importing endpoint of an import edge, with
-      the repository path it answers as a dependent: its file, or the
-      endpoint itself when the run placed it in no file.  The computation
-      maps dependents through this and nothing else.
+    * ``file_modules`` -- every file the run's module identity names a
+      module for, as ``(path, module)``, sorted: the same identity that
+      named the endpoints of the import edges.  The computation names an
+      origin file's module and a dependent module's file through this
+      relation and nothing else; a file it does not hold has no module.
     * ``dependency_edges`` -- the ``(source, target)`` import edges.
     * ``dependency_cycles`` -- each import cycle's modules, sorted, the
       cycles ordered by ``(size, members)``.
@@ -49,7 +50,7 @@ class BlastRadiusFacts:
       and unique; the computation cuts each with the blast zone.
     """
 
-    dependent_paths: tuple[tuple[str, str], ...]
+    file_modules: tuple[tuple[str, str], ...]
     dependency_edges: tuple[tuple[str, str], ...]
     dependency_cycles: tuple[tuple[str, ...], ...]
     clone_groups: tuple[tuple[str, ...], ...]

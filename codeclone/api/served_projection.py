@@ -38,6 +38,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Final
 
+from ..analysis.blast_radius import document_file_modules
 from ..contracts import REPORT_RUN_IDENTITY_TIER
 from ..utils.coerce import as_mapping, as_sequence
 
@@ -76,6 +77,12 @@ class ServingAnalysisContract:
     analysis_facts_digest: str
     #: ``integrity.digests.observation.value``.
     observation_digest: str
+    #: ``source_facts.module_registry`` -- every file the run's module
+    #: identity names a module for, as ``(path, module)``
+    #: (``analysis.blast_radius.document_file_modules``).  The identity that named the
+    #: endpoints of the run's import edges, so a served answer matches a file
+    #: to those edges through it rather than through the file's spelling.
+    file_modules: tuple[tuple[str, str], ...]
 
 
 class ServedReportProjection(Mapping[str, object]):
@@ -164,6 +171,7 @@ def build_served_projection(
             as_mapping(digests.get("analysis_facts")).get("value", "")
         ),
         observation_digest=str(as_mapping(digests.get("observation")).get("value", "")),
+        file_modules=document_file_modules(report_document),
     )
     return ServedReportProjection(
         {

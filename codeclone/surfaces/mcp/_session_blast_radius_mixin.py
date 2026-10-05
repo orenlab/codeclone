@@ -117,14 +117,17 @@ def _computed_blast_radius(
 ) -> BlastRadiusCacheEntry:
     """One normalized question, computed on its road (no cache).
 
-    The radius off the record's document always; on a serving road, the same
-    computation handed the facts the store states for the execution too, and
-    the edge decides which is served (``served_blast_radius``).
+    The radius off the record's document always -- with the module identity
+    the projection lifted out of the document's registry -- and on a serving
+    road, the same computation handed the facts the store states for the
+    execution too, and the edge decides which is served
+    (``served_blast_radius``).
     """
     run_id = _helpers._short_run_id(record.run_id)
     memory = compute_blast_radius(
         run_id=run_id,
         report_document=record.served_report,
+        file_modules=record.served_report.contract.file_modules,
         files=files,
         depth=depth,
         forbidden_patterns=forbidden_patterns,
