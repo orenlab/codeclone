@@ -16,6 +16,8 @@ from ._patch_contract_runs import (
     ComparisonFacts,
     PatchSession,
     RecordPatchRun,
+    StorePatchRun,
+    focus_is_analyzed,
     focused_comparison_index,
     gate_config,
     require_gate_coverage,
@@ -27,7 +29,11 @@ from ._report_section import (
     removed_report_section_payload,
     require_mapping_section,
 )
-from ._run_store_serving import memory_run_summary, served_run_summary
+from ._run_store_serving import (
+    memory_run_summary,
+    served_patch_contract,
+    served_run_summary,
+)
 from ._session_baseline import (
     CloneBaselineState,
     MetricsBaselineState,
@@ -184,6 +190,25 @@ def _module_map_section_payload(
     return payload
 
 
+def _focused_comparability(
+    *, before: MCPRunRecord, after: MCPRunRecord, focus: str
+) -> dict[str, object]:
+    """Whether the two runs are compared under ``focus``, decided on the
+    records: their root and settings (``_comparison_scope``), then the
+    focus -- a focus whose families the runs' analysis mode never produced
+    compares nothing, so it is no comparison and states no number."""
+    comparability = _helpers._comparison_scope(before=before, after=after)
+    if comparability["comparable"] and not focus_is_analyzed(
+        focus, analysis_mode=before.request.analysis_mode
+    ):
+        return {
+            **comparability,
+            "comparable": False,
+            "reason": _helpers.COMPARISON_REASON_FOCUS_NOT_ANALYZED,
+        }
+    return comparability
+
+
 def compare_runs_on_facts(
     *,
     before: MCPRunRecord,
@@ -211,7 +236,9 @@ def compare_runs_on_facts(
     common = before_ids & after_ids
     health_before = before_facts.health()
     health_after = after_facts.health()
-    comparability = _helpers._comparison_scope(before=before, after=after)
+    comparability = _focused_comparability(
+        before=before, after=after, focus=validated_focus
+    )
     comparable = bool(comparability["comparable"])
     health_delta = (
         health_after - health_before
@@ -286,6 +313,37 @@ def _compare_records(
         focus=focus,
         before_facts=RecordPatchRun(facts, before),
         after_facts=RecordPatchRun(facts, after),
+    )
+
+
+def served_run_comparison(
+    session: object,
+    *,
+    memory: Mapping[str, object],
+    before: MCPRunRecord,
+    after: MCPRunRecord,
+    focus: ComparisonFocus,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """The comparison of two records to serve, and where it came from
+    (consumer migration C3).
+
+    ``memory`` is the comparison over the records' facts; it is shadowed by
+    the same comparison over the two runs' stored facts, each run read
+    through the patch-run door, and the store's is served only when it is
+    the memory's byte for byte (``_run_store_serving.served_patch_contract``,
+    the patch verification's decision and block).  The records still name
+    the runs and decide their comparability."""
+    facts = cast("PatchSession", session)
+    return served_patch_contract(
+        memory,
+        {"before": before, "after": after},
+        lambda stored: compare_runs_on_facts(
+            before=before,
+            after=after,
+            focus=focus,
+            before_facts=StorePatchRun(facts, before, stored["before"]),
+            after_facts=StorePatchRun(facts, after, stored["after"]),
+        ),
     )
 
 
@@ -1059,7 +1117,12 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
             self._runs, before_run_id, root
         )
         after = _helpers._resolve_run_for_optional_root(self._runs, after_run_id, root)
-        return self._compare_run_records(before=before, after=after, focus=focus)
+        payload, serving = self._served_compare_run_records(
+            before=before, after=after, focus=focus
+        )
+        # Where the comparison came from, and why (consumer migration C3).
+        payload["serving"] = serving
+        return payload
 
     def _compare_run_records(
         self,
@@ -1077,6 +1140,25 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
         """
 
         return _compare_records(self, before=before, after=after, focus=focus)
+
+    def _served_compare_run_records(
+        self,
+        *,
+        before: MCPRunRecord,
+        after: MCPRunRecord,
+        focus: ComparisonFocus = "all",
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """:meth:`_compare_run_records`, served from the run store when the
+        store's comparison is the memory's (:func:`served_run_comparison`),
+        with its ``serving`` block beside it."""
+
+        return served_run_comparison(
+            self,
+            memory=self._compare_run_records(before=before, after=after, focus=focus),
+            before=before,
+            after=after,
+            focus=focus,
+        )
 
 
 class _MCPSessionStateMixin(_MCPSessionReportMixin):

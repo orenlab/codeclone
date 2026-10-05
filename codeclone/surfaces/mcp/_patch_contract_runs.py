@@ -43,6 +43,8 @@ from ._patch_contract import baseline_status
 from ._run_store_serving import served_patch_contract
 from ._session_finding_mixin import _FINDING_FAMILIES_BY_MODE
 from ._session_shared import (
+    FAMILY_CLONE,
+    FAMILY_CLONES,
     GatingResult,
     MCPGateRequest,
     MCPRunRecord,
@@ -109,6 +111,28 @@ def require_gate_coverage(
         raise MCPServiceContractError(
             f"Coverage gating requires a valid Cobertura XML input. Reason: {detail}"
         )
+
+
+#: The finding family a finding-group container holds, where the two names
+#: differ (``findings.groups.clones`` holds ``clone`` findings).
+_GROUP_FINDING_FAMILY: Mapping[str, str] = {FAMILY_CLONES: FAMILY_CLONE}
+
+
+def focus_is_analyzed(focus: str, *, analysis_mode: str) -> bool:
+    """Whether a run comparison under ``focus`` compares any family the
+    analysis mode produced: ``all`` always does; a focus whose families the
+    mode never produced compares nothing (a clones-only pair asked for its
+    structural or metrics findings), so it states no number."""
+    families = _FOCUS_FAMILIES.get(focus)
+    if families is None:
+        return True
+    produced = {
+        _GROUP_FINDING_FAMILY.get(key, key)
+        for key in _FINDING_FAMILIES_BY_MODE.get(
+            analysis_mode, baseline_tracked_group_keys()
+        )
+    }
+    return not families.isdisjoint(produced)
 
 
 def focused_comparison_index(
@@ -463,6 +487,7 @@ __all__ = [
     "PatchSession",
     "RecordPatchRun",
     "StorePatchRun",
+    "focus_is_analyzed",
     "focused_comparison_index",
     "gate_config",
     "record_current_state",

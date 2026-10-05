@@ -527,7 +527,7 @@ class _MCPSessionReviewReceiptMixin:
         # Both records are already root-bound (the attested before-run at the
         # intent's own root); compare them directly instead of re-resolving
         # ids that same-commit sibling worktrees share.
-        compare_payload = _state_session(self)._compare_run_records(
+        compare_payload, _serving = _state_session(self)._served_compare_run_records(
             before=previous,
             after=record,
             focus="all",

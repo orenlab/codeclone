@@ -641,6 +641,14 @@ def _comparison_settings(
     )
 
 
+#: Why a pair of comparable runs is not compared under one focus: the
+#: analysis mode of both runs produced none of the families the focus
+#: selects (a clones-only pair asked for its structural or metrics
+#: findings), so no comparison ran and no number is stated (ruling
+#: 2026-10-03, "not compared -> null").
+COMPARISON_REASON_FOCUS_NOT_ANALYZED = "focus_not_analyzed"
+
+
 def _comparison_scope(
     *,
     before: MCPRunRecord,
@@ -717,6 +725,9 @@ def _comparison_summary_text(
             "different_analysis_settings": "different analysis settings",
             "different_root_and_analysis_settings": (
                 "different roots and analysis settings"
+            ),
+            COMPARISON_REASON_FOCUS_NOT_ANALYZED: (
+                "the analysis mode did not analyse this focus"
             ),
         }.get(comparability_reason, "incomparable runs")
         return f"Finding and run health deltas omitted ({reason_text})"
