@@ -93,6 +93,7 @@ from codeclone.surfaces.mcp.session import (
 )
 from codeclone.utils import coerce as _coerce
 from tests import test_baseline_lane_degradation as lane_degradation
+from tests._blast_radius_layouts import registry_source_facts
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 from tests._report_access import _dict_at
 from tests._report_fixtures import served_projection_over
@@ -377,6 +378,13 @@ def _blast_radius_report_document(digest: str = "digest-a") -> dict[str, object]
                 ]
             }
         },
+        "source_facts": registry_source_facts(
+            ("pkg/a.py", "pkg.a"),
+            ("pkg/b.py", "pkg.b"),
+            ("pkg/c.py", "pkg.c"),
+            ("pkg/clone_peer.py", "pkg.clone_peer"),
+            ("tests/test_a.py", "tests.test_a"),
+        ),
         "metrics": {
             "families": {
                 "dependencies": {
@@ -571,7 +579,12 @@ def _patch_contract_report_document(
     complexity_path: str = "pkg/b.py",
 ) -> dict[str, object]:
     report_document = copy.deepcopy(_blast_radius_report_document(digest))
+    module_identity = cast("dict[str, object]", report_document["source_facts"])
     report_document.update(_trusted_gate_facts())
+    report_document["source_facts"] = {
+        **module_identity,
+        **cast("dict[str, object]", report_document["source_facts"]),
+    }
     report_document["meta"] = {
         "baseline": {
             "loaded": bool(baseline_status),
@@ -6268,14 +6281,17 @@ def test_mcp_blast_radius_projection_is_deterministic() -> None:
     )
 
 
-def test_mcp_blast_radius_high_scope_boundary_and_helper_edges() -> None:
-    report_document = copy.deepcopy(_blast_radius_report_document())
+def _add_dependent_modules(
+    report_document: dict[str, object], count: int
+) -> tuple[str, ...]:
+    """``count`` more modules importing ``pkg.a``: in the inventory, as
+    import edges, and in the module registry; their paths, sorted."""
+    paths = tuple(f"pkg/dep_{index}.py" for index in range(count))
     registry = cast(
         "dict[str, object]",
         cast(dict[str, object], report_document["inventory"])["file_registry"],
     )
-    items = cast("list[str]", registry["items"])
-    items.extend(f"pkg/dep_{index}.py" for index in range(6))
+    cast("list[str]", registry["items"]).extend(paths)
     dependencies = cast(
         "dict[str, object]",
         cast(
@@ -6283,10 +6299,19 @@ def test_mcp_blast_radius_high_scope_boundary_and_helper_edges() -> None:
             cast(dict[str, object], report_document["metrics"])["families"],
         )["dependencies"],
     )
-    dependency_items = cast("list[dict[str, object]]", dependencies["items"])
-    dependency_items.extend(
-        {"source": f"pkg.dep_{index}", "target": "pkg.a"} for index in range(6)
+    cast("list[dict[str, object]]", dependencies["items"]).extend(
+        {"source": f"pkg.dep_{index}", "target": "pkg.a"} for index in range(count)
     )
+    report_document["source_facts"] = registry_source_facts(
+        *mcp_blast_radius_mod.document_file_modules(report_document),
+        *((path, f"pkg.dep_{index}") for index, path in enumerate(paths)),
+    )
+    return paths
+
+
+def test_mcp_blast_radius_high_scope_boundary_and_helper_edges() -> None:
+    report_document = copy.deepcopy(_blast_radius_report_document())
+    dependent_paths = _add_dependent_modules(report_document, 6)
 
     result = mcp_blast_radius_mod.compute_blast_radius(
         run_id="abcdef12",
@@ -6300,6 +6325,7 @@ def test_mcp_blast_radius_high_scope_boundary_and_helper_edges() -> None:
     )
 
     assert result.radius_level == "high"
+    assert result.direct_dependents == ("pkg/b.py", *dependent_paths)
     assert (
         "high blast radius requires explicit human scope approval" in result.guardrails
     )
@@ -6315,6 +6341,27 @@ def test_mcp_blast_radius_high_scope_boundary_and_helper_edges() -> None:
     )
     assert mcp_blast_radius_mod._as_int(True) == 1
     assert mcp_blast_radius_mod._as_int("bad", default=7) == 7
+
+
+def test_a_file_is_named_by_the_module_identity_and_nothing_else() -> None:
+    """The identity's module for a file; a directory's regular package;
+    ``None`` for anything the identity does not name -- a path's spelling is
+    never read as a module (``pkg/data.txt`` used to be ``pkg.data.txt``,
+    ``src/pkg/core.py`` to be ``src.pkg.core``)."""
+    module_of, file_of = mcp_blast_radius_mod.module_index(
+        (("src/pkg/core.py", "pkg.core"), ("src/pkg/__init__.py", "pkg"))
+    )
+    assert file_of == {"pkg": "src/pkg/__init__.py", "pkg.core": "src/pkg/core.py"}
+    file_module = mcp_blast_radius_mod.file_module
+    assert file_module("src/pkg/core.py", module_of) == "pkg.core"
+    assert file_module("./src/pkg/core.py", module_of) == "pkg.core"
+    assert file_module("src/pkg", module_of) == "pkg"
+    assert file_module("src/pkg/", module_of) == "pkg"
+    for nameless in ("pkg/core.py", "src/pkg/data.txt", "src", "__init__.py", "."):
+        assert file_module(nameless, module_of) is None, nameless
+    # a module two files claim is placed at the first by path
+    _, twice = mcp_blast_radius_mod.module_index((("b.py", "m"), ("a.py", "m")))
+    assert twice == {"m": "a.py"}
 
 
 def test_mcp_blast_radius_private_edge_helpers() -> None:
@@ -19455,6 +19502,46 @@ def test_mcp_blast_payload_summaries_tolerate_malformed_shapes() -> None:
     assert summary == {"lane": {"total": 1, "shown": 0, "truncated": True}}
 
 
+def _append_malformed_module_rows(document: dict[str, object]) -> None:
+    """Module-registry rows no identity can be read from: not a pair, no
+    identity, no module, an empty path, an empty module."""
+    module_rows = cast(
+        "list[object]",
+        _dict_at(document, "source_facts", "module_registry", "entries_by_path")[
+            "rows"
+        ],
+    )
+    module_rows.extend(
+        [
+            "not-a-row",
+            ["pkg/only_path.py"],
+            ["pkg/no_identity.py", {}],
+            ["pkg/no_module.py", {"identity": {"file": {"path": "pkg/no_module.py"}}}],
+            [
+                "",
+                {"identity": {"file": {"path": ""}, "python_module": {"module": "x"}}},
+            ],
+            [
+                "pkg/blank.py",
+                {
+                    "identity": {
+                        "file": {"path": "pkg/blank.py"},
+                        "python_module": {"module": ""},
+                    }
+                },
+            ],
+        ]
+    )
+
+
+def test_the_module_identity_reader_drops_malformed_registry_rows() -> None:
+    noisy = copy.deepcopy(_blast_radius_report_document())
+    _append_malformed_module_rows(noisy)
+    assert mcp_blast_radius_mod.document_file_modules(
+        noisy
+    ) == mcp_blast_radius_mod.document_file_modules(_blast_radius_report_document())
+
+
 def test_blast_radius_document_parsing_filters_malformed_rows() -> None:
     """Malformed registry rows, metric items, edges, boundaries, and cycles
     are dropped row-by-row: garbage changes nothing."""
@@ -19472,6 +19559,7 @@ def test_blast_radius_document_parsing_filters_malformed_rows() -> None:
     inventory = cast("dict[str, object]", noisy_doc["inventory"])
     registry = cast("dict[str, object]", inventory["file_registry"])
     cast("list[object]", registry["items"]).append("")
+    _append_malformed_module_rows(noisy_doc)
     metrics = cast("dict[str, object]", noisy_doc["metrics"])
     families = cast("dict[str, object]", metrics["families"])
     complexity = cast("dict[str, object]", families["complexity"])

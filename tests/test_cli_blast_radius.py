@@ -13,6 +13,7 @@ import codeclone.surfaces.cli.blast_radius as cli_blast_radius
 from codeclone import ui_messages as ui
 from codeclone.contracts import ExitCode
 from codeclone.surfaces.cli.blast_radius import render_blast_radius
+from tests._blast_radius_layouts import registry_source_facts
 
 
 class _RecordingPrinter:
@@ -35,6 +36,9 @@ def _report_document() -> dict[str, object]:
                 "items": ["pkg/a.py", "pkg/b.py", "pkg/c.py"],
             },
         },
+        "source_facts": registry_source_facts(
+            ("pkg/a.py", "pkg.a"), ("pkg/b.py", "pkg.b"), ("pkg/c.py", "pkg.c")
+        ),
         "metrics": {
             "families": {
                 "dependencies": {
@@ -269,6 +273,13 @@ def test_blast_radius_verbose_with_guardrails(tmp_path: Path) -> None:
     assert "Guardrails" in printer.text
 
 
+def _numbered_modules(count: int) -> dict[str, object]:
+    """The module registry of ``pkg/f000.py`` .. : each file is its module."""
+    return registry_source_facts(
+        *((f"pkg/f{index:03d}.py", f"pkg.f{index:03d}") for index in range(count))
+    )
+
+
 def _report_document_many_files() -> dict[str, object]:
     """Report with >20 inventory files to exercise truncation rendering."""
     files = [f"pkg/f{index:03d}.py" for index in range(25)]
@@ -278,6 +289,7 @@ def _report_document_many_files() -> dict[str, object]:
     return {
         "integrity": {"digests": {"evaluation": {"value": "b" * 64}}},
         "inventory": {"file_registry": {"items": files}},
+        "source_facts": _numbered_modules(25),
         "metrics": {
             "families": {
                 "dependencies": {"items": deps, "cycles": []},

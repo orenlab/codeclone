@@ -88,7 +88,9 @@ def stored(populations: BlastPopulations) -> list[_Stored]:
                 name,
                 population.store_path,
                 link.store_run_id,
-                blast_radius_facts(record.served_report),
+                blast_radius_facts(
+                    record.served_report, record.served_report.contract.file_modules
+                ),
             )
         )
     return runs

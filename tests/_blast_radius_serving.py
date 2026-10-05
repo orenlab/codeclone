@@ -367,6 +367,15 @@ STORE_ROW_CARRIERS: dict[str, Carrier] = {
         _one("file_module", lambda row: row.module == ModuleId("pkg.user_1"), None),
         ("direct_dependents",),
     ),
+    # The ORIGIN's own row: the module the origin file is matched to the
+    # edges by is the identity's, read from the store on the store road --
+    # without it the origin has no module and no dependents.
+    "file_module_origin": Carrier(
+        "fanout",
+        BlastRequest(("pkg/core.py",), "direct"),
+        _one("file_module", lambda row: row.module == ModuleId("pkg.core"), None),
+        ("direct_dependents", "radius_level"),
+    ),
     "dependency_cycle": Carrier(
         "fanout",
         BlastRequest(("pkg/cyc_a.py",), "direct"),

@@ -708,13 +708,13 @@ _CONSUMER_PATHS: dict[str, tuple[str, ...]] = {
         "metrics.families.dependencies",
         "metrics.families.dependencies.cycles",
     ),
+    # The file registry is no longer read: a file's module is the run's module
+    # identity, the module registry's own rows -- read off a whole document,
+    # handed over lifted by a served projection (2026-10-05).
     "codeclone/analysis/blast_radius.py": (
         "findings",
         "findings.groups",
         "findings.groups.clones",
-        "inventory",
-        "inventory.file_registry",
-        "inventory.file_registry.items",
         "metrics",
         "metrics.families",
         "metrics.families.complexity",
@@ -729,6 +729,10 @@ _CONSUMER_PATHS: dict[str, tuple[str, ...]] = {
         "metrics.families.dependencies.items",
         "metrics.families.overloaded_modules",
         "metrics.families.overloaded_modules.items",
+        "source_facts",
+        "source_facts.module_registry",
+        "source_facts.module_registry.entries_by_path",
+        "source_facts.module_registry.entries_by_path.rows",
     ),
     "codeclone/surfaces/mcp/_implementation_context.py": (
         "metrics",

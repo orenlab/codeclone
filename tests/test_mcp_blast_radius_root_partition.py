@@ -43,6 +43,7 @@ from codeclone.surfaces.mcp._session_shared import (
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import MCPAnalysisRequest, MCPRunRecord
+from tests._blast_radius_layouts import registry_source_facts
 
 _DOCS_CONFIG_REFERENCE = (
     Path(__file__).resolve().parents[1] / "docs" / "reference" / "configuration.md"
@@ -71,6 +72,9 @@ def _report_document(
 
     return {
         "inventory": {"file_registry": {"items": ["pkg/a.py", dependent_path]}},
+        "source_facts": registry_source_facts(
+            ("pkg/a.py", "pkg.a"), (dependent_path, dependent_module)
+        ),
         "metrics": {
             "families": {
                 "dependencies": {
