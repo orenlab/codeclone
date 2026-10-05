@@ -15,6 +15,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Dependencies lane payload schema `8` and `HEALTH_INPUT_MANIFEST_VERSION` `2`: stored dependencies lanes are untrusted until `--update-baseline`.
 - Dead-code lane payload schema `4`: rows carry their declaration line, so a baseline recorded by an earlier build is untrusted for dead code (and health) and `--ci` exits `2`; record it again once with `codeclone . --update-baseline`.
 - A path in the repository's own `pyproject.toml` (`html_out`/`json_out`/`md_out`/`sarif_out`/`text_out`, `baseline`, `coverage_xml`, `cache_path`, the memory and analytics store paths) must resolve inside the repository: an outside path is refused when the configuration is read (exit `2`); pass it on the command line instead. A CodeClone database is no longer opened through a symbolic link inside `.codeclone/` (`.codeclone` itself may still be a link).
+- MCP `get_run_summary`: the eight `diff` terms and `health.delta` are `null` when the run did not make that comparison (no trusted baseline, a capability the run did not enable, a withheld health verdict); `0` is now always a measured zero, so a client that reads these fields as integers must accept `null`.
 
 ### Added
 
@@ -89,6 +90,8 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Run store: a published run resolves its baseline trust once; the stored comparison reads the trust vector the report is sealed with instead of resolving it a second time (report, wire and store bytes unchanged).
 - Run store: the report-document reader accepts a section the document declares its producer never ran (`integrity.semantic.population.producers`): `source_facts.semantic` null with the authority lane `disabled`, and the clones-only dead-code summary; such reports (every run without the authority lane, empty and unparsable scopes, clones-only) now read equal to the stored run, and an undeclared absence is still refused.
 - A metrics-skipping run (`--skip-metrics`, MCP `clones_only`) over a warm cache no longer takes back the cached semantic events, contract summaries and relationship facts its cold run drops: it gets the same run id and facts as on a cold cache and publishes no authority tier.
+- The report no longer states a comparison the run did not make: with the API surface not collected it published `api_surface.summary.baseline_diff_available: true` and every baseline symbol as a breaking change, and with dead code or dependencies skipped (`--skip-dead-code`, `--skip-dependencies`) it published `baseline_diff_available: true` for those families and a health delta over inputs the run never observed. One normalized comparison state now decides every delta for the report, the run store and the MCP run summary.
+- Blast radius (CLI `--blast-radius`, MCP `get_blast_radius`, `start_controlled_change`) and the implementation context name a file's module by the run's module identity: `src/` layouts, `source_roots` mounts and namespace packages report their real dependents, cycles and risk zone instead of a low radius, and a file outside every mount no longer borrows the radius of a module its path happens to spell (`module_role.module` is `null` for it).
 
 ### Security
 
