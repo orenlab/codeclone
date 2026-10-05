@@ -24,6 +24,7 @@ counts the document called not compared.
 from __future__ import annotations
 
 import json
+import shutil
 
 import pytest
 
@@ -37,6 +38,7 @@ from codeclone.report.gates.evaluator import (
 )
 from codeclone.utils.coerce import as_sequence
 from tests import conftest as corpora
+from tests._patch_contract_serving import shared_cycles, stored_patch_run
 
 _SET_DIFF_LANES = (
     "lane:unavailable:coupling_cohesion_observations",
@@ -228,3 +230,106 @@ def test_a_reason_reader_never_reads_an_uncompared_delta_as_a_number() -> None:
         )
         == ()
     )
+
+
+# -- a new deferred cycle is a new cycle, never a new import cycle ----------------
+
+#: The three builders of the gate's record, each over the same change: the
+#: patch battery's ``deferred_cycle`` -- a fresh baseline, then two modules
+#: importing each other inside their functions.  The run states one new
+#: cycle and no new import-time cycle; only the import-time one gates
+#: (``dependency_delta`` reads ``diff_new_import_cycles``).
+_ROADS = ("cli", "document", "store")
+#: One builder's reading: (new cycles, new import cycles, exit code, reasons).
+_RoadGate = tuple[int | None, int | None, int, tuple[str, ...]]
+
+
+@pytest.fixture(scope="module")
+def deferred_cycle_gates(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, _RoadGate]:
+    """Per builder, under ``fail_on_new_metrics``: (new cycles, new import
+    cycles, exit code, reasons).  The CLI analyses its own copy of the
+    cycle's tree against the same baseline, so the battery's tree is never
+    written; its record is read off the document it writes."""
+    cycle = shared_cycles(tmp_path_factory)["deferred_cycle"]
+    after = cycle.after
+    assert after is not None
+    config = _config(fail_on_new_metrics=True)
+    clones = {
+        "clone_new_count": len(after.new_func) + len(after.new_block),
+        "clone_total": after.func_clones_count + after.block_clones_count,
+    }
+    documented = evaluator.evaluate_gates(
+        report_document=after.served_report,
+        config=config,
+        enabled_lanes=after.served_report.contract.enabled_lanes,
+        **clones,
+    )
+    document_state = evaluator._gate_state_from_report_document(
+        report_document=after.served_report, **clones
+    )
+    served = stored_patch_run(cycle.store_path, after)
+    stored = evaluate_gate_state(
+        state=served.gate_state,
+        config=config,
+        lane_trust=served.lane_trust,
+        enabled_lanes=served.enabled_lanes,
+    )
+    copy = tmp_path_factory.mktemp("deferred_cycle_cli") / "tree"
+    shutil.copytree(
+        cycle.root, copy, ignore=shutil.ignore_patterns(".codeclone", ".cache")
+    )
+    report = copy.parent / "report.json"
+    code = corpora._run_codeclone_cli_exit(
+        [
+            str(copy),
+            "--no-progress",
+            "--api-surface",
+            "--baseline",
+            str(copy / "codeclone.baseline.json"),
+            "--json",
+            str(report),
+            "--fail-on-new-metrics",
+        ],
+        {},
+    )
+    written = json.loads(report.read_text("utf-8"))
+    outcome = written["evaluation"]["outcome"]
+    cli_state = evaluator._gate_state_from_report_document(report_document=written)
+    assert outcome["exit_code"] == (code or 0)
+    return {
+        "cli": (
+            cli_state.diff_new_cycles,
+            cli_state.diff_new_import_cycles,
+            int(outcome["exit_code"]),
+            tuple(str(reason) for reason in as_sequence(outcome["reasons"])),
+        ),
+        "document": (
+            document_state.diff_new_cycles,
+            document_state.diff_new_import_cycles,
+            documented.exit_code,
+            tuple(documented.reasons),
+        ),
+        "store": (
+            served.gate_state.diff_new_cycles,
+            served.gate_state.diff_new_import_cycles,
+            stored.exit_code,
+            tuple(stored.reasons),
+        ),
+    }
+
+
+@pytest.mark.parametrize("road", _ROADS)
+def test_a_new_deferred_cycle_does_not_fail_the_new_import_cycle_gate(
+    deferred_cycle_gates: dict[str, _RoadGate],
+    road: str,
+) -> None:
+    """A new deferred cycle is counted, never gated: one new cycle, no new
+    import-time cycle, and ``fail_on_new_metrics`` passes on every builder
+    (measured 2026-10-06: ``(1, 0, 0, ())`` on all three).  The population
+    distinguishes the two terms, so an import-cycle input read off every
+    new cycle fails this gate with the import-cycle reason."""
+    new_cycles, new_import_cycles, exit_code, reasons = deferred_cycle_gates[road]
+    assert new_cycles == 1
+    assert (new_import_cycles, exit_code, reasons) == (0, int(ExitCode.SUCCESS), ())
