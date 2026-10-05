@@ -30,6 +30,7 @@ from ._report_section import (
     require_mapping_section,
 )
 from ._run_store_serving import (
+    PATCH_BUDGET_RUN,
     memory_run_summary,
     served_patch_contract,
     served_run_summary,
@@ -296,6 +297,68 @@ def compare_runs_on_facts(
     if not comparable:
         payload["reason"] = comparability["reason"]
     return payload
+
+
+def gate_answer(
+    record: MCPRunRecord, request: MCPGateRequest, gate_result: GatingResult
+) -> dict[str, object]:
+    """``evaluate_gates``' answer for one run under one request: the verdict
+    the one evaluator gave over the run's gate inputs, and the policy the
+    request named, echoed."""
+    return {
+        "run_id": _helpers._short_run_id(record.run_id),
+        "would_fail": gate_result.exit_code != 0,
+        "exit_code": gate_result.exit_code,
+        "reasons": list(gate_result.reasons),
+        "config": {
+            "fail_on_new": request.fail_on_new,
+            "fail_threshold": request.fail_threshold,
+            "fail_complexity": request.fail_complexity,
+            "fail_coupling": request.fail_coupling,
+            "fail_cohesion": request.fail_cohesion,
+            "fail_cycles": request.fail_cycles,
+            "fail_dead_code": request.fail_dead_code,
+            "fail_health": request.fail_health,
+            "fail_on_new_metrics": request.fail_on_new_metrics,
+            "fail_on_typing_regression": request.fail_on_typing_regression,
+            "fail_on_docstring_regression": request.fail_on_docstring_regression,
+            "fail_on_api_break": request.fail_on_api_break,
+            "fail_on_untested_hotspots": request.fail_on_untested_hotspots,
+            "min_typing_coverage": request.min_typing_coverage,
+            "min_docstring_coverage": request.min_docstring_coverage,
+            "coverage_min": request.coverage_min,
+        },
+    }
+
+
+def served_gate_answer(
+    session: object,
+    *,
+    memory: Mapping[str, object],
+    record: MCPRunRecord,
+    request: MCPGateRequest,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """The gate answer for one run under one request to serve, and where it
+    came from (consumer migration C4).
+
+    The request is evaluated, never looked up: ``memory`` is the one
+    evaluator's verdict over the record's gate inputs, and it is shadowed by
+    the same evaluator over the run's STORED gate inputs
+    (``StorePatchRun.gate``), read through the patch-run door, under the
+    same request -- the run's own policy or any other.  The store's answer
+    is served only when it is the memory's byte for byte
+    (``_run_store_serving.served_patch_contract``, the budget's one-run
+    decision and block)."""
+    facts = cast("PatchSession", session)
+    return served_patch_contract(
+        memory,
+        {PATCH_BUDGET_RUN: record},
+        lambda stored: gate_answer(
+            record,
+            request,
+            StorePatchRun(facts, record, stored[PATCH_BUDGET_RUN]).gate(request),
+        ),
+    )
 
 
 def _compare_records(
@@ -1177,34 +1240,30 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         record = _helpers._resolve_run_for_optional_root(
             self._runs, request.run_id, request.root
         )
-        gate_result = self._evaluate_gate_snapshot(record=record, request=request)
-        result = {
-            "run_id": _helpers._short_run_id(record.run_id),
-            "would_fail": gate_result.exit_code != 0,
-            "exit_code": gate_result.exit_code,
-            "reasons": list(gate_result.reasons),
-            "config": {
-                "fail_on_new": request.fail_on_new,
-                "fail_threshold": request.fail_threshold,
-                "fail_complexity": request.fail_complexity,
-                "fail_coupling": request.fail_coupling,
-                "fail_cohesion": request.fail_cohesion,
-                "fail_cycles": request.fail_cycles,
-                "fail_dead_code": request.fail_dead_code,
-                "fail_health": request.fail_health,
-                "fail_on_new_metrics": request.fail_on_new_metrics,
-                "fail_on_typing_regression": request.fail_on_typing_regression,
-                "fail_on_docstring_regression": request.fail_on_docstring_regression,
-                "fail_on_api_break": request.fail_on_api_break,
-                "fail_on_untested_hotspots": request.fail_on_untested_hotspots,
-                "min_typing_coverage": request.min_typing_coverage,
-                "min_docstring_coverage": request.min_docstring_coverage,
-                "coverage_min": request.coverage_min,
-            },
-        }
+        result, serving = self._served_gate_answer(record=record, request=request)
         with self._state_lock:
             self._last_gate_results[record.run_id] = dict(result)
-        return result
+        # Where the answer came from, and why (consumer migration C4); the
+        # session's gate result -- the one the review receipt and the PR
+        # summary read -- is the answer itself, without it.
+        return {**result, "serving": serving}
+
+    def _served_gate_answer(
+        self, *, record: MCPRunRecord, request: MCPGateRequest
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """The gate answer for one run under one request, and where it came
+        from (:func:`served_gate_answer`); the memory answer is this
+        session's own evaluation of the record."""
+        return served_gate_answer(
+            self,
+            memory=gate_answer(
+                record,
+                request,
+                self._evaluate_gate_snapshot(record=record, request=request),
+            ),
+            record=record,
+            request=request,
+        )
 
     def _session_gate_result(self, run_id: str) -> dict[str, object] | None:
         """The one lookup of this session's gate results; a miss is None.

@@ -256,10 +256,13 @@ def test_the_gate_answer_matches_the_mcp_surface(
     request: pytest.FixtureRequest, name: str
 ) -> None:
     """``would_fail`` / ``exit_code`` / ``reasons`` and the configuration echo,
-    byte for byte, when ``evaluate_gates`` is asked the run's own request."""
+    byte for byte, when ``evaluate_gates`` is asked the run's own request
+    (its ``serving`` block says where the answer came from; not a gate
+    field)."""
     served = _served(request, name)
     answer = dict(_answer(served, "evaluate_gates"))
     del answer["run_id"]
+    del answer["serving"]
     assert _canonical(answer) == _canonical(gate_answer(served.model.facts.evaluation))
 
 
