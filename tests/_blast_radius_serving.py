@@ -31,12 +31,14 @@ store beside the surface (the Phase 39S test-import law binds
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from codeclone.canonical.identity import FileId, ModuleId
 from codeclone.surfaces.mcp._blast_radius import blast_radius_to_payload
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -47,6 +49,7 @@ from tests._run_summary_serving import (
     SummaryPopulation,
     serving_environment,
     shared_populations,
+    store_row_replaced,
 )
 
 #: The blast radius's populations, by name, and the publication each states.
@@ -276,16 +279,246 @@ def shared_blast_populations(factory: pytest.TempPathFactory) -> BlastPopulation
     return _SHARED[key]
 
 
+# -- one store row replaced: the carrier perturbations ----------------------
+#
+# Each perturbation replaces ONE stored row of a run as the store decodes it
+# (``store_row_replaced``, the run summary's instrument: between the member
+# decoder and the model assembly, so the bounded read meets the replaced row),
+# and the answer field that row carries must move -- through the store only:
+# the execution's memory is untouched, so the edge answers ``divergent`` and
+# names the field.  A carrier read from memory instead would stay ``served``.
+
+_Rows = dict[str, list[object]]
+_Perturb = Callable[[_Rows], None]
+
+
+def _one(
+    family: str,
+    match: Callable[[Any], bool],
+    edit: Callable[[Any], object] | None,
+) -> _Perturb:
+    """Replace (or, with no edit, drop) the one row ``match`` selects."""
+
+    def perturb(collected: _Rows) -> None:
+        rows = collected.get(family)
+        if rows is None:  # a family this reading did not read
+            return
+        (index,) = [position for position, row in enumerate(rows) if match(row)]
+        if edit is None:
+            del rows[index]
+        else:
+            rows[index] = edit(rows[index])
+
+    return perturb
+
+
+def _at_file(path: str) -> Callable[[Any], bool]:
+    return lambda row: row.file == FileId(path)
+
+
+def _site_in(path: str) -> Callable[[Any], bool]:
+    return lambda row: any(item.symbol.file == FileId(path) for item in row.items)
+
+
+def _symbol_in(path: str, attribute: str = "symbol") -> Callable[[Any], bool]:
+    return lambda row: getattr(row, attribute).file == FileId(path)
+
+
+def _band(dimension: str, path: str) -> Callable[[Any], bool]:
+    return lambda row: row.dimension == dimension and row.symbol.file == FileId(path)
+
+
+def _known_cycle(row: Any) -> bool:
+    return bool(row.novelty == "known" and "pkg.tri_a" in row.finding_id)
+
+
+def _known_block_clone(row: Any) -> bool:
+    return bool(row.novelty == "known" and row.finding_id.startswith("clone:block"))
+
+
+@dataclass(frozen=True, slots=True)
+class Carrier:
+    """One stored row, the question it answers, the fields it must move."""
+
+    population: str
+    request: BlastRequest
+    perturb: _Perturb
+    fields: tuple[str, ...]
+
+
+#: Every carrier family of the blast radius, with one row of it replaced.
+STORE_ROW_CARRIERS: dict[str, Carrier] = {
+    "dependency_relation": Carrier(
+        "fanout",
+        BlastRequest(("pkg/core.py",), "direct"),
+        _one(
+            "dependency_relation",
+            lambda row: (
+                row.source == ModuleId("pkg.user_0")
+                and row.target == ModuleId("pkg.core")
+            ),
+            lambda row: replace(row, source=ModuleId("pkg.top")),
+        ),
+        ("direct_dependents",),
+    ),
+    "file_module": Carrier(
+        "fanout",
+        BlastRequest(("pkg/core.py",), "direct"),
+        _one("file_module", lambda row: row.module == ModuleId("pkg.user_1"), None),
+        ("direct_dependents",),
+    ),
+    "dependency_cycle": Carrier(
+        "fanout",
+        BlastRequest(("pkg/cyc_a.py",), "direct"),
+        _one(
+            "dependency_cycle", lambda row: ModuleId("pkg.cyc_a") in row.modules, None
+        ),
+        ("in_dependency_cycle",),
+    ),
+    "clone_group": Carrier(
+        "fanout",
+        BlastRequest(("pkg/trio_a.py",), "direct"),
+        _one("clone_group", _site_in("pkg/trio_a.py"), None),
+        ("clone_cohort_members",),
+    ),
+    "suppressed_clone_group": Carrier(
+        "fanout",
+        BlastRequest(("tests/fixtures/golden_twins/twin_a.py",), "direct"),
+        _one(
+            "suppressed_clone_group",
+            _site_in("tests/fixtures/golden_twins/twin_a.py"),
+            None,
+        ),
+        ("review_context",),
+    ),
+    "import_observation": Carrier(
+        "fanout",
+        BlastRequest(("pkg/loader.py",), "direct"),
+        _one(
+            "import_observation",
+            lambda row: row.resolution == "unresolved_dynamic",
+            None,
+        ),
+        ("review_context",),
+    ),
+    "overloaded_module_candidate": Carrier(
+        "fanout",
+        BlastRequest(("pkg/core.py",), "direct"),
+        _one(
+            "overloaded_module",
+            lambda row: row.candidate_status == "candidate",
+            lambda row: replace(row, candidate_status="non_candidate"),
+        ),
+        ("structural_risk.overloaded_modules_in_blast_zone",),
+    ),
+    "overloaded_module": Carrier(
+        "fanout",
+        BlastRequest(("pkg/core.py",), "direct"),
+        _one("overloaded_module", _at_file("pkg/user_0.py"), None),
+        ("review_context",),
+    ),
+    "security_surface": Carrier(
+        "fanout",
+        BlastRequest(("pkg/core.py",), "direct"),
+        _one("security_surface", _at_file("pkg/a_danger.py"), None),
+        ("review_context",),
+    ),
+    "unit_risk_result_complexity": Carrier(
+        "trusted",
+        BlastRequest(("pkg/complex_old.py",), "direct"),
+        _one(
+            "unit_risk_result",
+            _band("complexity", "pkg/complex_old.py"),
+            lambda row: replace(row, band="medium"),
+        ),
+        ("structural_risk.high_complexity_in_blast_zone",),
+    ),
+    "unit_risk_result_coupling": Carrier(
+        "trusted",
+        BlastRequest(("pkg/hub.py",), "direct"),
+        _one(
+            "unit_risk_result",
+            _band("coupling", "pkg/hub.py"),
+            lambda row: replace(row, band="medium"),
+        ),
+        ("structural_risk.high_coupling_in_blast_zone",),
+    ),
+    "dependency_cycle_novelty": Carrier(
+        "trusted",
+        BlastRequest(("pkg/tri_a.py",), "transitive"),
+        _one(
+            "dependency_cycle_novelty",
+            _known_cycle,
+            lambda row: replace(row, novelty="new"),
+        ),
+        ("review_context",),
+    ),
+    "clone_novelty": Carrier(
+        "trusted",
+        BlastRequest(("pkg/run_host_one.py",), "direct"),
+        _one(
+            "clone_novelty", _known_block_clone, lambda row: replace(row, novelty="new")
+        ),
+        ("review_context",),
+    ),
+    "coverage_unit": Carrier(
+        "coverage_ok",
+        BlastRequest(("pkg/complex_old.py",), "direct"),
+        _one("coverage_unit", _symbol_in("pkg/complex_old.py"), None),
+        ("structural_risk.low_coverage_in_blast_zone",),
+    ),
+    "coverage_join": Carrier(
+        "coverage_ok",
+        BlastRequest(("pkg/complex_old.py",), "direct"),
+        _one(
+            "coverage_join",
+            lambda _row: True,
+            lambda row: replace(row, hotspot_threshold_percent=0),
+        ),
+        ("structural_risk.low_coverage_in_blast_zone",),
+    ),
+    "risk_observation": Carrier(
+        "coverage_ok",
+        BlastRequest(("pkg/complex_old.py",), "direct"),
+        _one(
+            "risk_observation",
+            lambda row: (
+                row.dimension == "cyclomatic_complexity"
+                and row.symbol.file == FileId("pkg/complex_old.py")
+            ),
+            lambda row: replace(row, numerator=1),
+        ),
+        ("structural_risk.low_coverage_in_blast_zone",),
+    ),
+}
+
+
+def carrier_answer(
+    population: SummaryPopulation, carrier: Carrier
+) -> dict[str, object]:
+    """The carrier's question, asked of the store with its one row replaced
+    -- computed afresh, so no cached answer stands in for the store."""
+    forget_answers(population)
+    try:
+        with store_row_replaced(carrier.perturb):
+            return blast_answer(population, carrier.request, serve_from="run_store")
+    finally:
+        forget_answers(population)
+
+
 __all__ = [
     "BLAST_POPULATIONS",
     "FANOUT_TREE",
     "INCLUDES",
     "SPECIAL_ORIGINS",
+    "STORE_ROW_CARRIERS",
     "BlastPopulations",
     "BlastRequest",
+    "Carrier",
     "PolicyRequest",
     "blast_answer",
     "blast_requests",
+    "carrier_answer",
     "forget_answers",
     "policy_answer",
     "policy_requests",
