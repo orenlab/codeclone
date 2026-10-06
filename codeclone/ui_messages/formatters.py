@@ -1291,5 +1291,5 @@ def fmt_internal_error(
                 "".join(traceback_lines).rstrip(),
             ]
         )
-    body = esc("\n".join(lines))
+    body = esc("\n".join(lines), multiline=True)
     return f"\n{_INDENT}{MARKER_INTERNAL_ERROR}\n{_indent_block(body)}"

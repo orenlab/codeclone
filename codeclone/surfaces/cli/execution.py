@@ -29,6 +29,7 @@ from ...core._types import ProcessingResult as PipelineProcessingResult
 from ...core.reporting import GatingResult
 from ...observability import SpanHandle, is_observability_enabled, span
 from ...observability.analysis_phases import apply_pipeline_process_phase_counters
+from ...utils.display_text import display_text
 from . import state as cli_state
 from .attrs import bool_attr
 from .console import PlainConsole
@@ -306,7 +307,7 @@ def enforce_gating(
             )
         )
         for failure in processing.source_read_failures[:10]:
-            printer.print(f"    • {failure}", markup=False)
+            printer.print(f"    • {display_text(failure)}", markup=False)
         if len(processing.source_read_failures) > 10:
             remaining = len(processing.source_read_failures) - 10
             printer.print(f"    ... and {remaining} more")

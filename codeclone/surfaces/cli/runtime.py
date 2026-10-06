@@ -14,6 +14,7 @@ from ... import ui_messages as ui
 from ...cache.store import Cache, resolve_cache_status
 from ...cache.versioning import CacheStatus
 from ...contracts import ExitCode
+from ...utils.display_text import display_text
 from . import state as cli_state
 from .attrs import bool_attr, int_attr, optional_text_attr, set_bool_attr
 from .types import PrinterLike, require_status_console
@@ -215,7 +216,7 @@ def print_failed_files(*, failed_files: tuple[str, ...], console: PrinterLike) -
         return
     console.print(ui.fmt_failed_files_header(len(failed_files)))
     for failure in failed_files[:10]:
-        console.print(f"    • {failure}", markup=False)
+        console.print(f"    • {display_text(failure)}", markup=False)
     if len(failed_files) > 10:
         console.print(f"    ... and {len(failed_files) - 10} more")
 

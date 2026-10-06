@@ -21,9 +21,12 @@ The rules, enforced mechanically by ``tests/test_cli_design_system.py``:
   number via :func:`n_of`.
 * Dynamic text interpolated into markup is escaped with :func:`esc` so
   bracketed payload data (``[Errno 2]``, severity markers) survives
-  rendering byte-for-byte.
+  rendering byte-for-byte; ``esc`` is the display-boundary owner's
+  ``rich_text``, so control characters are replaced as well.
 * Messages are stripped of markup only through :func:`strip_markup`,
-  which removes exactly the tags of the style map and nothing else.
+  which removes exactly the tags of the style map and nothing else, and
+  reads backslashes the way Rich does, so a plain console prints what a
+  Rich console prints.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ from ..domain.quality import (
     HEALTH_GRADE_D,
     HEALTH_GRADE_F,
 )
+from ..utils.display_text import rich_text
 
 # ── layout grid ──────────────────────────────────────────────────────
 
@@ -126,32 +130,51 @@ MARKUP_STYLES: frozenset[str] = frozenset(
     }
 )
 
-_RICH_MARKUP_TAG_RE = re.compile(
-    r"\[/?(?:" + "|".join(sorted(re.escape(tag) for tag in MARKUP_STYLES)) + r")\]"
+#: Rich's own tag pattern (``rich.markup.RE_TAGS``): a run of backslashes,
+#: then a tag-shaped bracket. Rich halves the run and, when the run is odd,
+#: prints the bracket as text instead of reading it as a tag.
+_RICH_MARKUP_TAG_RE = re.compile(r"(\\*)\[([a-z#/@][^[]*?)]")
+_STYLE_TAGS: frozenset[str] = MARKUP_STYLES | frozenset(
+    f"/{style}" for style in MARKUP_STYLES
 )
 
 
-def esc(value: object) -> str:
+def esc(value: object, *, multiline: bool = False) -> str:
     """Escape dynamic text for safe interpolation into markup strings.
 
     Rich treats any well-formed ``[word]`` as a style tag and silently
-    swallows it. Payload data — error details, severity markers, literal
-    brackets — must pass through :func:`esc` before entering a markup
-    template so it survives rendering unmodified.
+    swallows it, and reads backslashes in front of one as escapes. Payload
+    data — error details, severity markers, literal brackets, file names —
+    must pass through :func:`esc` before entering a markup template so it
+    survives rendering unmodified. The escaping is the display-boundary
+    owner's (:func:`codeclone.utils.display_text.rich_text`): one rule for
+    every Rich surface, control characters replaced before Rich sees them.
+    A line break is replaced too, unless ``multiline`` says the value is a
+    block whose lines the caller composed.
     """
 
-    return str(value).replace("[", "\\[")
+    return rich_text(value, multiline=multiline)
+
+
+def _plain_tag(match: re.Match[str]) -> str:
+    backslashes, tag = match.groups()
+    kept, escaped = divmod(len(backslashes), 2)
+    if escaped or tag not in _STYLE_TAGS:
+        return "\\" * kept + f"[{tag}]"
+    return "\\" * kept
 
 
 def strip_markup(text: str) -> str:
-    """Remove design-code markup tags and unescape payload brackets.
+    """Remove design-code markup tags the way Rich would render them.
 
     Only tags from :data:`MARKUP_STYLES` are removed; bracketed payload
-    data such as ``[Errno 2]`` is left intact. Escaped brackets produced
-    by :func:`esc` are restored to literal brackets.
+    data such as ``[Errno 2]`` is left intact. Backslashes in front of a
+    tag-shaped bracket are read as Rich reads them -- the run is halved, and
+    an odd run leaves the bracket as text -- so text escaped by :func:`esc`
+    prints on a plain console exactly as on a Rich one.
     """
 
-    return _RICH_MARKUP_TAG_RE.sub("", text).replace("\\[", "[")
+    return _RICH_MARKUP_TAG_RE.sub(_plain_tag, text)
 
 
 def styled(text: object, style: str) -> str:

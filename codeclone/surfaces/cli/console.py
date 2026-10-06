@@ -21,6 +21,7 @@ from ... import ui_messages as ui
 from ...contracts import ExitCode
 from ...report.gates import reasons as gate_reasons
 from ...ui_messages.styling import _L, INDENT_UNIT, RICH_THEME_STYLES, strip_markup
+from ...utils.display_text import display_text
 from .types import CLIArgsLike, PrinterLike
 
 if TYPE_CHECKING:
@@ -59,7 +60,12 @@ _LABEL_ROW_RE = re.compile(
 
 
 class PlainConsole:
-    """Lightweight console for quiet/no-progress mode."""
+    """Lightweight console for quiet/no-progress mode.
+
+    Every string it prints passes the display-boundary owner's control
+    filter: an escape sequence inside a file name cannot move the cursor,
+    erase a line or open a link on the reader's terminal.
+    """
 
     def print(
         self,
@@ -75,7 +81,7 @@ class PlainConsole:
         text = sep.join(str(obj) for obj in objects)
         if markup:
             text = strip_markup(text)
-        print(text, end=end)
+        print(display_text(text, multiline=True), end=end)
 
     @staticmethod
     def status(*_: object, **__: object) -> AbstractContextManager[None]:
@@ -178,6 +184,13 @@ def grid_console_class() -> type[RichConsole]:
             soft_wrap: bool | None = None,
             new_line_start: bool = False,
         ) -> None:
+            # Rich 15 drops only BEL/BS/VT/FF/CR from a ``Text``; ESC, NUL,
+            # DEL and C1 reach the terminal, coloured or not. Every string
+            # this console prints passes the owner's control filter first.
+            objects = tuple(
+                display_text(item, multiline=True) if isinstance(item, str) else item
+                for item in objects
+            )
             passthrough = (
                 not objects
                 or bool(soft_wrap)
@@ -290,11 +303,14 @@ def _render_banner(
     root_display: str | None = None,
 ) -> None:
     _, _, rule_cls = rich_console_symbols()
+    text_cls = rich_panel_symbols()[4]
     console.print(banner_title)
     console.print()
     console.print(
         rule_cls(
-            title=project_name if project_name else "Analyze",
+            # The root directory's name, chosen by whoever wrote the
+            # repository: a ``Text``, so a bracket in it is never a tag.
+            title=text_cls(display_text(project_name)) if project_name else "Analyze",
             style=ui.STYLE_META,
             characters=ui.GLYPH_RULE,
         )
@@ -364,7 +380,7 @@ def _print_gating_failure_block(
     rows.extend((_gate_row_label(key), str(value)) for key, value in entries)
     width = max(len(label) for label, _ in rows)
     for label, value in rows:
-        console.print(f"    {label:<{width}}  {value}", markup=False)
+        console.print(f"    {label:<{width}}  {display_text(value)}", markup=False)
 
 
 def _print_verbose_clone_hashes(
