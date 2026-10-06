@@ -26,6 +26,7 @@ from ..project import (
 from ..schema import create_schema_v1, open_memory_db
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..staleness import apply_refresh_staleness
+from ..statement_markdown import validate_statement_markdown
 from ..vacuum import run_memory_vacuum
 from . import InitOptions, InitReport
 from .extractors import (
@@ -109,6 +110,35 @@ def _registry_paths(report_document: Mapping[str, object]) -> frozenset[str]:
     return frozenset(str(item).replace("\\", "/").strip("/") for item in items)
 
 
+def _admitted_by_statement_markdown(batch: RecordBatch) -> RecordBatch:
+    """Keep the records whose statement ``record_candidate`` would admit.
+
+    A ``module_role`` statement names a file path, and the path is chosen by
+    whoever writes the repository. The Markdown validator that refuses raw
+    HTML, images and links in an agent's statement refuses them here too: a
+    record it would reject is not written, with its subjects, evidence and
+    links, so ingestion is no way around the rule a write through MCP obeys.
+    """
+
+    refused = frozenset(
+        record.id
+        for record in batch.records
+        if validate_statement_markdown(record.statement).rejects
+    )
+    if not refused:
+        return batch
+    return RecordBatch(
+        records=[record for record in batch.records if record.id not in refused],
+        subjects=[item for item in batch.subjects if item.memory_id not in refused],
+        evidence=[item for item in batch.evidence if item.memory_id not in refused],
+        links=[
+            link
+            for link in batch.links
+            if link.from_memory_id not in refused and link.to_memory_id not in refused
+        ],
+    )
+
+
 def build_init_batch(
     *,
     root_path: Path,
@@ -131,13 +161,15 @@ def build_init_batch(
     registry = _registry_paths(report_document)
 
     batches = [
-        extract_module_roles(
-            project=project,
-            root_path=root_path,
-            report_document=report_document,
-            git=git,
-            report_digest=report_digest,
-            analysis_fingerprint=analysis_fingerprint,
+        _admitted_by_statement_markdown(
+            extract_module_roles(
+                project=project,
+                root_path=root_path,
+                report_document=report_document,
+                git=git,
+                report_digest=report_digest,
+                analysis_fingerprint=analysis_fingerprint,
+            )
         ),
         extract_contract_notes(
             project=project,
