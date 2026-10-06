@@ -17,6 +17,10 @@ from codeclone.api.comparison import build_comparison_context
 from codeclone.baseline import Baseline, MetricsBaseline
 from codeclone.cache.reuse import binding_context_digest, source_content_digest
 from codeclone.contracts import ObservedPopulation
+from codeclone.contracts.comparison_state import (
+    COMPARISON_ADOPTION,
+    COMPARISON_API_SURFACE,
+)
 from codeclone.core._types import (
     AnalysisResult,
     _as_sorted_str_tuple,
@@ -217,6 +221,19 @@ def _project_metrics(*, dead_confidence: str = "high") -> ProjectMetrics:
         ),
         health=HealthScore(total=50, grade="D", dimensions={"health": 50}),
     )
+
+
+def _compared_values(
+    metrics_diff: MetricsDiff, *, adoption: bool, api_surface: bool
+) -> dict[str, dict[str, int] | None]:
+    """The adoption and API comparisons of the normalized state the
+    enrichment is handed, computed by the producer's own reading of the
+    metrics diff (``None`` for a comparison that did not run)."""
+    values = _comparison_values(metrics_diff)
+    return {
+        "adoption_values": values[COMPARISON_ADOPTION] if adoption else None,
+        "api_surface_values": values[COMPARISON_API_SURFACE] if api_surface else None,
+    }
 
 
 def _project_metrics_with_adoption_and_api() -> ProjectMetrics:
@@ -1960,8 +1977,7 @@ def test_enrich_metrics_report_payload_adds_docstring_and_breaking_api_rows() ->
     payload = _enrich_metrics_report_payload(
         metrics_payload=base_payload,
         metrics_diff=metrics_diff,
-        coverage_adoption_diff_available=True,
-        api_surface_diff_available=True,
+        **_compared_values(metrics_diff, adoption=True, api_surface=True),
     )
 
     coverage_adoption = cast(dict[str, object], payload["coverage_adoption"])
@@ -2008,8 +2024,8 @@ def test_enrich_metrics_report_payload_hides_api_diff_without_api_baseline() -> 
                 ),
             ),
         ),
-        coverage_adoption_diff_available=True,
-        api_surface_diff_available=False,
+        adoption_values=None,
+        api_surface_values=None,
     )
 
     api_surface = cast(dict[str, object], payload["api_surface"])
@@ -2017,8 +2033,8 @@ def test_enrich_metrics_report_payload_hides_api_diff_without_api_baseline() -> 
     api_items = cast(list[dict[str, object]], api_surface["items"])
 
     assert api_summary["baseline_diff_available"] is False
-    assert api_summary["added"] == 0
-    assert api_summary["breaking"] == 0
+    assert api_summary["added"] is None
+    assert api_summary["breaking"] is None
     assert not any(item.get("record_kind") == "breaking_change" for item in api_items)
 
 
@@ -2139,9 +2155,9 @@ def test_metrics_for_report_withholds_adoption_comparison_on_a_refusal_run() -> 
 
     assert published == {
         "baseline_diff_available": False,
-        "param_delta": 0,
-        "return_delta": 0,
-        "docstring_delta": 0,
+        "param_delta": None,
+        "return_delta": None,
+        "docstring_delta": None,
     }
 
 
@@ -2178,9 +2194,9 @@ def test_metrics_for_report_states_no_adoption_comparison_without_a_baseline_ter
 
     assert published == {
         "baseline_diff_available": False,
-        "param_delta": 0,
-        "return_delta": 0,
-        "docstring_delta": 0,
+        "param_delta": None,
+        "return_delta": None,
+        "docstring_delta": None,
     }
 
 
@@ -2201,9 +2217,9 @@ def test_metrics_for_report_states_no_adoption_comparison_over_an_untrusted_lane
 
     assert published == {
         "baseline_diff_available": False,
-        "param_delta": 0,
-        "return_delta": 0,
-        "docstring_delta": 0,
+        "param_delta": None,
+        "return_delta": None,
+        "docstring_delta": None,
     }
 
 
@@ -2348,9 +2364,9 @@ def test_api_comparison_is_withheld_on_an_unmeasured_run() -> None:
 
     assert published == {
         "baseline_diff_available": False,
-        "added": 0,
-        "breaking": 0,
-        "changed": 0,
+        "added": None,
+        "breaking": None,
+        "changed": None,
         "breaking_rows": [],
         "signature_rows": [],
     }
@@ -2389,9 +2405,9 @@ def test_api_comparison_is_withheld_on_a_truncated_run() -> None:
 
     assert published == {
         "baseline_diff_available": False,
-        "added": 0,
-        "breaking": 0,
-        "changed": 0,
+        "added": None,
+        "breaking": None,
+        "changed": None,
         "breaking_rows": [],
         "signature_rows": [],
     }
@@ -2540,8 +2556,7 @@ def test_enrich_metrics_report_payload_rows_each_change_under_its_own_record_kin
         payload = _enrich_metrics_report_payload(
             metrics_payload=base_payload,
             metrics_diff=metrics_diff,
-            coverage_adoption_diff_available=True,
-            api_surface_diff_available=available,
+            **_compared_values(metrics_diff, adoption=True, api_surface=available),
         )
         api_surface = cast("dict[str, object]", payload["api_surface"])
         summary = cast("dict[str, object]", api_surface["summary"])
@@ -2569,7 +2584,7 @@ def test_enrich_metrics_report_payload_rows_each_change_under_its_own_record_kin
             ("signature_change", "pkg.mod:widened", "signature_changed"),
         ],
     )
-    assert published(False) == (0, 0, [])
+    assert published(False) == (None, None, [])
 
 
 def test_api_teardown_still_publishes_on_a_genuinely_emptied_scope() -> None:
@@ -2757,15 +2772,15 @@ def _population_metrics(population: str) -> ProjectMetrics:
 
 
 _SET_DIFF_MUTED: dict[str, dict[str, object]] = {
-    "complexity": {"baseline_diff_available": False, "new_high_risk": 0},
-    "coupling": {"baseline_diff_available": False, "new_high_risk": 0},
+    "complexity": {"baseline_diff_available": False, "new_high_risk": None},
+    "coupling": {"baseline_diff_available": False, "new_high_risk": None},
     "dependencies": {
         "baseline_diff_available": False,
-        "new_cycles": 0,
-        "new_import_cycles": 0,
-        "new_deferred_cycles": 0,
+        "new_cycles": None,
+        "new_import_cycles": None,
+        "new_deferred_cycles": None,
     },
-    "dead_code": {"baseline_diff_available": False, "new_items": 0},
+    "dead_code": {"baseline_diff_available": False, "new_items": None},
 }
 
 _SET_DIFF_PUBLISHED: dict[str, dict[str, object]] = {
@@ -3128,8 +3143,8 @@ def test_enrich_metrics_payload_skips_absent_summaries() -> None:
             "health": {"score": 90},
         },
         metrics_diff=None,
-        coverage_adoption_diff_available=False,
-        api_surface_diff_available=False,
+        adoption_values=None,
+        api_surface_values=None,
     )
     coverage_adoption = enriched["coverage_adoption"]
     assert isinstance(coverage_adoption, dict)

@@ -13,6 +13,10 @@ from ..analysis.suppressions import (
     INLINE_CODECLONE_SUPPRESSION_SOURCE,
 )
 from ..canonical.authority_identity import candidate_total_order_key
+from ..contracts.comparison_state import (
+    COMPARISON_ADOPTION,
+    document_comparison_fields,
+)
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
 from ..domain.quality import CONFIDENCE_HIGH, RISK_LOW
 from ..metrics.health import health_report_fields
@@ -288,9 +292,17 @@ def _enrich_metrics_report_payload(
     *,
     metrics_payload: Mapping[str, object],
     metrics_diff: MetricsDiff | None,
-    coverage_adoption_diff_available: bool,
-    api_surface_diff_available: bool,
+    adoption_values: Mapping[str, int] | None,
+    api_surface_values: Mapping[str, int] | None,
 ) -> dict[str, object]:
+    """The metrics payload with the adoption and API comparisons folded in.
+
+    ``adoption_values`` / ``api_surface_values`` are those comparisons of the
+    run's normalized comparison state, ``None`` when one did not run; each
+    family's pair is written from them by the one writer
+    (``document_comparison_fields``) -- never decided again here.  The
+    metrics diff only supplies the API change rows of a comparison that
+    ran."""
     enriched = {
         key: (dict(value) if isinstance(value, Mapping) else value)
         for key, value in metrics_payload.items()
@@ -298,21 +310,8 @@ def _enrich_metrics_report_payload(
     coverage_adoption = dict(as_mapping(enriched.get("coverage_adoption")))
     coverage_summary = dict(as_mapping(coverage_adoption.get("summary")))
     if coverage_summary:
-        coverage_summary["baseline_diff_available"] = coverage_adoption_diff_available
-        coverage_summary["param_delta"] = (
-            int(metrics_diff.typing_param_permille_delta)
-            if metrics_diff is not None and coverage_adoption_diff_available
-            else 0
-        )
-        coverage_summary["return_delta"] = (
-            int(metrics_diff.typing_return_permille_delta)
-            if metrics_diff is not None and coverage_adoption_diff_available
-            else 0
-        )
-        coverage_summary["docstring_delta"] = (
-            int(metrics_diff.docstring_permille_delta)
-            if metrics_diff is not None and coverage_adoption_diff_available
-            else 0
+        coverage_summary.update(
+            document_comparison_fields(COMPARISON_ADOPTION, adoption_values)
         )
         coverage_adoption["summary"] = coverage_summary
         enriched["coverage_adoption"] = coverage_adoption
@@ -320,7 +319,7 @@ def _enrich_metrics_report_payload(
     enriched["api_surface"] = _enrich_api_surface_payload(
         enriched.get("api_surface"),
         metrics_diff=metrics_diff,
-        diff_available=api_surface_diff_available,
+        values=api_surface_values,
     )
     return enriched
 

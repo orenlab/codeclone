@@ -6,9 +6,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
+from ..contracts.comparison_state import (
+    COMPARISON_API_SURFACE,
+    document_comparison_fields,
+)
 from ..metrics.api_population import visible_api_surface
 from ..models import ApiBreakingChange, ApiSurfaceSnapshot
 from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
@@ -83,32 +87,32 @@ def _enrich_api_surface_payload(
     api_surface_payload: object,
     *,
     metrics_diff: MetricsDiff | None,
-    diff_available: bool,
+    values: Mapping[str, int] | None,
 ) -> dict[str, object]:
     """The api_surface container with the baseline comparison folded in.
 
-    ``breaking`` counts the changes that break a caller -- ``removed`` and
+    ``values`` is the API comparison of the run's normalized comparison
+    state (``None`` when it did not run); the summary's pair is written from
+    it by the one writer (``document_comparison_fields``): ``breaking``
+    counts the changes that break a caller -- ``removed`` and
     ``signature_break`` -- and is the count the api gate reads; ``changed``
-    counts the compatible ``signature_changed`` changes recorded beside it.
-    Each change also rides ``items`` as one row: ``breaking_change`` keeps
-    its meaning, so a reader counting those rows still counts exactly the
-    breaking set, and a compatible change is its own ``signature_change``
-    record rather than a breaking row that says it is not breaking. None of
-    it is a fact when the comparison never ran, which the summary states
-    through ``baseline_diff_available``.
+    counts the compatible ``signature_changed`` changes recorded beside it;
+    ``added`` the new public symbols.  Each change also rides ``items`` as
+    one row: ``breaking_change`` keeps its meaning, so a reader counting
+    those rows still counts exactly the breaking set, and a compatible change
+    is its own ``signature_change`` record rather than a breaking row that
+    says it is not breaking.  None of it is a fact when the comparison never
+    ran: the summary states ``baseline_diff_available: false`` beside
+    ``null`` counts, and no change row is published.
     """
 
     api_surface = dict(as_mapping(api_surface_payload))
     api_summary = dict(as_mapping(api_surface.get("summary")))
-    compared = metrics_diff if diff_available else None
-    added = compared.new_api_symbols if compared is not None else ()
+    compared = metrics_diff if values is not None else None
     breaking = compared.new_api_breaking_changes if compared is not None else ()
     changed = compared.new_api_signature_changes if compared is not None else ()
     if api_summary:
-        api_summary["baseline_diff_available"] = diff_available
-        api_summary["added"] = len(added)
-        api_summary["breaking"] = len(breaking)
-        api_summary["changed"] = len(changed)
+        api_summary.update(document_comparison_fields(COMPARISON_API_SURFACE, values))
         api_surface["summary"] = api_summary
     api_surface["items"] = [
         *as_sequence(api_surface.get("items")),

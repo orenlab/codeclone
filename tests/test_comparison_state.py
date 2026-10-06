@@ -278,30 +278,50 @@ def _families(document: Mapping[str, object]) -> Mapping[str, object]:
     return as_mapping(as_mapping(document.get("metrics")).get("families"))
 
 
+def _raw_pair(
+    summary: Mapping[str, object], field: str, result: ComparisonResult
+) -> tuple[object, object]:
+    """One family's raw flag and delta, held to the stored result: the flag
+    is a bool and is the result's ``made``; the delta is an integer equal to
+    the stored value exactly when the flag is true, ``null`` exactly when it
+    is false."""
+    flag = summary["baseline_diff_available"]
+    value = summary[field]
+    assert flag is True or flag is False, flag
+    assert flag is result.is_compared
+    if flag:
+        assert type(value) is int, value
+        assert value == result.value
+    else:
+        assert value is None, value
+    return flag, value
+
+
 def test_the_documents_raw_pair_is_the_stored_state_on_every_population(
     raw_runs: list[tuple[str, Mapping[str, object], CanonicalModel]],
 ) -> None:
     """Per family, per run, the RAW fields the document writes -- never the
     document reader, which names a disabled lane's reason whatever the flag
     says -- against the state the store's rows state: the flag is a bool and
-    is the comparison's ``made``, the delta is its value when it ran and the
-    pair's empty half when it did not.  Measured 2026-10-05: a producer that
-    compared a set-difference family whose lane the run disabled survived
-    the whole suite, the reader masking the flag."""
+    is the comparison's ``made``; the delta is an integer exactly when the
+    flag is true (its value, a measured zero included) and ``null`` exactly
+    when it is false (ruling 2026-10-03: "comparison not performed -> null").
+    Measured 2026-10-05: a producer that compared a set-difference family
+    whose lane the run disabled survived the whole suite, the reader masking
+    the flag."""
     outcomes: Counter[tuple[object, str]] = Counter()
+    measured_zero = 0
     for name, document, model in raw_runs:
         state = stored_comparison_state(model)
         families = _families(document)
         for key, (family, field) in DOCUMENT_FIELDS.items():
             result = state.result(*key)
             summary = as_mapping(as_mapping(families[family]).get("summary"))
-            flag = summary["baseline_diff_available"]
-            assert flag is True or flag is False, (name, family, flag)
-            assert flag is result.is_compared, (name, key)
-            assert summary[field] == (result.value if result.is_compared else 0), (
-                name,
-                key,
-            )
+            try:
+                flag, value = _raw_pair(summary, field, result)
+            except AssertionError as broken:
+                raise AssertionError((name, key)) from broken
+            measured_zero += value == 0
             outcomes[(flag, str(result.reason))] += 1
     assert {reason for _flag, reason in outcomes} == {
         "None",
@@ -310,6 +330,9 @@ def test_the_documents_raw_pair_is_the_stored_state_on_every_population(
         NOT_COMPARED_UNAVAILABLE,
     }, outcomes
     assert {flag for flag, _reason in outcomes} == {True, False}, outcomes
+    # Positive control: a comparison that ran and measured zero is in the
+    # population, and it stays the integer ``0``.
+    assert measured_zero, outcomes
 
 
 def test_a_comparison_runs_only_over_lanes_it_trusts(
@@ -358,12 +381,12 @@ def test_a_run_that_did_not_collect_the_api_surface_states_no_api_comparison(
     """The producer fix: API not enabled with an API lane in the baseline
     published ``{enabled: false, baseline_diff_available: true,
     breaking: 29}`` (measured 2026-10-05).  The pair is now false beside
-    no change; the trusted run with the API lane on keeps its comparison
-    (positive control)."""
+    ``null`` counts; the trusted run with the API lane on keeps its
+    comparison (positive control)."""
     stored, _document, api = population_states["api_disabled"]
     assert api["enabled"] is False
     assert api["baseline_diff_available"] is False
-    assert api["breaking"] == 0
+    assert api["breaking"] is None
     assert stored.reason(COMPARISON_API_SURFACE) == NOT_COMPARED_DISABLED
     trusted, _document, trusted_api = population_states["trusted"]
     assert trusted_api["baseline_diff_available"] is True
@@ -417,16 +440,13 @@ _OWNER = frozenset(
 _READS_AROUND_THE_CARRIER: dict[str, int] = {
     "codeclone/canonical/comparison_ingest.py": 2,
     "codeclone/canonical/comparison_projection.py": 2,
-    "codeclone/canonical/evaluation_projection.py": 3,
+    "codeclone/canonical/evaluation_projection.py": 2,
     "codeclone/canonical/model.py": 4,
     "codeclone/canonical/registry.py": 1,
     "codeclone/canonical/tier_storage.py": 1,
-    "codeclone/core/api_surface_payload.py": 4,
+    "codeclone/core/api_surface_payload.py": 2,
     "codeclone/core/comparison_snapshot.py": 2,
-    "codeclone/core/metrics_payload.py": 4,
-    "codeclone/core/reporting.py": 1,
     "codeclone/report/document/_common.py": 4,
-    "codeclone/report/document/metrics.py": 14,
     "codeclone/report/gates/evaluator.py": 13,
     "codeclone/report/html/sections/_overview.py": 7,
     "codeclone/surfaces/cli/patch_verify.py": 1,

@@ -282,7 +282,7 @@ def test_report_document_withholds_the_verdict_when_health_was_not_computed() ->
     assert summary == {
         **NEVER_COMPUTED_HEALTH,
         "baseline_diff_available": False,
-        "delta": 0,
+        "delta": None,
     }
 
 

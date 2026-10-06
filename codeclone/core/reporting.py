@@ -24,7 +24,10 @@ from ..contracts import (
 from ..contracts.comparison_state import (
     COMPARISON_ADOPTION,
     COMPARISON_API_SURFACE,
+    COMPARISON_CLONES,
+    COMPARISON_TERMS,
     DOCUMENT_FIELDS,
+    document_comparison_fields,
 )
 from ..contracts.report_identity import realized_health_params
 from ..models import (
@@ -229,10 +232,13 @@ def _metrics_for_report(
 ) -> Mapping[str, object] | None:
     """The metric families of the document, each comparison field written
     from the run's one normalized comparison state
-    (:func:`core.comparison_state.run_comparison_state`): a family's
-    ``baseline_diff_available`` is that state's ``made`` and its delta the
-    state's value, so the document, the store rows read off it, and every
-    reader of either state the producer's one decision."""
+    (:func:`core.comparison_state.run_comparison_state`) through the one
+    writer of the pair (``contracts.comparison_state.
+    document_comparison_fields``): a family's ``baseline_diff_available`` is
+    that state's ``made``, its delta the state's integer when the comparison
+    ran and ``null`` when it did not -- on every path, a run without a
+    metrics diff included -- so the document, the store rows read off it,
+    and every reader of either state the producer's one decision."""
     validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
     if analysis.metrics_payload is None:
         return None
@@ -248,27 +254,29 @@ def _metrics_for_report(
     enriched = _enrich_metrics_report_payload(
         metrics_payload=analysis.metrics_payload,
         metrics_diff=validated_metrics_diff,
-        coverage_adoption_diff_available=state.made(COMPARISON_ADOPTION),
-        api_surface_diff_available=state.made(COMPARISON_API_SURFACE),
+        adoption_values=state.values(COMPARISON_ADOPTION),
+        api_surface_values=state.values(COMPARISON_API_SURFACE),
     )
-    if validated_metrics_diff is None:
-        return enriched
-    for (comparison, term), (family_name, value_key) in DOCUMENT_FIELDS.items():
-        if comparison in _ENRICHED_COMPARISONS:
-            continue
+    for comparison in _FAMILY_COMPARISONS:
+        family_name = DOCUMENT_FIELDS[(comparison, COMPARISON_TERMS[comparison][0])][0]
         family = dict(_as_mapping(enriched.get(family_name)))
-        summary = dict(_as_mapping(family.get("summary")))
-        available = state.made(comparison)
-        summary["baseline_diff_available"] = available
-        summary[value_key] = state.value(comparison, term) if available else 0
-        family["summary"] = summary
+        family["summary"] = {
+            **_as_mapping(family.get("summary")),
+            **document_comparison_fields(comparison, state.values(comparison)),
+        }
         enriched[family_name] = family
     return enriched
 
 
-#: The comparisons whose document fields the enrichment writes (it also
-#: publishes the API change rows); the loop above writes the others.
-_ENRICHED_COMPARISONS = frozenset({COMPARISON_ADOPTION, COMPARISON_API_SURFACE})
+#: The comparisons whose pair the loop above writes into their family's
+#: summary; the enrichment writes adoption and API (it also publishes the
+#: API change rows), and the clone comparison has no family summary.
+_FAMILY_COMPARISONS = tuple(
+    comparison
+    for comparison in COMPARISON_TERMS
+    if comparison
+    not in {COMPARISON_ADOPTION, COMPARISON_API_SURFACE, COMPARISON_CLONES}
+)
 
 
 def build_report_body_for_analysis(

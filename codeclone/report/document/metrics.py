@@ -10,6 +10,18 @@ from collections.abc import Mapping, Sequence
 
 from ...analysis.suppressions import INLINE_CODECLONE_SUPPRESSION_SOURCE
 from ...canonical.authority_identity import candidate_total_order_key
+from ...contracts.comparison_state import (
+    COMPARISON_ADOPTION,
+    COMPARISON_API_SURFACE,
+    COMPARISON_COMPLEXITY,
+    COMPARISON_COUPLING,
+    COMPARISON_DEAD_CODE,
+    COMPARISON_DEPENDENCIES,
+    COMPARISON_HEALTH,
+    DOCUMENT_FLAG,
+    document_comparison_fields,
+    document_comparison_values,
+)
 from ...domain.findings import (
     CATEGORY_COHESION,
     CATEGORY_COMPLEXITY,
@@ -55,6 +67,19 @@ _COVERAGE_JOIN_FAMILY = "coverage_join"
 _SECURITY_SURFACES_FAMILY = "security_surfaces"
 
 _SEMANTIC_AUTHORITY_FAMILY = "semantic_authority"
+
+
+def _comparison_pair(
+    summary: Mapping[str, object], comparison: str
+) -> dict[str, object]:
+    """One comparison's pair as the document states it: read off the
+    producer's family summary by the owner's one reader and written back by
+    its one writer, so the flag is a bool and every delta an integer exactly
+    when the flag is true and ``null`` exactly when it is false -- the
+    assembler never decides the comparison again."""
+    return document_comparison_fields(
+        comparison, document_comparison_values(summary, comparison)
+    )
 
 
 def _authority_item_order_tail(item: Mapping[str, object]) -> str:
@@ -889,6 +914,10 @@ def _normalize_metrics_families(
         == CONFIDENCE_HIGH
     )
 
+    # Their pairs are not contiguous in the summary: placed field by field.
+    adoption_pair = _comparison_pair(coverage_adoption_summary, COMPARISON_ADOPTION)
+    api_surface_pair = _comparison_pair(api_surface_summary, COMPARISON_API_SURFACE)
+
     family_sections: dict[str, object] = {
         CATEGORY_COMPLEXITY: {
             "summary": {
@@ -896,10 +925,7 @@ def _normalize_metrics_families(
                 "average": round(_as_float(complexity_summary.get("average")), 2),
                 "max": _as_int(complexity_summary.get("max")),
                 "high_risk": _as_int(complexity_summary.get("high_risk")),
-                "baseline_diff_available": bool(
-                    complexity_summary.get("baseline_diff_available")
-                ),
-                "new_high_risk": _as_int(complexity_summary.get("new_high_risk")),
+                **_comparison_pair(complexity_summary, COMPARISON_COMPLEXITY),
             },
             "items": complexity_items,
             "items_truncated": False,
@@ -910,10 +936,7 @@ def _normalize_metrics_families(
                 "average": round(_as_float(coupling_summary.get("average")), 2),
                 "max": _as_int(coupling_summary.get("max")),
                 "high_risk": _as_int(coupling_summary.get("high_risk")),
-                "baseline_diff_available": bool(
-                    coupling_summary.get("baseline_diff_available")
-                ),
-                "new_high_risk": _as_int(coupling_summary.get("new_high_risk")),
+                **_comparison_pair(coupling_summary, COMPARISON_COUPLING),
             },
             "items": coupling_items,
             "items_truncated": False,
@@ -949,16 +972,7 @@ def _normalize_metrics_families(
                 "max_depth": _as_int(dependencies.get("max_depth")),
                 "avg_depth": round(_as_float(dependencies.get("avg_depth")), 2),
                 "p95_depth": _as_int(dependencies.get("p95_depth")),
-                "baseline_diff_available": bool(
-                    dependencies_comparison.get("baseline_diff_available")
-                ),
-                "new_cycles": _as_int(dependencies_comparison.get("new_cycles")),
-                "new_import_cycles": _as_int(
-                    dependencies_comparison.get("new_import_cycles")
-                ),
-                "new_deferred_cycles": _as_int(
-                    dependencies_comparison.get("new_deferred_cycles")
-                ),
+                **_comparison_pair(dependencies_comparison, COMPARISON_DEPENDENCIES),
             },
             "items": dependency_edges,
             "cycles": dependency_cycles,
@@ -978,10 +992,7 @@ def _normalize_metrics_families(
                 ),
                 "suppressed": len(dead_suppressed_items)
                 or _as_int(dead_code_summary.get("suppressed")),
-                "baseline_diff_available": bool(
-                    dead_code_summary.get("baseline_diff_available")
-                ),
-                "new_items": _as_int(dead_code_summary.get("new_items")),
+                **_comparison_pair(dead_code_summary, COMPARISON_DEAD_CODE),
                 # Carried verbatim: the report document is the evidence the
                 # MCP gate path reads, so dropping the abstention count here
                 # would make --fail-on-unresolved-dead-code inert on that
@@ -1033,10 +1044,7 @@ def _normalize_metrics_families(
                 # Always emitted, so a consumer never has to read the absence
                 # of a key as an answer.
                 "population": health_population,
-                "baseline_diff_available": bool(
-                    health_comparison.get("baseline_diff_available")
-                ),
-                "delta": _as_int(health_comparison.get("delta")),
+                **_comparison_pair(health_comparison, COMPARISON_HEALTH),
             },
             "items": [],
             "items_truncated": False,
@@ -1051,10 +1059,8 @@ def _normalize_metrics_families(
                 "param_permille": _as_int(
                     coverage_adoption_summary.get("param_permille")
                 ),
-                "baseline_diff_available": bool(
-                    coverage_adoption_summary.get("baseline_diff_available")
-                ),
-                "param_delta": _as_int(coverage_adoption_summary.get("param_delta")),
+                DOCUMENT_FLAG: adoption_pair[DOCUMENT_FLAG],
+                "param_delta": adoption_pair["param_delta"],
                 "returns_total": _as_int(
                     coverage_adoption_summary.get("returns_total")
                 ),
@@ -1064,7 +1070,7 @@ def _normalize_metrics_families(
                 "return_permille": _as_int(
                     coverage_adoption_summary.get("return_permille")
                 ),
-                "return_delta": _as_int(coverage_adoption_summary.get("return_delta")),
+                "return_delta": adoption_pair["return_delta"],
                 "public_symbol_total": _as_int(
                     coverage_adoption_summary.get("public_symbol_total")
                 ),
@@ -1074,9 +1080,7 @@ def _normalize_metrics_families(
                 "docstring_permille": _as_int(
                     coverage_adoption_summary.get("docstring_permille")
                 ),
-                "docstring_delta": _as_int(
-                    coverage_adoption_summary.get("docstring_delta")
-                ),
+                "docstring_delta": adoption_pair["docstring_delta"],
                 "typing_any_count": _as_int(
                     coverage_adoption_summary.get("typing_any_count")
                 ),
@@ -1087,17 +1091,14 @@ def _normalize_metrics_families(
         _API_SURFACE_FAMILY: {
             "summary": {
                 "enabled": bool(api_surface_summary.get("enabled")),
-                "baseline_diff_available": bool(
-                    api_surface_summary.get("baseline_diff_available")
-                ),
+                DOCUMENT_FLAG: api_surface_pair[DOCUMENT_FLAG],
                 "modules": _as_int(api_surface_summary.get("modules")),
                 "public_symbols": _as_int(api_surface_summary.get("public_symbols")),
-                "added": _as_int(api_surface_summary.get("added")),
-                "breaking": _as_int(api_surface_summary.get("breaking")),
-                # Absent from a document written before the key existed; the
-                # absent count reads as 0 like every other count here, and
-                # ``baseline_diff_available`` still says whether it is a fact.
-                "changed": _as_int(api_surface_summary.get("changed")),
+                "added": api_surface_pair["added"],
+                "breaking": api_surface_pair["breaking"],
+                # Absent from a payload written before the key existed beside
+                # a ``true`` flag, the count reads as 0 (the owner's reader).
+                "changed": api_surface_pair["changed"],
                 "strict_types": bool(api_surface_summary.get("strict_types")),
             },
             "items": api_surface_items,

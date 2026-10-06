@@ -1816,7 +1816,7 @@ def test_report_json_dead_code_summary_uses_high_confidence_key() -> None:
         "high_confidence": 1,
         "suppressed": 0,
         "baseline_diff_available": False,
-        "new_items": 0,
+        "new_items": None,
         # 39Y cycle 2b: abstentions ride beside the dead counts, never inside.
         "unresolved_external_override": 0,
         # RULING 2026-09-01: the reachability abstentions and their world ride
@@ -1909,7 +1909,7 @@ def test_report_json_dead_code_suppressed_items_are_reported_separately() -> Non
         "high_confidence": 0,
         "suppressed": 1,
         "baseline_diff_available": False,
-        "new_items": 0,
+        "new_items": None,
         "unresolved_external_override": 0,
         "unresolved": 0,
         "unresolved_internal": 0,

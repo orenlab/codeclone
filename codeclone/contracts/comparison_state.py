@@ -178,6 +178,47 @@ DOCUMENT_FIELDS: Final[Mapping[ComparisonKey, tuple[str, str]]] = {
 }
 
 
+#: The flag of each metrics family summary that says whether the family's
+#: comparison ran: the producer's ``made`` for that comparison.
+DOCUMENT_FLAG: Final = "baseline_diff_available"
+
+
+def document_comparison_fields(
+    comparison: str, values: Mapping[str, int] | None
+) -> dict[str, object]:
+    """The report document's spelling of one comparison -- the one writer of
+    the pair: the family's flag and every delta field of the comparison.
+    ``values`` (by term) when the comparison ran: the flag is ``true`` and
+    each field its integer, a measured zero included; ``None`` when it did
+    not: the flag is ``false`` and each field ``null``, never ``0``."""
+    fields: dict[str, object] = {DOCUMENT_FLAG: values is not None}
+    for term in COMPARISON_TERMS[comparison]:
+        field = DOCUMENT_FIELDS[(comparison, term)][1]
+        fields[field] = None if values is None else int(values[term])
+    return fields
+
+
+def _count(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def document_comparison_values(
+    summary: Mapping[str, object], comparison: str
+) -> dict[str, int] | None:
+    """The one reader of the pair: the deltas a family ``summary`` states for
+    one comparison, by term, when its flag says the comparison ran, else
+    ``None``.  The flag alone decides; the reader never decides again.  A
+    field absent beside a ``true`` flag is a document older than the field
+    (``api_surface.summary.changed`` before report schema 3.6) and reads as
+    the count it then implied, ``0``."""
+    if summary.get(DOCUMENT_FLAG) is not True:
+        return None
+    return {
+        term: _count(summary.get(DOCUMENT_FIELDS[(comparison, term)][1]))
+        for term in COMPARISON_TERMS[comparison]
+    }
+
+
 def not_compared_reason(*, enabled: bool, lanes_trusted: bool) -> NotComparedReason:
     """Why a comparison that did not run did not run: the one spelling the
     producer, the store reader and the document reader share."""
@@ -201,6 +242,7 @@ __all__ = [
     "COMPARISON_LANES",
     "COMPARISON_TERMS",
     "DOCUMENT_FIELDS",
+    "DOCUMENT_FLAG",
     "NOT_COMPARED_DISABLED",
     "NOT_COMPARED_NOT_RUN",
     "NOT_COMPARED_REASONS",
@@ -220,5 +262,7 @@ __all__ = [
     "TERM_TYPING_RETURN_DELTA",
     "ComparisonKey",
     "NotComparedReason",
+    "document_comparison_fields",
+    "document_comparison_values",
     "not_compared_reason",
 ]

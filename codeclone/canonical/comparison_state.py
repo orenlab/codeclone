@@ -37,6 +37,7 @@ from codeclone.contracts.comparison_state import (
     TERM_NEW_GROUPS,
     ComparisonKey,
     NotComparedReason,
+    document_comparison_values,
     not_compared_reason,
 )
 from codeclone.utils.coerce import as_mapping, as_sequence
@@ -116,6 +117,17 @@ class ComparisonState:
             for term in COMPARISON_TERMS[comparison]
         )
 
+    def values(self, comparison: str) -> dict[str, int] | None:
+        """Every delta of the comparison by term when it ran, else ``None``:
+        the shape the report document's pair is written from
+        (``contracts.comparison_state.document_comparison_fields``)."""
+        if not self.made(comparison):
+            return None
+        return {
+            term: int(self.results[(comparison, term)].value or 0)
+            for term in COMPARISON_TERMS[comparison]
+        }
+
     def reason(self, comparison: str) -> NotComparedReason | None:
         """Why the comparison did not run, ``None`` when it ran."""
         return self.results[(comparison, COMPARISON_TERMS[comparison][0])].reason
@@ -176,13 +188,11 @@ def document_comparison_state(
         else:
             family = DOCUMENT_FIELDS[(comparison, terms[0])][0]
             summary = as_mapping(as_mapping(families.get(family)).get("summary"))
-            ran = summary.get("baseline_diff_available") is True
+            stated = document_comparison_values(summary, comparison)
+            ran = stated is not None
             enabled = disabled.isdisjoint(lanes)
             lanes_trusted = trusted.issuperset(lanes)
-            values = {
-                term: _int(summary.get(DOCUMENT_FIELDS[(comparison, term)][1]))
-                for term in terms
-            }
+            values = stated or {}
         results.update(
             comparison_results(
                 comparison,

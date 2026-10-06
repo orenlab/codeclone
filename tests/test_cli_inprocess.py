@@ -4970,7 +4970,7 @@ def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
         "high_confidence": 0,
         "suppressed": suppressed_count,
         "baseline_diff_available": False,
-        "new_items": 0,
+        "new_items": None,
         "unreachable_statements": 0,
         "unresolved_external_override": 0,
         "unresolved": 0,
@@ -5797,7 +5797,7 @@ def test_cli_report_withholds_set_diff_comparisons_on_an_unmeasured_run(
         summary = families[family]["summary"]
         assert summary["baseline_diff_available"] is False, family
         for key in keys:
-            assert summary[key] == 0, (family, key)
+            assert summary[key] is None, (family, key)
 
 
 def test_cli_coverage_threshold_stops_blaming_an_unread_population(

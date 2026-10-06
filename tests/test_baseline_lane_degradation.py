@@ -862,7 +862,7 @@ def test_an_opaque_health_input_lane_withholds_the_health_comparison(
     )
 
     assert health["baseline_diff_available"] is False, lane_name
-    assert health["delta"] == 0, lane_name
+    assert health["delta"] is None, lane_name
 
 
 def test_an_empty_health_lane_is_not_an_opaque_one(
@@ -1125,7 +1125,7 @@ def test_an_empty_current_scope_withholds_the_health_comparison(
 
     assert health["score"] is None
     assert health["population"] == "complete_empty"
-    assert health["delta"] == 0
+    assert health["delta"] is None
     assert health["baseline_diff_available"] is False
 
 

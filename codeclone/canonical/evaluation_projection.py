@@ -42,6 +42,11 @@ from typing import Final
 
 from codeclone.canonical.evaluation_rows import GATE_PASSED, HotlistRow
 from codeclone.canonical.model import CanonicalModel, EvaluationFacts
+from codeclone.contracts.comparison_state import (
+    COMPARISON_HEALTH,
+    TERM_SCORE_DELTA,
+    document_comparison_fields,
+)
 
 #: The analysis mode of a run whose metrics never ran (``core.canonical_
 #: snapshot.CLONES_ONLY_MODE``, the run population's own word).
@@ -84,23 +89,30 @@ def _clones_only(model: CanonicalModel) -> bool:
 def health_payload(model: CanonicalModel) -> dict[str, object]:
     """``health`` of ``get_run_summary`` / ``get_production_triage`` /
     ``generate_pr_summary``: the verdict with its dimensions, and the health
-    delta when the comparison stated one (``0`` beside
-    ``baseline_diff_available: false`` otherwise, as the document writes it).
-    A run without a verdict answers the surface's two absences: the metrics
-    were skipped, or no verdict exists."""
+    comparison's pair as the document writes it, by the one writer
+    (``document_comparison_fields``): the delta beside ``true`` when the
+    comparison stated one, ``null`` beside ``false`` otherwise.  A run
+    without a verdict answers the surface's two absences: the metrics were
+    skipped, or no verdict exists."""
     health = model.facts.evaluation.health_result
     if health is None:
         reason = "metrics_skipped" if _clones_only(model) else "unavailable"
         return {"available": False, "reason": reason}
-    deltas = model.facts.comparison.health_delta
     return {
         "score": health.score,
         "grade": health.grade,
         "dimensions": None if health.dimensions is None else dict(health.dimensions),
         "population": health.population,
-        "baseline_diff_available": bool(deltas),
-        "delta": sum(row.value for row in deltas),
+        **_health_comparison(model),
     }
+
+
+def _health_comparison(model: CanonicalModel) -> dict[str, object]:
+    """The health comparison's pair off the stored delta row: its value when
+    the comparison stated one, else ``null`` beside ``false``."""
+    deltas = model.facts.comparison.health_delta
+    stated = {TERM_SCORE_DELTA: sum(row.value for row in deltas)} if deltas else None
+    return document_comparison_fields(COMPARISON_HEALTH, stated)
 
 
 def diff_health_delta(model: CanonicalModel) -> int | None:

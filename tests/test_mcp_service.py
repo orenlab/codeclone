@@ -11513,7 +11513,7 @@ def test_get_run_summary_omits_dead_code_block_when_metrics_skipped(
         "baseline_diff_available": False,
         "high_confidence": 0,
         "live_roots": 0,
-        "new_items": 0,
+        "new_items": None,
         "suppressed": 0,
         "total": 0,
         "unreachable_statements": 0,
