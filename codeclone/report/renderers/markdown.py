@@ -21,6 +21,7 @@ from ...contracts import (
     GROUP_KEY_STRUCTURAL,
 )
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
+from ...utils.display_text import markdown_code
 from ...utils.finding_groups import (
     baseline_tracked_group_keys,
     family_group_list,
@@ -114,9 +115,10 @@ def _location_text(item: Mapping[str, object]) -> str:
         line_part = f":{start_line}"
         if end_line > 0 and end_line != start_line:
             line_part += f"-{end_line}"
+    location = markdown_code(f"{relative_path}{line_part}")
     if qualname:
-        return f"`{relative_path}{line_part}` :: `{qualname}`"
-    return f"`{relative_path}{line_part}`"
+        return f"{location} :: {markdown_code(qualname)}"
+    return location
 
 
 def _append_anchor(lines: list[str], anchor_id: str, title: str, level: int) -> None:
@@ -155,7 +157,9 @@ def _append_facts_block(
     if not facts:
         return
     lines.append(f"- {title}:")
-    lines.extend(f"  - `{key}`: {_text(facts[key])}" for key in sorted(facts))
+    lines.extend(
+        f"  - {markdown_code(key)}: {_text(facts[key])}" for key in sorted(facts)
+    )
 
 
 def _append_findings_section(
@@ -174,7 +178,7 @@ def _append_findings_section(
         _append_kv_bullets(
             lines,
             (
-                (md_msgs.MD_FINDING_ID, f"`{_text(group.get('id'))}`"),
+                (md_msgs.MD_FINDING_ID, markdown_code(_text(group.get("id")))),
                 (md_msgs.MD_FAMILY, group.get("family")),
                 (md_msgs.MD_CATEGORY, group.get("category")),
                 (md_msgs.MD_KIND, group.get("kind")),
@@ -228,7 +232,7 @@ def _append_suppressed_clone_findings(
         _append_kv_bullets(
             lines,
             (
-                ("Finding ID", f"`{_text(group.get('id'))}`"),
+                ("Finding ID", markdown_code(_text(group.get("id")))),
                 ("Category", group.get("category")),
                 ("Clone Type", group.get("clone_type")),
                 ("Severity", group.get("severity")),
@@ -240,7 +244,7 @@ def _append_suppressed_clone_findings(
                 (
                     "Matched Patterns",
                     ", ".join(
-                        str(item).strip()
+                        markdown_code(str(item).strip())
                         for item in _as_sequence(group.get("matched_patterns"))
                         if str(item).strip()
                     )
@@ -364,7 +368,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             f"### {md_msgs.MD_BASELINE_LANE_TRUST}",
             "",
             *(
-                f"- `{_text(_as_mapping(row).get('name'))}`: "
+                f"- {markdown_code(_text(_as_mapping(row).get('name')))}: "
                 f"{_text(_as_mapping(row).get('status'))} "
                 f"({_text(_as_mapping(row).get('reason'))})"
                 for row in lane_trust
@@ -498,7 +502,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             _append_kv_bullets(
                 lines,
                 (
-                    ("Finding", f"`{_text(suggestion.get('finding_id'))}`"),
+                    ("Finding", markdown_code(_text(suggestion.get("finding_id")))),
                     ("Summary", suggestion.get("summary")),
                     ("Location", suggestion.get("location_label")),
                     ("Effort", action.get("effort")),

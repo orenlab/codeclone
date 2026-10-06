@@ -30,6 +30,7 @@ from ...contracts import (
 )
 from ...domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ...utils.coerce import as_int, as_mapping, as_sequence
+from ...utils.display_text import display_text
 from ...utils.finding_groups import (
     baseline_tracked_group_keys,
     family_group_list,
@@ -73,7 +74,7 @@ def format_meta_text_value(value: object) -> str:
     ):
         formatted = [format_meta_text_value(item) for item in value]
         return ", ".join(formatted) if formatted else proj.PROJECTION_NONE
-    text = str(value).strip()
+    text = display_text(str(value).strip())
     return text if text else proj.PROJECTION_NONE
 
 
@@ -363,11 +364,11 @@ def _suppression_bindings_text(item: Mapping[str, object]) -> str:
             rule = str(binding.get("rule", "")).strip() or "unknown"
             source = str(binding.get("source", "")).strip() or "unknown"
             parts.append(f"{rule}@{source}")
-        return ",".join(parts)
+        return display_text(",".join(parts))
     rule = str(item.get("suppression_rule", "")).strip()
     source = str(item.get("suppression_source", "")).strip()
     if rule or source:
-        return f"{rule or 'unknown'}@{source or 'unknown'}"
+        return display_text(f"{rule or 'unknown'}@{source or 'unknown'}")
     return proj.PROJECTION_NONE
 
 
@@ -431,7 +432,7 @@ def _append_suggestions(
         )
         summary = str(suggestion.get("summary", "")).strip()
         if summary:
-            lines.append(f"   summary: {summary}")
+            lines.append(f"   summary: {display_text(summary)}")
         lines.append(
             f"   location: {format_meta_text_value(suggestion.get('location_label'))}"
         )
@@ -445,7 +446,7 @@ def _append_suggestions(
             for step in _as_sequence(_as_mapping(suggestion.get("action")).get("steps"))
             if str(step).strip()
         ]
-        lines.extend(f"   - {step}" for step in steps[:2])
+        lines.extend(f"   - {display_text(step)}" for step in steps[:2])
 
 
 def _append_overview(
