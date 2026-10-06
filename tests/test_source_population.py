@@ -38,6 +38,7 @@ from codeclone.paths.git_snapshot import list_git_workspace_paths
 from codeclone.paths.module_identity.inventory import build_module_registry
 from codeclone.paths.population import derive_source_population
 from codeclone.scanner import discover_python_files
+from codeclone.utils import git_process
 
 _TRACKED = (
     "pkg/__init__.py",
@@ -449,6 +450,20 @@ def _git_that_answers(ls_files: _LsFiles) -> _FakeRun:
     return _run
 
 
+def _owner_seam(
+    fake_run: _FakeRun,
+) -> Callable[..., subprocess.CompletedProcess[bytes]]:
+    """Every git call reaches ``git_process.run_git_bytes``; the fake keeps
+    the ``subprocess.run`` shape it was written against."""
+
+    def run_git_bytes(
+        root: Path, args: list[str], *, timeout: float, input_bytes: bytes | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        return fake_run(["git", *args], cwd=root, timeout=timeout, input=input_bytes)
+
+    return run_git_bytes
+
+
 def _raise(error: BaseException) -> _LsFiles:
     def _fail(_command: list[str]) -> subprocess.CompletedProcess[bytes]:
         raise error
@@ -505,7 +520,7 @@ def test_each_git_refusal_is_a_typed_fallback_reason(
     expected_reason: str,
 ) -> None:
     _write(tmp_path, "pkg/mod.py")
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(git_process, "run_git_bytes", _owner_seam(fake_run))
 
     listing = list_git_workspace_paths(tmp_path)
     assert listing.available is False
@@ -526,11 +541,13 @@ def test_an_empty_git_listing_is_an_answer_and_not_a_refusal(
 
     _write(tmp_path, "pkg/mod.py")
     monkeypatch.setattr(
-        subprocess,
-        "run",
-        _git_that_answers(
-            lambda command: subprocess.CompletedProcess(
-                command, 0, stdout=b"", stderr=b""
+        git_process,
+        "run_git_bytes",
+        _owner_seam(
+            _git_that_answers(
+                lambda command: subprocess.CompletedProcess(
+                    command, 0, stdout=b"", stderr=b""
+                )
             )
         ),
     )

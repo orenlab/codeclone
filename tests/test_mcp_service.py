@@ -6145,8 +6145,8 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
     assert console.messages == ["alpha 2"]
 
     monkeypatch.setattr(
-        cast(Any, mcp_shared_mod).subprocess,
-        "run",
+        cast(Any, mcp_shared_mod).git_process,
+        "run_git_text",
         lambda *args, **kwargs: SimpleNamespace(
             stdout="pkg/a.py\npkg/b.py\npkg/a.py\n"
         ),
@@ -6159,7 +6159,9 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
     def _raise_subprocess(*args: object, **kwargs: object) -> object:
         raise subprocess.CalledProcessError(1, ["git", "diff"])
 
-    monkeypatch.setattr(cast(Any, mcp_shared_mod).subprocess, "run", _raise_subprocess)
+    monkeypatch.setattr(
+        cast(Any, mcp_shared_mod).git_process, "run_git_text", _raise_subprocess
+    )
     with pytest.raises(MCPGitDiffError):
         mcp_shared_mod._git_diff_lines_payload(root_path=tmp_path, git_diff_ref="HEAD")
 

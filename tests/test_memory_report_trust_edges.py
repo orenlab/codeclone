@@ -95,6 +95,27 @@ def _make_fake_git_run(
     return _run
 
 
+def _owner_seam(
+    fake_run: Callable[..., CompletedProcess[str]],
+) -> Callable[..., CompletedProcess[str]]:
+    """Every git call reaches ``git_process.run_git_text``; the fake keeps
+    the ``subprocess.run`` shape it was written against."""
+
+    def run_git_text(
+        root: Path, args: list[str], *, timeout: float
+    ) -> CompletedProcess[str]:
+        return fake_run(
+            ["git", *args],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+    return run_git_text
+
+
 def test_cached_report_untrusted_when_report_mtime_older_than_head(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -110,7 +131,9 @@ def test_cached_report_untrusted_when_report_mtime_older_than_head(
         git_log_stdout="9999999999\n",
         fail_cmd=None,
     )
-    monkeypatch.setattr("codeclone.memory.report_trust.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "codeclone.memory.report_trust.git_process.run_git_text", _owner_seam(fake_run)
+    )
 
     reason = cached_report_untrusted_reason(
         root_path=root,
@@ -161,7 +184,9 @@ def test_cached_report_untrusted_reason_git_log_variants(
         git_log_stdout=git_log_stdout,
         fail_cmd=None,
     )
-    monkeypatch.setattr("codeclone.memory.report_trust.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "codeclone.memory.report_trust.git_process.run_git_text", _owner_seam(fake_run)
+    )
 
     reason = cached_report_untrusted_reason(
         root_path=root,
@@ -205,7 +230,9 @@ def test_cached_report_untrusted_reason_handles_ls_files_failure(
             )
         raise AssertionError(f"unexpected cmd: {cmd}")
 
-    monkeypatch.setattr("codeclone.memory.report_trust.subprocess.run", _run)
+    monkeypatch.setattr(
+        "codeclone.memory.report_trust.git_process.run_git_text", _owner_seam(_run)
+    )
 
     reason = cached_report_untrusted_reason(
         root_path=root,
@@ -231,7 +258,9 @@ def test_cached_report_untrusted_reason_git_subprocess_failure_variants(
         git_log_stdout="0\n",
         fail_cmd=fail_cmd,
     )
-    monkeypatch.setattr("codeclone.memory.report_trust.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "codeclone.memory.report_trust.git_process.run_git_text", _owner_seam(fake_run)
+    )
 
     reason = cached_report_untrusted_reason(
         root_path=root,
