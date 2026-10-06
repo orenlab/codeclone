@@ -46,6 +46,7 @@ from codeclone.surfaces.mcp._workspace_intents import (
     WorkspaceIntentRecord,
     compute_scope_digest,
     expires_at,
+    find_workspace_intent,
     format_utc,
     remove_workspace_record,
     utc_now,
@@ -677,3 +678,40 @@ def test_shutdown_releases_the_sessions_store_leases(repo: _Repo) -> None:
     repo.service.shutdown_cleanup()
 
     assert repo.lease_rows() == []
+
+
+def test_clear_session_runs_forgets_retired_intents_and_releases_every_lease(
+    repo: _Repo,
+) -> None:
+    retired_id, _before, _run_id = _start_and_retire(repo)
+    active_id = repo.start(["README.md"])
+    assert len(repo.lease_rows()) == 2
+
+    cleared = repo.service.clear_session_runs()
+
+    assert cleared["cleared_intents"] == 2
+    assert cleared["workspace_cleared"] is True
+    assert repo.lease_rows() == []
+    assert repo.service._intent_run_leases == {}
+    assert repo.service._before_run_evicted_intents == {}
+    for intent_id in (retired_id, active_id):
+        assert find_workspace_intent(root=repo.root, intent_id=intent_id) is None
+
+
+def test_an_intent_id_handed_out_again_after_clear_starts_clean(
+    repo: _Repo,
+) -> None:
+    retired_id, _before, _run_id = _start_and_retire(repo)
+    repo.service.clear_session_runs()
+    repo.analyze()
+
+    reused = repo.start()
+
+    # Intent ids restart with the session's runs: the same id, a new intent,
+    # with nothing of the one that wore it before.
+    assert reused == retired_id
+    assert reused not in repo.service._before_run_evicted_intents
+    lease = repo.lease(reused)
+    assert lease is not None
+    assert lease.held
+    assert [row[0] for row in repo.lease_rows()] == [lease.lease_id]
