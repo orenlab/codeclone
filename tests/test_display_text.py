@@ -152,18 +152,10 @@ _MARKDOWN_EMITTERS: tuple[str, ...] = (
     "codeclone/report/renderers/markdown.py",
     "codeclone/report/messages/markdown.py",
     "codeclone/surfaces/mcp/_review_receipt.py",
+    "codeclone/surfaces/mcp/messages/receipt.py",
+    # The pull-request summary (``_render_pr_summary_markdown``).
+    "codeclone/surfaces/mcp/_session_helpers.py",
 )
-#: Markdown emitters still writing their own spans, each with why. Shrink-only:
-#: the test fails once an entry stops violating, so a fixed module leaves.
-_PENDING_MARKDOWN_EMITTERS: dict[str, str] = {
-    "codeclone/surfaces/mcp/_session_helpers.py": (
-        "PR summary markdown; outside the edit boundary of the wave that "
-        "introduced the owner"
-    ),
-    "codeclone/surfaces/mcp/messages/receipt.py": (
-        "RECEIPT_MD_FOOTER, a template no renderer reads"
-    ),
-}
 
 
 def _code_span_interpolations(tree: ast.AST) -> list[int]:
@@ -218,12 +210,3 @@ def test_no_markdown_emitter_opens_a_code_span_around_an_interpolation() -> None
         )
     }
     assert violations == {}
-
-
-def test_pending_markdown_emitters_still_need_their_entry() -> None:
-    still_pending = {
-        relative
-        for relative in _PENDING_MARKDOWN_EMITTERS
-        if _code_span_interpolations(ast.parse((_ROOT / relative).read_text("utf-8")))
-    }
-    assert still_pending == set(_PENDING_MARKDOWN_EMITTERS)
