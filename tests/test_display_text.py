@@ -210,3 +210,90 @@ def test_no_markdown_emitter_opens_a_code_span_around_an_interpolation() -> None
         )
     }
     assert violations == {}
+
+
+#: The one module allowed to escape text for Rich markup.
+_RICH_ESCAPING_OWNER = "codeclone/utils/display_text.py"
+
+
+def _imports_rich_escape(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.ImportFrom)
+        and node.module == "rich.markup"
+        and any(alias.name == "escape" for alias in node.names)
+    )
+
+
+def _reads_rich_escape(node: ast.AST) -> bool:
+    if not (isinstance(node, ast.Attribute) and node.attr == "escape"):
+        return False
+    owner = node.value
+    return (isinstance(owner, ast.Name) and owner.id == "markup") or (
+        isinstance(owner, ast.Attribute) and owner.attr == "markup"
+    )
+
+
+def _escapes_brackets_by_hand(node: ast.AST) -> bool:
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "replace"
+        and len(node.args) == 2
+    ):
+        return False
+    old, new = node.args
+    return (
+        isinstance(old, ast.Constant)
+        and isinstance(new, ast.Constant)
+        and "[" in str(old.value)
+        and "\\[" in str(new.value)
+    )
+
+
+def _rich_escapes(tree: ast.AST) -> list[int]:
+    """Lines that escape text for Rich markup without the owner."""
+    checks = (_imports_rich_escape, _reads_rich_escape, _escapes_brackets_by_hand)
+    return sorted(
+        {
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.stmt, ast.expr))
+            and any(check(node) for check in checks)
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from rich.markup import escape",
+        "import rich.markup as markup\nmarkup.escape(x)",
+        "import rich.markup\nrich.markup.escape(x)",
+        'str(x).replace("[", "\\\\[")',
+    ],
+)
+def test_rich_ratchet_scanner_sees_every_spelling_of_a_second_escape(
+    source: str,
+) -> None:
+    assert _rich_escapes(ast.parse(source)) != []
+
+
+def test_rich_ratchet_scanner_passes_the_owner_call() -> None:
+    assert _rich_escapes(ast.parse('f"[bold]{rich_text(x)}[/bold]"')) == []
+
+
+def test_nothing_escapes_rich_markup_outside_the_owner() -> None:
+    violations = {
+        relative: lines
+        for path in sorted((_ROOT / "codeclone").rglob("*.py"))
+        if (relative := path.relative_to(_ROOT).as_posix()) != _RICH_ESCAPING_OWNER
+        and (lines := _rich_escapes(ast.parse(path.read_text("utf-8"))))
+    }
+    assert violations == {}
+
+
+def test_the_rich_escaping_owner_is_seen_by_the_scanner() -> None:
+    # Positive control on the real tree: the owner's own escape is visible to
+    # the scanner, so an empty violation map is not an empty scan.
+    owner = ast.parse((_ROOT / _RICH_ESCAPING_OWNER).read_text("utf-8"))
+    assert _rich_escapes(owner) != []

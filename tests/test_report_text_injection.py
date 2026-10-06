@@ -468,3 +468,11 @@ def test_text_report_suggestion_and_suppression_fields_carry_no_controls() -> No
     assert f"   location: label {shown}" in lines
     assert f"   - step {shown}" in lines
     assert any(line.endswith(f"suppressed_by=r@src {shown}") for line in lines)
+
+
+def test_markdown_report_keeps_the_absence_marker_out_of_code_spans() -> None:
+    payload = _bare_site_payload("pkg.alpha")
+    payload["meta"] = {}
+    lines = render_markdown_report_document(payload).splitlines()
+
+    assert "- Project: (none)" in lines
