@@ -598,11 +598,27 @@ class _MCPSessionFindingMixin:
         # ``finding-`` prefixed onto ``canonical_id`` and nothing else; both are
         # derivable by the caller and are no longer paid for per finding card.
         canonical_id = str(finding.get("canonical_id") or finding.get("id", "")).strip()
-        resolved_short_id = (
-            str(short_finding_id)
-            if short_finding_id is not None
-            else self._short_finding_id(record, canonical_id)
+        return self._project_finding_card(
+            finding,
+            detail_level=detail_level,
+            short_finding_id=(
+                str(short_finding_id)
+                if short_finding_id is not None
+                else self._short_finding_id(record, canonical_id)
+            ),
         )
+
+    def _project_finding_card(
+        self,
+        finding: Mapping[str, object],
+        *,
+        detail_level: str,
+        short_finding_id: str,
+    ) -> dict[str, object]:
+        """One finding at one detail level, under a short id already
+        resolved: nothing of the run is read."""
+        canonical_id = str(finding.get("canonical_id") or finding.get("id", "")).strip()
+        resolved_short_id = short_finding_id
         if detail_level == "full":
             full_payload = dict(finding)
             full_payload["id"] = resolved_short_id

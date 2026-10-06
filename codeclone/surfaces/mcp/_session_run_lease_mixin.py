@@ -104,6 +104,14 @@ class _MCPSessionRunLeaseMixin:
             if self._intent_run_leases.get(intent_id) == entry:
                 self._intent_run_leases[intent_id] = (root, fresh)
 
+    def _release_all_intent_run_leases(self) -> None:
+        """Release every lease this session holds (``clear_session_runs``:
+        intent ids restart there, so no lease may outlive its intent)."""
+
+        with self._state_lock:
+            intent_ids = tuple(self._intent_run_leases)
+        self._release_intent_run_leases(intent_ids)
+
     def _release_intent_run_leases(self, intent_ids: Sequence[str]) -> None:
         """Release the leases of intents this session no longer holds."""
 

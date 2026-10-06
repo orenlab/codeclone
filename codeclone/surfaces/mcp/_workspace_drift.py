@@ -18,7 +18,7 @@ from ...api.population import derive_source_population
 from ...cache.store import file_stat_signature
 from ...contracts.errors import ValidationError
 from ...models import FileStat
-from ._session_shared import MCPRunRecord
+from ._session_shared import MCPHeldRun
 from ._workspace_hygiene import collect_dirty_snapshot
 
 WorkspaceDriftStatus = Literal["fresh", "drifted", "unknown"]
@@ -81,7 +81,7 @@ def build_run_content_manifest(
 
 
 def compute_drift(
-    record: MCPRunRecord,
+    record: MCPHeldRun,
     paths: Sequence[str] | None = None,
 ) -> WorkspaceDrift:
     """Compare a run's source snapshot with current stat, topology, and git state."""

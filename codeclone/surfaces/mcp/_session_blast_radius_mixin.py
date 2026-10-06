@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Final, cast
 
 from ...api.memory import blast_radius_cache_limit
@@ -27,10 +27,12 @@ from ._blast_radius import (
     compute_blast_radius,
     compute_blast_radius_from_facts,
 )
+from ._run_residence import payload_evicted_blast_radius
 from ._run_store_serving import served_blast_radius
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
 from ._session_shared import (
     CodeCloneMCPRunStore,
+    MCPHeldRun,
     MCPRunRecord,
     MCPServiceContractError,
 )
@@ -74,6 +76,11 @@ BlastRadiusCache = dict[BlastRadiusCacheKey, BlastRadiusCacheEntry]
 #: (``tests/test_implementation_context_run_store_serving.py``); its radius is
 #: its own consumer migration, not this one.
 BLAST_RADIUS_DOCUMENT_ROAD: Final = "document"
+#: The road of a run held without its payload: the store's facts alone,
+#: served on the door's membership proof.  A key of its own, so an answer
+#: cached while the payload was held -- a shadow-read answer -- is never
+#: handed out as the payload-less one, nor the other way round.
+BLAST_RADIUS_PAYLOAD_EVICTED_ROAD: Final = "payload_evicted"
 
 #: Every consumer names the slot it reads through these, never a bare index.
 #: A bare index is how the previous shape broke: the pruner read slot 0 as a
@@ -107,7 +114,7 @@ def _finding_session(
 
 
 def _computed_blast_radius(
-    record: MCPRunRecord,
+    record: MCPHeldRun,
     *,
     files: tuple[str, ...],
     depth: BlastRadiusDepth,
@@ -124,17 +131,6 @@ def _computed_blast_radius(
     (``served_blast_radius``).
     """
     run_id = _helpers._short_run_id(record.run_id)
-    memory = compute_blast_radius(
-        run_id=run_id,
-        report_document=record.served_report,
-        file_modules=record.served_report.contract.file_modules,
-        files=files,
-        depth=depth,
-        forbidden_patterns=forbidden_patterns,
-        allowed_scope=allowed_scope,
-    )
-    if road == BLAST_RADIUS_DOCUMENT_ROAD:
-        return memory, None
 
     def from_store(facts: BlastRadiusFacts) -> BlastRadiusResult:
         return compute_blast_radius_from_facts(
@@ -146,7 +142,52 @@ def _computed_blast_radius(
             allowed_scope=allowed_scope,
         )
 
+    if not isinstance(record, MCPRunRecord):
+        return payload_evicted_blast_radius(record, from_store)
+    return _whole_record_blast_radius(
+        record,
+        from_store,
+        files=files,
+        depth=depth,
+        forbidden_patterns=forbidden_patterns,
+        allowed_scope=allowed_scope,
+        road=road,
+    )
+
+
+def _whole_record_blast_radius(
+    record: MCPRunRecord,
+    from_store: Callable[[BlastRadiusFacts], BlastRadiusResult],
+    *,
+    files: tuple[str, ...],
+    depth: BlastRadiusDepth,
+    forbidden_patterns: tuple[str, ...],
+    allowed_scope: tuple[str, ...],
+    road: str,
+) -> BlastRadiusCacheEntry:
+    """The radius off the record's document, and on a serving road the
+    store's beside it (``served_blast_radius``)."""
+    memory = compute_blast_radius(
+        run_id=_helpers._short_run_id(record.run_id),
+        report_document=record.served_report,
+        file_modules=record.served_report.contract.file_modules,
+        files=files,
+        depth=depth,
+        forbidden_patterns=forbidden_patterns,
+        allowed_scope=allowed_scope,
+    )
+    if road == BLAST_RADIUS_DOCUMENT_ROAD:
+        return memory, None
     return served_blast_radius(record, memory, from_store)
+
+
+def _blast_radius_road(record: MCPHeldRun) -> str:
+    """The road a held run's radius is answered on: the serving switch's
+    for a run held whole, the store's facts alone for one without its
+    payload."""
+    if isinstance(record, MCPRunRecord):
+        return serving_source()
+    return BLAST_RADIUS_PAYLOAD_EVICTED_ROAD
 
 
 def _serving_payload(entry: BlastRadiusCacheEntry) -> dict[str, object]:
@@ -171,7 +212,7 @@ class _MCPSessionBlastRadiusMixin:
         depth: str = "direct",
         include: Sequence[str] | None = None,
     ) -> dict[str, object]:
-        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
+        record = _helpers._resolve_held_run_for_optional_root(self._runs, run_id, root)
         normalized_depth = self._validated_blast_radius_depth(depth)
         normalized_files = _finding_session(self)._normalize_changed_paths(
             root_path=record.root,
@@ -194,7 +235,7 @@ class _MCPSessionBlastRadiusMixin:
     def _blast_radius_result(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         files: Sequence[str],
         depth: BlastRadiusDepth,
         forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
@@ -214,7 +255,7 @@ class _MCPSessionBlastRadiusMixin:
     def _served_blast_radius(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         files: Sequence[str],
         depth: BlastRadiusDepth,
         forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
@@ -234,14 +275,14 @@ class _MCPSessionBlastRadiusMixin:
             depth=depth,
             forbidden_patterns=forbidden_patterns,
             allowed_scope=allowed_scope,
-            road=serving_source(),
+            road=_blast_radius_road(record),
         )
         return entry[0], _serving_payload(entry)
 
     def _document_blast_radius(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         files: Sequence[str],
         depth: BlastRadiusDepth,
         forbidden_patterns: Sequence[str] = DEFAULT_DO_NOT_TOUCH_PATTERNS,
@@ -262,7 +303,7 @@ class _MCPSessionBlastRadiusMixin:
     def _cached_blast_radius(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         files: Sequence[str],
         depth: BlastRadiusDepth,
         forbidden_patterns: Sequence[str],

@@ -33,20 +33,30 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Protocol
 
-from ...api.run_store_serving import ServedPatchRun
+from ...api.run_residence import ResidentRun
+from ...api.run_store_serving import (
+    SERVING_REASON_SERVED,
+    SERVING_SOURCE_RUN_STORE,
+    RunStoreServingOutcome,
+    ServedPatchRun,
+    read_run_store_patch_run,
+)
 from ...utils.coerce import as_int as _coerce_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from ...utils.finding_groups import baseline_tracked_group_keys
 from . import _session_helpers as _helpers
 from ._patch_contract import baseline_status
-from ._run_store_serving import served_patch_contract
+from ._run_residence import payload_evicted_outcome
+from ._run_store_serving import PATCH_BUDGET_RUN, served_patch_contract
 from ._session_finding_mixin import _FINDING_FAMILIES_BY_MODE
 from ._session_shared import (
     FAMILY_CLONE,
     FAMILY_CLONES,
     GatingResult,
     MCPGateRequest,
+    MCPHeldRun,
+    MCPRunPayloadEvictedError,
     MCPRunRecord,
     MCPServiceContractError,
     MetricGateConfig,
@@ -158,10 +168,12 @@ class ComparisonFacts(Protocol):
 
 
 class PatchRun(ComparisonFacts, Protocol):
-    """What the patch contract reads of one run, beside its record."""
+    """What the patch contract reads of one run, beside its record -- the
+    record whole, or its resident identity when its payload was dropped:
+    the verifier reads only the identity off it."""
 
     @property
-    def record(self) -> MCPRunRecord: ...
+    def record(self) -> MCPHeldRun: ...
 
     def current_state(self) -> dict[str, object]: ...
 
@@ -204,13 +216,12 @@ class PatchSession(Protocol):
         self, findings: Sequence[Mapping[str, object]]
     ) -> tuple[dict[str, str], dict[str, str]]: ...
 
-    def _project_finding_detail(
+    def _project_finding_card(
         self,
-        record: MCPRunRecord,
         finding: Mapping[str, object],
         *,
         detail_level: str,
-        short_finding_id: str | None = None,
+        short_finding_id: str,
     ) -> dict[str, object]: ...
 
 
@@ -379,7 +390,7 @@ class StorePatchRun:
     """
 
     def __init__(
-        self, session: PatchSession, record: MCPRunRecord, served: ServedPatchRun
+        self, session: PatchSession, record: MCPHeldRun, served: ServedPatchRun
     ) -> None:
         self._session = session
         self._record = record
@@ -397,7 +408,7 @@ class StorePatchRun:
         )[0]
 
     @property
-    def record(self) -> MCPRunRecord:
+    def record(self) -> MCPHeldRun:
         return self._record
 
     def health(self) -> int | None:
@@ -436,8 +447,7 @@ class StorePatchRun:
 
     def comparison_card(self, finding: Mapping[str, object]) -> dict[str, object]:
         canonical_id = str(finding.get("id", "")).strip()
-        summary = self._session._project_finding_detail(
-            self._record,
+        summary = self._session._project_finding_card(
             finding,
             detail_level="summary",
             short_finding_id=self._canonical_to_short.get(canonical_id, canonical_id),
@@ -454,6 +464,97 @@ class StorePatchRun:
 
     def baseline_status(self) -> str:
         return self._served.baseline_status
+
+
+def serve_payload_evicted_answer(
+    session: PatchSession,
+    runs: Mapping[str, MCPHeldRun],
+    answer: Callable[[Mapping[str, PatchRun]], dict[str, object]],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """An answer over runs one of which is held without its payload, and
+    its ``serving`` block.
+
+    There is no memory answer to shadow: every run is read through the
+    patch-run door, which proves the run's membership before its first
+    fact, and the answer is built over the stored facts -- a run held whole
+    that the store does not answer for lends its own.  A run without its
+    payload that the store does not answer for leaves nothing to answer
+    from: the typed refusal, carrying where the store road went.
+    """
+    read = {
+        side: read_run_store_patch_run(
+            root=run.root, link=run.execution.run_snapshot_link
+        )
+        for side, run in runs.items()
+    }
+    facts: dict[str, PatchRun] = {}
+    for side, run in runs.items():
+        stored, _outcome = read[side]
+        if stored is not None:
+            facts[side] = StorePatchRun(session, run, stored)
+        elif isinstance(run, MCPRunRecord):
+            facts[side] = RecordPatchRun(session, run)
+        else:
+            raise MCPRunPayloadEvictedError(
+                run, serving=payload_evicted_serving_block(runs, read)
+            )
+    return answer(facts), payload_evicted_serving_block(runs, read)
+
+
+def payload_evicted_serving_block(
+    runs: Mapping[str, MCPHeldRun],
+    read: Mapping[str, tuple[ServedPatchRun | None, RunStoreServingOutcome]],
+) -> dict[str, object]:
+    """The ``serving`` block of an answer over runs one of which is held
+    without its payload: the shape of the memory road's block (one run: the
+    run's own outcome; a pair: an outcome and each run's under ``runs``),
+    each run without its payload saying so; the outcome is the first such
+    run the store refused, else ``served``."""
+    own = {
+        side: (
+            payload_evicted_outcome(outcome)
+            if isinstance(runs[side], ResidentRun)
+            else outcome
+        )
+        for side, (_stored, outcome) in read.items()
+    }
+    if tuple(own) == (PATCH_BUDGET_RUN,):
+        return own[PATCH_BUDGET_RUN].as_payload()
+    refused = [
+        outcome
+        for side, outcome in own.items()
+        if isinstance(runs[side], ResidentRun) and read[side][0] is None
+    ]
+    outcome = (
+        refused[0]
+        if refused
+        else payload_evicted_outcome(
+            RunStoreServingOutcome(
+                source=SERVING_SOURCE_RUN_STORE, reason=SERVING_REASON_SERVED
+            )
+        )
+    )
+    return {
+        **outcome.as_payload(),
+        "runs": {side: outcome.as_payload() for side, outcome in own.items()},
+    }
+
+
+def serve_held_patch_answer(
+    session: PatchSession,
+    runs: Mapping[str, MCPHeldRun],
+    answer: Callable[[Mapping[str, PatchRun], bool], dict[str, object]],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """The answer over runs held whole -- shadowed by the store's
+    (:func:`serve_patch_answer`) -- or, when a run is held without its
+    payload, over the stored facts alone, its audit events written
+    (:func:`serve_payload_evicted_answer`)."""
+    whole = {side: run for side, run in runs.items() if isinstance(run, MCPRunRecord)}
+    if len(whole) == len(runs):
+        return serve_patch_answer(session, whole, answer)
+    return serve_payload_evicted_answer(
+        session, runs, lambda facts: answer(facts, True)
+    )
 
 
 def serve_patch_answer(
@@ -490,8 +591,11 @@ __all__ = [
     "focus_is_analyzed",
     "focused_comparison_index",
     "gate_config",
+    "payload_evicted_serving_block",
     "record_current_state",
     "record_metric_item_index",
     "require_gate_coverage",
+    "serve_held_patch_answer",
     "serve_patch_answer",
+    "serve_payload_evicted_answer",
 ]

@@ -534,6 +534,32 @@ def _store_answer(
     )
 
 
+def prove_published_run(
+    *, root: Path, link: RunSnapshotLink | None
+) -> RunStoreServingOutcome:
+    """Whether the store holds one execution's run published, its membership
+    proven by its object ids (``canonical.store.prove_run_membership``, once
+    per process per store file and run) -- ``served`` when it does, the
+    reason a reading would have been refused with when it does not.
+
+    The question a surface asks before it lets the run's in-memory copy go:
+    the same gates, the same two roads, the same one store open and the same
+    refusal vocabulary as every reading, and the same proof every reading
+    runs before its first fact.  The serving switch is not consulted -- this
+    asks what the store holds, not which source a consumer serves.
+    """
+    _proven, outcome = _read_published(root=root, link=link, read=_membership_proven)
+    return outcome
+
+
+def _membership_proven(store: RunStore, run_id: str) -> bool:
+    prove_run_membership(store, run_id)
+    # A proof is remembered for the process; whether the run is still
+    # published is asked every time -- the collector may have taken it since.
+    store.require_published(run_id)
+    return True
+
+
 def read_run_store_blast_radius_facts(
     *, root: Path, link: RunSnapshotLink | None
 ) -> tuple[BlastRadiusFacts | None, RunStoreServingOutcome]:
@@ -598,6 +624,7 @@ __all__ = [
     "answered_if_compared",
     "document_comparison_state",
     "forget_served_facts",
+    "prove_published_run",
     "read_run_store_authority_candidates",
     "read_run_store_blast_radius_facts",
     "read_run_store_slices",

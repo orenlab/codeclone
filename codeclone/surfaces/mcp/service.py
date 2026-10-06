@@ -6,9 +6,12 @@
 from __future__ import annotations
 
 import inspect
-from typing import Protocol
+from collections.abc import Callable
+from typing import Protocol, TypeVar
 
 from ...utils.payload_narrow import is_payload_dict
+from ._run_residence import payload_evicted_answer
+from ._session_shared import MCPRunPayloadEvictedError, _json_text_payload
 from ._workspace_intents import safe_remove_own_intent
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
@@ -195,7 +198,7 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
 
     def _run_dict(self, method_name: str, **params: object) -> dict[str, object]:
         bound = getattr(self._session_cls, method_name).__get__(self, type(self))
-        result = run_kw(bound, params)
+        result = _answered(lambda: run_kw(bound, params))
         if not is_payload_dict(result):
             raise TypeError(f"MCP session method '{method_name}' must return a dict.")
         return result
@@ -212,16 +215,18 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
         *,
         root: str | None = None,
     ) -> dict[str, object]:
-        return self._session_cls.get_run_summary(self, run_id, root=root)
+        return _answered(
+            lambda: self._session_cls.get_run_summary(self, run_id, root=root)
+        )
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
-        return self._session_cls.evaluate_gates(self, request)
+        return _answered(lambda: self._session_cls.evaluate_gates(self, request))
 
     def clear_session_runs(self) -> dict[str, object]:
         return self._session_cls.clear_session_runs(self)
 
     def read_resource(self, uri: str) -> str:
-        return self._session_cls.read_resource(self, uri)
+        return _answered_text(lambda: self._session_cls.read_resource(self, uri))
 
     def shutdown_cleanup(self) -> None:
         """Best-effort cleanup of workspace intent files owned by this process.
@@ -281,6 +286,25 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
             clear_workspace_intent_store_cache()
         except Exception:
             pass
+
+
+_AnswerT = TypeVar("_AnswerT")
+
+
+def _answered(call: Callable[[], _AnswerT]) -> _AnswerT | dict[str, object]:
+    """``call``'s answer -- or, for a run held without its payload that no
+    store reading stood in for, the one typed answer every tool gives: the
+    step that brings the run back, never a raw error, never an empty one."""
+    try:
+        return call()
+    except MCPRunPayloadEvictedError as evicted:
+        return payload_evicted_answer(evicted.identity, serving=evicted.serving)
+
+
+def _answered_text(call: Callable[[], str]) -> str:
+    """:func:`_answered` for a resource: the typed answer as its text."""
+    answer = _answered(call)
+    return answer if isinstance(answer, str) else _json_text_payload(answer)
 
 
 _EMPTY = inspect.Signature.empty

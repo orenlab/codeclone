@@ -66,6 +66,7 @@ from ._session_shared import (
     Iterable,
     Mapping,
     MCPAnalysisRequest,
+    MCPHeldRun,
     MCPRunRecord,
     MCPServiceContractError,
     MCPServiceError,
@@ -392,6 +393,20 @@ def _resolve_run_for_optional_root(
     return runs.get_for_root(run_id, root=_resolve_root(cleaned))
 
 
+def _resolve_held_run_for_optional_root(
+    runs: CodeCloneMCPRunStore,
+    run_id: str | None,
+    root: str | None,
+) -> MCPHeldRun:
+    """:func:`_resolve_run_for_optional_root` for a reader with a store
+    road: a run held by its resident identity alone is answered with it."""
+
+    cleaned = "" if root is None else str(root).strip()
+    if not cleaned:
+        return runs.held_any_root(run_id)
+    return runs.held_for_root(run_id, root=_resolve_root(cleaned))
+
+
 def _resolve_optional_path(
     value: str,
     root_path: Path,
@@ -683,8 +698,8 @@ COMPARISON_REASON_FOCUS_NOT_ANALYZED = "focus_not_analyzed"
 
 def _comparison_scope(
     *,
-    before: MCPRunRecord,
-    after: MCPRunRecord,
+    before: MCPHeldRun,
+    after: MCPHeldRun,
 ) -> dict[str, object]:
     same_root = before.root == after.root
     same_analysis_settings = before.comparison_settings == after.comparison_settings

@@ -28,6 +28,7 @@ from ...api.config_delivery import (
     load_repository_config,
 )
 from ...api.execution_event import ExecutionEvent
+from ...api.run_residence import ResidentRun
 from ...api.served_projection import (
     WITHHELD_PROOF_SECTIONS,
     ServedProjectionError,
@@ -300,6 +301,14 @@ MAX_MCP_HISTORY_LIMIT = 10
 # counts: releasing a pin that a live intent still needs would break that
 # intent, so this is a backstop against abandonment, not a working limit.
 MAX_PINNED_MCP_RUNS = 10
+# How many unpinned runs the session keeps by their resident identity alone,
+# once their payload was dropped (``CodeCloneMCPRunStore.drop_payload``).  The
+# history limit bounds payloads -- what costs memory; this bounds the names a
+# caller can still ask about and be answered from the run store or told,
+# typed, to analyse again.  A resident identity is the execution event and a
+# few scalars, so this number is a bound on bookkeeping, not on RAM: a policy
+# value, like the pin ceiling, held by its value in a test.
+MCP_RESIDENT_HISTORY_LIMIT = 32
 DEFAULT_REPORT_SECTION: Final[ReportSection] = "meta"
 # ``all`` is withdrawn, not forgotten. The whole document reached 37M tokens on
 # this repository, so the tool stopped serving it — but the value stays a
@@ -607,6 +616,33 @@ class MCPRunNotFoundError(MCPServiceError):
     """Raised when a requested MCP run is not available in the in-memory registry."""
 
 
+class MCPRunPayloadEvictedError(MCPServiceError):
+    """The run is held by its resident identity only: its payload was dropped.
+
+    Not a kind of :class:`MCPRunNotFoundError` on purpose -- the run is known,
+    its store copy may answer, and a caller that treated this as "no such
+    run" would answer a different question.  A reader that needs the payload
+    and has no store road lets this propagate to the one typed answer of the
+    service (``_run_residence.payload_evicted_answer``); every reader with a
+    store road resolves the resident identity instead.
+    """
+
+    def __init__(
+        self,
+        identity: MCPRunIdentity,
+        *,
+        serving: Mapping[str, object] | None = None,
+    ) -> None:
+        self.identity = identity
+        # Where the store road went, for a reader that had one and was refused.
+        self.serving = serving
+        super().__init__(
+            f"The payload of MCP analysis run "
+            f"'{identity.run_id[:_SHORT_RUN_ID_LENGTH]}' under {identity.root} "
+            "was dropped from memory."
+        )
+
+
 class MCPRunRootMismatchError(MCPServiceError):
     """Raised when a run exists, but under a root other than the required one.
 
@@ -757,6 +793,28 @@ class MCPRunRecord:
     module_imports: tuple[ModuleDep, ...] = ()
 
 
+#: The resident part of a held run (``api.run_residence.ResidentRun``), over
+#: this surface's analysis request: what stays when its payload is dropped.
+MCPRunIdentity = ResidentRun[MCPAnalysisRequest]
+
+#: A run the registry holds: whole, or by its resident identity alone.
+MCPHeldRun = MCPRunRecord | MCPRunIdentity
+
+#: The record fields that stay resident when a payload is dropped -- the
+#: fields :class:`MCPRunIdentity` takes from the record, by name.  Every
+#: other field of :class:`MCPRunRecord` is the payload.
+RESIDENT_RECORD_FIELDS: Final[tuple[str, ...]] = (
+    "run_id",
+    "root",
+    "request",
+    "comparison_settings",
+    "changed_paths",
+    "func_clones_count",
+    "block_clones_count",
+    "execution",
+)
+
+
 # The index of one semantic report under one checkout.  Content-addressed
 # run ids collide between same-commit worktrees; the root is what tells those
 # apart, and it belongs in the index -- never in the id itself.
@@ -791,13 +849,23 @@ class CodeCloneMCPRunStore:
     per report.  An unpinned execution that a newer execution of the same
     report supersedes is released at once -- nothing can name it any more --
     and the rest are pruned oldest-first past ``history_limit``.
+
+    An execution is held whole (:class:`MCPRunRecord`) or, once its payload
+    was dropped (:meth:`drop_payload`), by its resident identity alone
+    (:class:`MCPRunIdentity`), in the same place, with the same ordinal,
+    pins and index entry.  ``history_limit`` counts the unpinned executions
+    held whole -- the payloads, what costs memory -- and
+    :data:`MCP_RESIDENT_HISTORY_LIMIT` the unpinned ones held by identity.
+    The resolvers that hand out a record refuse an identity-only execution
+    with :class:`MCPRunPayloadEvictedError`; the ``held_*`` resolvers hand
+    out either.
     """
 
     def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
         self._history_limit = _validated_history_limit(history_limit)
         self._lock = RLock()
         # Registration order, oldest first.
-        self._executions: OrderedDict[str, MCPRunRecord] = OrderedDict()
+        self._executions: OrderedDict[str, MCPHeldRun] = OrderedDict()
         self._key_of: dict[str, MCPRunKey] = {}
         # The newest execution per (root, run_id): the index, not the address.
         self._latest_by_key: dict[MCPRunKey, str] = {}
@@ -921,6 +989,12 @@ class CodeCloneMCPRunStore:
         against, whatever executions of the same report registered since.
         """
 
+        return whole_record(self.held_execution(execution_event_id))
+
+    def held_execution(self, execution_event_id: str) -> MCPHeldRun:
+        """:meth:`get_execution`, answering an execution held by its resident
+        identity alone with that identity rather than a refusal."""
+
         with self._lock:
             record = self._executions.get(execution_event_id)
             if record is None:
@@ -943,6 +1017,17 @@ class CodeCloneMCPRunStore:
         Raises :class:`MCPRunRootMismatchError` when the id is only known under
         a different root, so callers can tell "wrong checkout" from "no run".
         """
+
+        return whole_record(self.held_for_root(run_id, root=root))
+
+    def held_for_root(
+        self,
+        run_id: str | None = None,
+        *,
+        root: Path,
+    ) -> MCPHeldRun:
+        """:meth:`get_for_root`, answering an execution held by its resident
+        identity alone with that identity rather than a refusal."""
 
         resolved_root = root.resolve()
         with self._lock:
@@ -968,6 +1053,12 @@ class CodeCloneMCPRunStore:
         Fails closed when the id is held under more than one root: picking one
         would be exactly the silent substitution this store exists to prevent.
         """
+
+        return whole_record(self.held_any_root(run_id))
+
+    def held_any_root(self, run_id: str | None = None) -> MCPHeldRun:
+        """:meth:`resolve_any_root`, answering an execution held by its
+        resident identity alone with that identity rather than a refusal."""
 
         with self._lock:
             # These two exits answer without reaching _resolve_key_locked, so
@@ -1050,8 +1141,56 @@ class CodeCloneMCPRunStore:
         }
 
     def records(self) -> tuple[MCPRunRecord, ...]:
+        """The executions held whole, oldest first."""
         with self._lock:
-            return tuple(self._executions.values())
+            return _whole_records(self._executions.values())
+
+    def held_run_ids(self) -> frozenset[str]:
+        """The run ids of every held execution, whole or by identity."""
+        with self._lock:
+            return frozenset(record.run_id for record in self._executions.values())
+
+    def pin_count(self, execution_event_id: str) -> int:
+        """How many references hold this execution pinned."""
+        with self._lock:
+            return self._pinned.get(execution_event_id, 0)
+
+    def payload_excess(self, *, incoming: int) -> int:
+        """How many held payloads must go for ``incoming`` new ones to fit
+        under the history limit -- every payload counts, pinned or not."""
+        with self._lock:
+            held = sum(
+                1
+                for record in self._executions.values()
+                if isinstance(record, MCPRunRecord)
+            )
+        return held + incoming - self._history_limit
+
+    def drop_payload(self, identity: MCPRunIdentity) -> bool:
+        """Hold ``identity``'s execution by that identity alone from now on.
+
+        Its place, ordinal, pins and index entry stay; the record, and with
+        it the payload, goes.  ``False`` when the execution is no longer held
+        whole -- forgotten, or dropped already.  Nothing turns an identity
+        back into a record: only the producer registering the execution
+        again does.  Whether a payload MAY be dropped is not decided here
+        (``_run_residence.payload_droppable``).
+        """
+        event_id = identity.execution.execution_event_id
+        with self._lock:
+            record = self._executions.get(event_id)
+            if not isinstance(record, MCPRunRecord):
+                return False
+            if (
+                record.execution is not identity.execution
+                or record.run_id != identity.run_id
+                or record.root != identity.root
+            ):
+                raise ValueError(
+                    "a resident identity replaces only the record it was taken from"
+                )
+            self._executions[event_id] = identity
+            return True
 
     def pin_execution(self, execution_event_id: str) -> str:
         """Take a reference on one execution so pruning cannot drop it."""
@@ -1130,17 +1269,24 @@ class CodeCloneMCPRunStore:
                 continue
             if self._latest_by_key.get(self._key_of[event_id]) != event_id:
                 self._forget_locked(event_id)
-        while self._unpinned_count_locked() > self._history_limit:
-            for event_id in tuple(self._executions):
-                if event_id in self._pinned:
-                    continue
-                self._forget_locked(event_id)
-                break
-            else:
-                break
+        # The unpinned executions held whole within the history limit, and
+        # those held by identity alone within the resident limit, each
+        # oldest first.
+        self._forget_unpinned_past_locked(whole=True, bound=self._history_limit)
+        self._forget_unpinned_past_locked(whole=False, bound=MCP_RESIDENT_HISTORY_LIMIT)
         for event_id in tuple(self._pinned):
             if event_id not in self._executions:
                 self._pinned.pop(event_id, None)
+
+    def _forget_unpinned_past_locked(self, *, whole: bool, bound: int) -> None:
+        unpinned = [
+            event_id
+            for event_id, record in self._executions.items()
+            if event_id not in self._pinned
+            and isinstance(record, MCPRunRecord) is whole
+        ]
+        for event_id in unpinned[: max(0, len(unpinned) - bound)]:
+            self._forget_locked(event_id)
 
     def _release_pins_over_cap_locked(self) -> None:
         """Release the longest-held pins once the ceiling is exceeded.
@@ -1154,8 +1300,17 @@ class CodeCloneMCPRunStore:
             self._pinned.popitem(last=False)
         self._prune_unpinned_locked()
 
-    def _unpinned_count_locked(self) -> int:
-        return sum(1 for event_id in self._executions if event_id not in self._pinned)
+
+def _whole_records(held: Iterable[MCPHeldRun]) -> tuple[MCPRunRecord, ...]:
+    return tuple(record for record in held if isinstance(record, MCPRunRecord))
+
+
+def whole_record(held: MCPHeldRun) -> MCPRunRecord:
+    """The held run as a record, or the typed refusal of one held by its
+    resident identity alone -- for a reader that needs the payload."""
+    if isinstance(held, ResidentRun):
+        raise MCPRunPayloadEvictedError(held)
+    return held
 
 
 __all__ = [
@@ -1193,10 +1348,12 @@ __all__ = [
     "FAMILY_DEAD_CODE",
     "FAMILY_DESIGN",
     "FAMILY_STRUCTURAL",
+    "MCP_RESIDENT_HISTORY_LIMIT",
     "MIN_MCP_HISTORY_LIMIT",
     "REMOVED_REPORT_SECTIONS",
     "REMOVED_RESOURCE_SUFFIXES",
     "REPORT_SCHEMA_VERSION",
+    "RESIDENT_RECORD_FIELDS",
     "SEVERITY_CRITICAL",
     "SEVERITY_INFO",
     "SEVERITY_WARNING",
@@ -1260,8 +1417,11 @@ __all__ = [
     "MCPAnalysisRequest",
     "MCPFindingNotFoundError",
     "MCPGateRequest",
+    "MCPHeldRun",
+    "MCPRunIdentity",
     "MCPRunKey",
     "MCPRunNotFoundError",
+    "MCPRunPayloadEvictedError",
     "MCPRunRecord",
     "MCPRunRootAmbiguityError",
     "MCPRunRootMismatchError",
@@ -1310,4 +1470,5 @@ __all__ = [
     "report",
     "resolve_finding_id",
     "short_id",
+    "whole_record",
 ]

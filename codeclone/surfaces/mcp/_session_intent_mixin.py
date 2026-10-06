@@ -49,15 +49,18 @@ from ._intent import (
     normalize_expected_effects,
     normalize_intent_scope,
 )
+from ._run_residence import report_digest_of
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_finding_mixin import _MCPSessionFindingMixin
 from ._session_run_lease_mixin import _MCPSessionRunLeaseMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
+    MCPHeldRun,
     MCPRunNotFoundError,
     MCPRunRecord,
     MCPRunRootMismatchError,
     MCPServiceContractError,
+    whole_record,
 )
 from ._workspace_intent_store import (
     InaccessibleRegistryEntry,
@@ -239,7 +242,7 @@ class _MCPSessionIntentMixin:
         depth: str = "direct",
         include: Sequence[str] | None = None,
     ) -> dict[str, object]:
-        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
+        record = _helpers._resolve_held_run_for_optional_root(self._runs, run_id, root)
         blast_radius_session = cast(_MCPSessionBlastRadiusMixin, super())
         # Re-enter root-bound: the record already names its checkout, and a
         # bare id would fall back to global resolution.
@@ -352,7 +355,7 @@ class _MCPSessionIntentMixin:
         intent_id: str | None,
         root: str | None,
     ) -> dict[str, object]:
-        record, active_intent = self._resolve_intent(
+        record, active_intent = self._resolve_held_intent(
             run_id=run_id,
             intent_id=intent_id,
             root=root,
@@ -840,7 +843,7 @@ class _MCPSessionIntentMixin:
             raise MCPServiceContractError(
                 "action='check' requires diff_ref or changed_files."
             )
-        record, active_intent = self._resolve_intent(
+        record, active_intent = self._resolve_held_intent(
             run_id=run_id,
             intent_id=intent_id,
             root=root,
@@ -955,15 +958,32 @@ class _MCPSessionIntentMixin:
         intent_id: str | None,
         root: str | None = None,
     ) -> tuple[MCPRunRecord, IntentRecord]:
+        """:meth:`_resolve_held_intent` for a reader of the run's payload: a
+        run held without it is the typed refusal."""
+        record, intent = self._resolve_held_intent(
+            run_id=run_id, intent_id=intent_id, root=root
+        )
+        return whole_record(record), intent
+
+    def _resolve_held_intent(
+        self,
+        *,
+        run_id: str | None,
+        intent_id: str | None,
+        root: str | None = None,
+    ) -> tuple[MCPHeldRun, IntentRecord]:
+        # The intent's run whole, or by its resident identity alone: what an
+        # intent is checked, renewed and verified by is its identity and its
+        # execution's witnesses, never its payload.
         if intent_id is not None:
             active_intent = self._held_intent(intent_id)
             return self._bound_run_or_retire(active_intent), active_intent
         # A caller-supplied root binds the lookup; without one, resolution
         # still fails closed if the id is held under several checkouts.
         record = (
-            self._runs.get_for_root(run_id, root=_helpers._resolve_root(root))
+            self._runs.held_for_root(run_id, root=_helpers._resolve_root(root))
             if root is not None
-            else self._runs.resolve_any_root(run_id)
+            else self._runs.held_any_root(run_id)
         )
         with self._state_lock:
             # Same-commit worktrees share a run id; an intent qualifies only
@@ -982,7 +1002,7 @@ class _MCPSessionIntentMixin:
     def _intent_payload_with_expiry(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         intent: IntentRecord,
     ) -> dict[str, object]:
         if self._is_intent_expired(record=record, intent=intent):
@@ -997,13 +1017,13 @@ class _MCPSessionIntentMixin:
     def _is_intent_expired(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         intent: IntentRecord,
     ) -> bool:
         return intent.report_digest != self._report_digest_value(record)
 
-    def _report_digest_value(self, record: MCPRunRecord) -> str:
-        return _helpers._report_digest(record.served_report)
+    def _report_digest_value(self, record: MCPHeldRun) -> str:
+        return report_digest_of(record)
 
     def _workspace_record_from_intent(
         self,
@@ -1053,7 +1073,7 @@ class _MCPSessionIntentMixin:
     def _sync_workspace_intent_status(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         intent: IntentRecord,
     ) -> None:
         """Persist the FATE this intent's verdict implies, not the verdict.
@@ -1077,7 +1097,7 @@ class _MCPSessionIntentMixin:
     def _renew_lease_if_active(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         intent: IntentRecord,
     ) -> None:
         try:
@@ -1091,7 +1111,7 @@ class _MCPSessionIntentMixin:
         except Exception:
             return
 
-    def _renew_lease_for_run(self, *, record: MCPRunRecord) -> None:
+    def _renew_lease_for_run(self, *, record: MCPHeldRun) -> None:
         with self._state_lock:
             intents = tuple(
                 intent
@@ -1116,7 +1136,7 @@ class _MCPSessionIntentMixin:
                 )
             active_intent = all_intents[-1]
             intent_id = active_intent.intent_id
-        record, active_intent = self._resolve_intent(
+        record, active_intent = self._resolve_held_intent(
             run_id=None,
             intent_id=intent_id,
         )
@@ -1865,9 +1885,18 @@ class _MCPSessionIntentMixin:
             return self._runs.get_execution(intent.before_execution_id)
         return self._runs.get_for_root(intent.run_id, root=intent.root)
 
-    def _optional_intent_bound_run(self, intent: IntentRecord) -> MCPRunRecord | None:
+    def _held_intent_bound_run(self, intent: IntentRecord) -> MCPHeldRun:
+        """:meth:`_intent_bound_run`, answering an execution held by its
+        resident identity alone with that identity: the readers with a store
+        road -- verification, the scope check, clear -- need no payload."""
+
+        if intent.before_execution_id is not None:
+            return self._runs.held_execution(intent.before_execution_id)
+        return self._runs.held_for_root(intent.run_id, root=intent.root)
+
+    def _optional_intent_bound_run(self, intent: IntentRecord) -> MCPHeldRun | None:
         try:
-            return self._intent_bound_run(intent)
+            return self._held_intent_bound_run(intent)
         except (MCPRunNotFoundError, MCPRunRootMismatchError):
             return None
 
@@ -1920,7 +1949,7 @@ class _MCPSessionIntentMixin:
         stays known until ``clear`` or ``recover``.
         """
 
-        held_run_ids = {record.run_id for record in self._runs.records()}
+        held_run_ids = self._runs.held_run_ids()
         with self._state_lock:
             retired = tuple(
                 intent
@@ -1997,9 +2026,9 @@ class _MCPSessionIntentMixin:
             raise _before_run_evicted(retired)
         raise MCPServiceContractError(f"Unknown change intent id: {intent_id}")
 
-    def _bound_run_or_retire(self, intent: IntentRecord) -> MCPRunRecord:
+    def _bound_run_or_retire(self, intent: IntentRecord) -> MCPHeldRun:
         try:
-            return self._intent_bound_run(intent)
+            return self._held_intent_bound_run(intent)
         except (MCPRunNotFoundError, MCPRunRootMismatchError) as missing:
             # Lost before any analysis noticed: make the same transition an
             # analysis makes, so the answer, the audit trail and the registry

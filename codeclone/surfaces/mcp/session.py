@@ -50,6 +50,7 @@ from ._session_memory_mixin import _MCPSessionMemoryMixin
 from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
 from ._session_run_lease_mixin import _MCPSessionRunLeaseMixin
+from ._session_run_payload_mixin import _MCPSessionRunPayloadMixin
 from ._session_shared import (
     _REPORT_DUMMY_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -180,6 +181,7 @@ class MCPSession(
     _MCPSessionReviewReceiptMixin,
     _MCPSessionAuditArtifactMixin,
     _MCPSessionPatchContractMixin,
+    _MCPSessionRunPayloadMixin,
     _MCPSessionRunLeaseMixin,
     _MCPSessionIntentMixin,
     _MCPSessionMemoryMixin,
@@ -693,6 +695,11 @@ class MCPSession(
             relationship_facts=processing_result.function_relationship_facts,
             module_imports=processing_result.module_deps,
         )
+        # Room for this run's payload first, so the drop never takes the run
+        # this call registers: the oldest payloads the drop rule lets go are
+        # dropped, the rest stay -- and the registry's history bound forgets
+        # an unpinned run held whole past the limit, as it always did.
+        self._relieve_payload_pressure(incoming=1)
         self._runs.register(record)
         self._prune_session_state()
         # The audit row reports the same figures this call returns. The

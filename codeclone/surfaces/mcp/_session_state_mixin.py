@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import cast
 
 from . import _session_helpers as _helpers
@@ -21,6 +22,7 @@ from ._patch_contract_runs import (
     focused_comparison_index,
     gate_config,
     require_gate_coverage,
+    serve_payload_evicted_answer,
 )
 from ._report_section import (
     findings_section_payload,
@@ -29,6 +31,7 @@ from ._report_section import (
     removed_report_section_payload,
     require_mapping_section,
 )
+from ._run_residence import payload_evicted_run_summary
 from ._run_store_serving import (
     PATCH_BUDGET_RUN,
     memory_run_summary,
@@ -44,6 +47,7 @@ from ._session_blast_radius_mixin import (
     BlastRadiusCache,
 )
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
+from ._session_run_lease_mixin import _MCPSessionRunLeaseMixin
 from ._session_runtime import validate_numeric_args
 from ._session_shared import (
     _FOCUS_PRODUCTION,
@@ -87,6 +91,7 @@ from ._session_shared import (
     Mapping,
     MCPAnalysisRequest,
     MCPGateRequest,
+    MCPHeldRun,
     MCPRunRecord,
     MCPServiceContractError,
     MetricsDetailFamily,
@@ -191,7 +196,7 @@ def _module_map_section_payload(
 
 
 def _focused_comparability(
-    *, before: MCPRunRecord, after: MCPRunRecord, focus: str
+    *, before: MCPHeldRun, after: MCPHeldRun, focus: str
 ) -> dict[str, object]:
     """Whether the two runs are compared under ``focus``, decided on the
     records: their root and settings (``_comparison_scope``), then the
@@ -211,8 +216,8 @@ def _focused_comparability(
 
 def compare_runs_on_facts(
     *,
-    before: MCPRunRecord,
-    after: MCPRunRecord,
+    before: MCPHeldRun,
+    after: MCPHeldRun,
     focus: ComparisonFocus,
     before_facts: ComparisonFacts,
     after_facts: ComparisonFacts,
@@ -297,7 +302,7 @@ def compare_runs_on_facts(
 
 
 def gate_answer(
-    record: MCPRunRecord, request: MCPGateRequest, gate_result: GatingResult
+    record: MCPHeldRun, request: MCPGateRequest, gate_result: GatingResult
 ) -> dict[str, object]:
     """``evaluate_gates``' answer for one run under one request: the verdict
     the one evaluator gave over the run's gate inputs, and the policy the
@@ -356,6 +361,107 @@ def served_gate_answer(
             StorePatchRun(facts, record, stored[PATCH_BUDGET_RUN]).gate(request),
         ),
     )
+
+
+def payload_evicted_gate_answer(
+    session: object,
+    *,
+    record: MCPHeldRun,
+    request: MCPGateRequest,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """The gate answer for a run without its payload: the one evaluator
+    over the run's stored gate inputs, served on the strength of the door's
+    membership proof (``serve_payload_evicted_answer``)."""
+    return serve_payload_evicted_answer(
+        cast("PatchSession", session),
+        {PATCH_BUDGET_RUN: record},
+        lambda runs: gate_answer(record, request, runs[PATCH_BUDGET_RUN].gate(request)),
+    )
+
+
+def payload_evicted_run_comparison(
+    session: object,
+    *,
+    before: MCPHeldRun,
+    after: MCPHeldRun,
+    focus: ComparisonFocus,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """The comparison of a pair one run of which is held without its
+    payload: each run's stored facts, a run held whole falling back to its
+    own when the store does not answer for it."""
+    return serve_payload_evicted_answer(
+        cast("PatchSession", session),
+        {"before": before, "after": after},
+        lambda runs: compare_runs_on_facts(
+            before=before,
+            after=after,
+            focus=focus,
+            before_facts=runs["before"],
+            after_facts=runs["after"],
+        ),
+    )
+
+
+def held_run_summary(
+    session: _MCPSessionSummaryMixin, record: MCPHeldRun
+) -> dict[str, object]:
+    """``get_run_summary`` of one held run: for a run held whole, the
+    store's answer when it is the memory's byte for byte, the memory's
+    otherwise -- and the answer says which, and why (consumer migration C1,
+    ``_run_store_serving.served_run_summary``), both answering ``null`` for a
+    comparison the run did not make (ruling 2026-10-03,
+    ``_run_store_serving.memory_run_summary``); for a run held without its
+    payload there is no memory answer: the store's, or the refusal."""
+    if not isinstance(record, MCPRunRecord):
+        return payload_evicted_run_summary(
+            record,
+            code_provenance=code_provenance_payload(
+                process_start_epoch=session._agent_start_epoch
+            ),
+        )
+    payload, serving = served_run_summary(
+        record,
+        memory_run_summary(
+            record, session._summary_payload(record.summary, record=record)
+        ),
+    )
+    payload["serving"] = serving.as_payload()
+    return payload
+
+
+def held_run_comparison(
+    session: object,
+    *,
+    whole: Callable[
+        [MCPRunRecord, MCPRunRecord], tuple[dict[str, object], dict[str, object]]
+    ],
+    before: MCPHeldRun,
+    after: MCPHeldRun,
+    focus: ComparisonFocus,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """The comparison of two held runs to serve: ``whole`` (the session's
+    shadowed comparison) for a pair held whole; for a pair one run of which
+    is held without its payload, the stored facts' comparison."""
+    if isinstance(before, MCPRunRecord) and isinstance(after, MCPRunRecord):
+        return whole(before, after)
+    return payload_evicted_run_comparison(
+        session, before=before, after=after, focus=focus
+    )
+
+
+def held_gate_answer(
+    session: object,
+    *,
+    whole: Callable[[MCPRunRecord], tuple[dict[str, object], dict[str, object]]],
+    record: MCPHeldRun,
+    request: MCPGateRequest,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """The gate answer for one held run: ``whole`` (the session's shadowed
+    answer) for a run held whole, the stored gate inputs' for one held
+    without its payload."""
+    if isinstance(record, MCPRunRecord):
+        return whole(record)
+    return payload_evicted_gate_answer(session, record=record, request=request)
 
 
 def _compare_records(
@@ -1145,20 +1251,10 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
         *,
         root: str | None = None,
     ) -> dict[str, object]:
-        record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
-        # The store's answer when it is the memory's byte for byte, the
-        # memory's otherwise -- and the answer says which, and why
-        # (consumer migration C1, ``_run_store_serving.served_run_summary``).
-        # Both answer ``null`` for a comparison the run did not make
-        # (ruling 2026-10-03, ``_run_store_serving.memory_run_summary``).
-        payload, serving = served_run_summary(
-            record,
-            memory_run_summary(
-                record, self._summary_payload(record.summary, record=record)
-            ),
+        return held_run_summary(
+            self,
+            _helpers._resolve_held_run_for_optional_root(self._runs, run_id, root),
         )
-        payload["serving"] = serving.as_payload()
-        return payload
 
     def compare_runs(
         self,
@@ -1171,12 +1267,20 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
         # One root for the pair: comparing runs from two checkouts is the
         # cross-root case the comparability check already reports, not a
         # selector the caller needs two of.
-        before = _helpers._resolve_run_for_optional_root(
+        before = _helpers._resolve_held_run_for_optional_root(
             self._runs, before_run_id, root
         )
-        after = _helpers._resolve_run_for_optional_root(self._runs, after_run_id, root)
-        payload, serving = self._served_compare_run_records(
-            before=before, after=after, focus=focus
+        after = _helpers._resolve_held_run_for_optional_root(
+            self._runs, after_run_id, root
+        )
+        payload, serving = held_run_comparison(
+            self,
+            whole=lambda whole_before, whole_after: self._served_compare_run_records(
+                before=whole_before, after=whole_after, focus=focus
+            ),
+            before=before,
+            after=after,
+            focus=focus,
         )
         # Where the comparison came from, and why (consumer migration C3).
         payload["serving"] = serving
@@ -1229,13 +1333,21 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _context_projection_pages: dict[str, ContextProjectionArtifact]
     _memory_continuation_requests: dict[str, dict[str, object]]
     _active_intents: dict[str, IntentRecord]
+    _before_run_evicted_intents: dict[str, IntentRecord]
     _intent_sequence: int
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
-        record = _helpers._resolve_run_for_optional_root(
+        record = _helpers._resolve_held_run_for_optional_root(
             self._runs, request.run_id, request.root
         )
-        result, serving = self._served_gate_answer(record=record, request=request)
+        result, serving = held_gate_answer(
+            self,
+            whole=lambda whole_record: self._served_gate_answer(
+                record=whole_record, request=request
+            ),
+            record=record,
+            request=request,
+        )
         with self._state_lock:
             self._last_gate_results[record.run_id] = dict(result)
         # Where the answer came from, and why (consumer migration C4); the
@@ -1665,7 +1777,12 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
 
     def clear_session_runs(self) -> dict[str, object]:
         with self._state_lock:
-            intent_snapshot = tuple(self._active_intents.values())
+            # A retired intent -- its before-run lost -- still owns its
+            # registry row and its store lease until clear or recover.
+            intent_snapshot = (
+                *self._active_intents.values(),
+                *self._before_run_evicted_intents.values(),
+            )
         # Keyed off each intent's own root: an intent whose run has already
         # aged out still owns a registry row that must be cleaned up, and a
         # same-id run from a sibling worktree is not its evidence.
@@ -1684,7 +1801,9 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             cleared_memory_continuation_requests = len(
                 self._memory_continuation_requests
             )
-            cleared_intents = len(self._active_intents)
+            cleared_intents = len(self._active_intents) + len(
+                self._before_run_evicted_intents
+            )
             self._review_state.clear()
             self._last_gate_results.clear()
             self._spread_max_cache.clear()
@@ -1692,7 +1811,12 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             self._context_projection_pages.clear()
             self._memory_continuation_requests.clear()
             self._active_intents.clear()
+            self._before_run_evicted_intents.clear()
+            # Intent ids restart here, so nothing keyed by one may outlive
+            # it: an id handed out again starts with no retirement and no
+            # store lease of the intent that wore it before.
             self._intent_sequence = 0
+        cast(_MCPSessionRunLeaseMixin, self)._release_all_intent_run_leases()
         workspace_cleared = True
         for root_path, intent_id in workspace_targets:
             workspace_cleared = (
@@ -1796,7 +1920,9 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         )
 
     def _prune_session_state(self) -> None:
-        active_run_ids = {record.run_id for record in self._runs.records()}
+        # Every run the session still holds, whole or by its resident
+        # identity: the state a run carries outlives its payload.
+        active_run_ids = self._runs.held_run_ids()
         with self._state_lock:
             for state_map in (
                 self._review_state,

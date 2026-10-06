@@ -38,7 +38,7 @@ from ._patch_contract_runs import (
     METRIC_VALUE_KEYS,
     PatchRun,
     PatchSession,
-    serve_patch_answer,
+    serve_held_patch_answer,
 )
 from ._run_store_serving import PATCH_BUDGET_RUN
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
@@ -46,11 +46,12 @@ from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPGateRequest,
+    MCPHeldRun,
     MCPRunNotFoundError,
-    MCPRunRecord,
     MCPRunRootAmbiguityError,
     MCPRunRootMismatchError,
     MCPServiceContractError,
+    whole_record,
 )
 from ._session_state_mixin import compare_runs_on_facts
 from ._verification_profile import (
@@ -80,7 +81,7 @@ def _names_run(candidate: str, run_id: str) -> bool:
     return bool(candidate) and (run_id == candidate or run_id.startswith(candidate))
 
 
-def _witnessable(path: str, *records: MCPRunRecord) -> bool:
+def _witnessable(path: str, *records: MCPHeldRun) -> bool:
     """Can the executions' witnesses see this path at all?
 
     A path in either content manifest or in either git snapshot is one the
@@ -97,7 +98,7 @@ def _witnessable(path: str, *records: MCPRunRecord) -> bool:
     return False
 
 
-def _run_dirty_paths(record: MCPRunRecord) -> frozenset[str]:
+def _run_dirty_paths(record: MCPHeldRun) -> frozenset[str]:
     """Paths git reported as modified when *record* was analysed."""
 
     snapshot = record.execution.dirty_snapshot
@@ -184,12 +185,15 @@ class _MCPSessionPatchContractMixin:
 
     def _served_patch_answer(
         self,
-        runs: Mapping[str, MCPRunRecord],
+        runs: Mapping[str, MCPHeldRun],
         answer: _PatchAnswer,
     ) -> tuple[dict[str, object], dict[str, object]]:
         """The answer over the records, shadowed by the same answer over the
-        runs' stored facts (``_patch_contract_runs.serve_patch_answer``)."""
-        return serve_patch_answer(cast("PatchSession", self), runs, answer)
+        runs' stored facts (``_patch_contract_runs.serve_patch_answer``) --
+        or, when a run is held without its payload, the answer over the
+        stored facts alone, its audit events written
+        (``_patch_contract_runs.serve_payload_evicted_answer``)."""
+        return serve_held_patch_answer(cast("PatchSession", self), runs, answer)
 
     def _patch_contract_budget(
         self,
@@ -532,7 +536,7 @@ class _MCPSessionPatchContractMixin:
         *,
         binding_intent: IntentRecord | None,
         root: Path | None,
-    ) -> MCPRunRecord:
+    ) -> MCPHeldRun:
         """The before-run: the intent's own execution when the id names it.
 
         A run id names a report; the intent names the execution that produced
@@ -550,7 +554,7 @@ class _MCPSessionPatchContractMixin:
             before_run_id, binding_intent.run_id
         ):
             try:
-                return _intent_session(self)._intent_bound_run(binding_intent)
+                return _intent_session(self)._held_intent_bound_run(binding_intent)
             except MCPRunNotFoundError as missing:
                 # Asked only whether the report lives elsewhere: a sibling
                 # checkout holding it is a typed root mismatch.  Whatever it
@@ -568,7 +572,7 @@ class _MCPSessionPatchContractMixin:
         run_id: str | None,
         *,
         root: Path | None,
-    ) -> MCPRunRecord:
+    ) -> MCPHeldRun:
         """Resolve a run, bound to ``root`` when one is known.
 
         With a root, a run of the same id under any other checkout raises
@@ -577,15 +581,15 @@ class _MCPSessionPatchContractMixin:
         """
 
         if root is not None:
-            return self._runs.get_for_root(run_id, root=root)
-        return self._runs.resolve_any_root(run_id)
+            return self._runs.held_for_root(run_id, root=root)
+        return self._runs.held_any_root(run_id)
 
     def _after_run_for(
         self,
         after_run_id: str,
         *,
-        before: MCPRunRecord,
-    ) -> MCPRunRecord:
+        before: MCPHeldRun,
+    ) -> MCPHeldRun:
         """Resolve the after-run, preferring the before-run's own checkout.
 
         A genuinely cross-root pair still resolves, so it reaches the existing
@@ -594,10 +598,10 @@ class _MCPSessionPatchContractMixin:
         """
 
         try:
-            return self._runs.get_for_root(after_run_id, root=before.root)
+            return self._runs.held_for_root(after_run_id, root=before.root)
         except MCPRunRootMismatchError:
             try:
-                return self._runs.resolve_any_root(after_run_id)
+                return self._runs.held_any_root(after_run_id)
             except MCPRunRootAmbiguityError as exc:
                 # Several sibling checkouts hold the id, none of them ours:
                 # there is no single diagnostic pair to report incomparable,
@@ -631,11 +635,11 @@ class _MCPSessionPatchContractMixin:
     def _optional_intent(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         intent_id: str | None,
     ) -> IntentRecord | None:
         if intent_id is not None:
-            _, intent = _intent_session(self)._resolve_intent(
+            _, intent = _intent_session(self)._resolve_held_intent(
                 run_id=None,
                 intent_id=intent_id,
             )
@@ -657,7 +661,7 @@ class _MCPSessionPatchContractMixin:
     def _budgets_for_record(
         self,
         *,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
         strictness: StrictnessProfile,
     ) -> PatchBudgets:
         request = record.request
@@ -670,7 +674,7 @@ class _MCPSessionPatchContractMixin:
         )
 
     def _gate_request(
-        self, *, record: MCPRunRecord, budgets: PatchBudgets
+        self, *, record: MCPHeldRun, budgets: PatchBudgets
     ) -> MCPGateRequest:
         clone_budget = budgets.clone_regression
         return MCPGateRequest(
@@ -733,7 +737,7 @@ class _MCPSessionPatchContractMixin:
     def _patch_changed_files(
         self,
         *,
-        after: MCPRunRecord,
+        after: MCPHeldRun,
         diff_ref: str | None,
         changed_files: Sequence[str] | None,
     ) -> tuple[str, ...]:
@@ -747,7 +751,7 @@ class _MCPSessionPatchContractMixin:
     def _patch_changed_files_flexible(
         self,
         *,
-        before: MCPRunRecord,
+        before: MCPHeldRun,
         after_run_id: str | None,
         diff_ref: str | None,
         changed_files: Sequence[str] | None,
@@ -803,8 +807,8 @@ class _MCPSessionPatchContractMixin:
         self,
         after_run_id: str | None,
         *,
-        before: MCPRunRecord,
-    ) -> MCPRunRecord | None:
+        before: MCPHeldRun,
+    ) -> MCPHeldRun | None:
         if after_run_id is None:
             return None
         try:
@@ -892,8 +896,8 @@ class _MCPSessionPatchContractMixin:
     def _matching_run_ids_outcome(
         self,
         *,
-        before: MCPRunRecord,
-        after: MCPRunRecord,
+        before: MCPHeldRun,
+        after: MCPHeldRun,
         intent: IntentRecord | None,
         strictness: StrictnessProfile,
         classification: ClassificationResult,
@@ -977,7 +981,7 @@ class _MCPSessionPatchContractMixin:
         self,
         *,
         intent: IntentRecord | None,
-        after: MCPRunRecord,
+        after: MCPHeldRun,
     ) -> bool:
         """Is the offered after-run a later execution than the intent's own?
 
@@ -1022,7 +1026,7 @@ class _MCPSessionPatchContractMixin:
         self,
         *,
         intent: IntentRecord | None,
-        after: MCPRunRecord,
+        after: MCPHeldRun,
         changed_files: Sequence[str],
     ) -> tuple[str, ...] | None:
         """Unobserved changed paths, or ``None`` when invariance is refused.
@@ -1044,7 +1048,7 @@ class _MCPSessionPatchContractMixin:
 
         if not self._invariance_run_is_fresh(intent=intent, after=after):
             return None
-        before: MCPRunRecord | None = None
+        before: MCPHeldRun | None = None
         if intent is not None and intent.before_execution_id is not None:
             before = _intent_session(self)._optional_intent_bound_run(intent)
             if before is None:
@@ -1069,7 +1073,7 @@ class _MCPSessionPatchContractMixin:
         self,
         *,
         intent: IntentRecord | None,
-        after: MCPRunRecord,
+        after: MCPHeldRun,
         changed_files: Sequence[str],
     ) -> tuple[str, ...] | None:
         """Paths already dirty when the intent was declared, or ``None``.
@@ -1184,7 +1188,7 @@ class _MCPSessionPatchContractMixin:
         self,
         *,
         intent: IntentRecord | None,
-        after: MCPRunRecord,
+        after: MCPHeldRun,
         changed_files: Sequence[str],
     ) -> bool:
         return (
@@ -1575,8 +1579,8 @@ class _MCPSessionPatchContractMixin:
     def _compare_runs_on(
         self,
         *,
-        before: MCPRunRecord,
-        after: MCPRunRecord,
+        before: MCPHeldRun,
+        after: MCPHeldRun,
         before_facts: PatchRun,
         after_facts: PatchRun,
     ) -> dict[str, object]:
@@ -1634,12 +1638,14 @@ class _MCPSessionPatchContractMixin:
 
     def _finding_path_index(
         self,
-        record: MCPRunRecord,
+        record: MCPHeldRun,
     ) -> dict[str, frozenset[str]]:
         finding_session = _finding_session(self)
+        # The findings are the payload's: a run held without it is refused.
+        whole = whole_record(record)
         return self._finding_path_index_for(
-            finding_session._base_findings(record),
-            canonical_to_short=finding_session._finding_id_maps(record)[0],
+            finding_session._base_findings(whole),
+            canonical_to_short=finding_session._finding_id_maps(whole)[0],
         )
 
     def _finding_path_index_for(

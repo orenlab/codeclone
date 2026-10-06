@@ -66,6 +66,7 @@ from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
+    MCPRunPayloadEvictedError,
     MCPRunRecord,
     MCPRunRootMismatchError,
     MCPServiceContractError,
@@ -757,7 +758,8 @@ class _MCPSessionMemoryMixin:
             return None
         try:
             record = self._memory_run_record(root_path, run_id)
-        except MCPServiceContractError:
+        except (MCPServiceContractError, MCPRunPayloadEvictedError):
+            # No run to sync from -- none analysed, or none still held whole.
             return None
         sync_payload = execute_mcp_memory_sync(
             root_path=root_path,
@@ -921,7 +923,7 @@ class _MCPSessionMemoryMixin:
         # root mismatch silently dropped dependents whenever another checkout
         # analyzed more recently.
         try:
-            record = self._runs.get_for_root(None, root=root_path)
+            record = self._runs.held_for_root(None, root=root_path)
         except MCPRunNotFoundError:
             return frozenset()
         try:
@@ -930,7 +932,7 @@ class _MCPSessionMemoryMixin:
                 files=list(scope_paths),
                 depth="direct",
             )
-        except MCPServiceContractError:
+        except (MCPServiceContractError, MCPRunPayloadEvictedError):
             return frozenset()
         return frozenset(result.direct_dependents)
 
