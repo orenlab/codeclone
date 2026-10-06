@@ -1940,33 +1940,37 @@ def _collect_after_publication(store: RunStore) -> GcJobReport:
 
 def release_publication_lease(
     *, config: RunStoreConfig, publication: RunSnapshotPublication
-) -> bool:
+) -> str:
     """End a publisher's in-flight operation: clear its lease root.
 
     Called once the identity bridge has been stated, which is the last thing
-    the publisher does with its run -- and, because ``report`` calls it from
-    ``finally``, also when anything before that point ended the report.
-    From here the run stays exactly as rooted as the store says -- head,
-    history, an operator's retention, a reader's lease -- or it is garbage
-    for the next sweep.
+    the publisher does with its run -- and, because ``report`` also calls it
+    on the way out of a report that raised, when anything before that point
+    ended the report.  From here the run stays exactly as rooted as the
+    store says -- head, history, an operator's retention, a reader's lease
+    -- or it is garbage for the next sweep.
 
-    ``False`` when there is nothing to release (the rollout is off, nothing
-    was stored, the lease was never granted) or when the store refuses the
-    release.  The refusal is contained on purpose: the lease's own deadline
-    dissolves it anyway, and ending an in-flight operation late may not fail
-    the analysis that finished it.  No store is opened when there is nothing
-    to release, so a disabled rollout never touches sqlite from here.
+    Returns the store's refusal, ``"<Type>: <message>"``, and ``""`` when
+    nothing was refused: the lease was cleared, there was nothing to
+    release (the rollout is off, nothing was stored, the lease was never
+    granted), or the grant was already gone.  The refusal is contained on
+    purpose -- the lease's own deadline dissolves it anyway, and ending an
+    in-flight operation late may not fail the analysis that finished it --
+    but it is not silent: ``report`` puts it on the link, whose warning line
+    every surface prints.  No store is opened when there is nothing to
+    release, so a disabled rollout never touches sqlite from here.
     """
 
     if config.path is None or not publication.in_flight_lease:
-        return False
+        return ""
     from ..canonical.store import RunStore, release_run_lease
 
     try:
         with RunStore(config.path, create=False) as store:
-            return release_run_lease(store, publication.in_flight_lease)
-    except Exception:
-        return False
+            release_run_lease(store, publication.in_flight_lease)
+    except Exception as refusal:
+        return f"{type(refusal).__name__}: {refusal}"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -2085,6 +2089,7 @@ def bridge_run_snapshot(
             outcome=publication.outcome,
             store_run_id=publication.run_id,
             analysis_scope_digest=publication.analysis_scope_digest,
+            sweep_refusal=_sweep_refusal(publication),
         )
     recomputed = report_scope_receipt(report_document)
     if not hmac.compare_digest(recomputed, publication.analysis_scope_digest):
@@ -2100,7 +2105,18 @@ def bridge_run_snapshot(
         store_run_id=publication.run_id,
         analysis_scope_digest=publication.analysis_scope_digest,
         report_run_identity=_report_run_identity_or_refuse(report_document),
+        sweep_refusal=_sweep_refusal(publication),
     )
+
+
+def _sweep_refusal(publication: RunSnapshotPublication) -> str:
+    """The reader of the GC owner's receipt: why the sweep that followed this
+    stored publication was refused, or ``""`` when it ran (or nothing was
+    stored, so nothing was swept)."""
+    collection = publication.collection
+    if collection is None or collection.refusal is None:
+        return ""
+    return collection.refusal
 
 
 # ---------------------------------------------------------------------------

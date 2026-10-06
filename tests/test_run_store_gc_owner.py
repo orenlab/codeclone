@@ -532,7 +532,7 @@ def test_the_bridge_is_written_under_the_lease_and_only_then_released(
 
     def release_then_collect(
         *, config: RunStoreConfig, publication: RunSnapshotPublication
-    ) -> bool:
+    ) -> str:
         released = release_publication_lease(config=config, publication=publication)
         with corpus.open() as other:
             linked_at_release.append(_linked_edges(other, publication.run_id))
@@ -571,7 +571,7 @@ def test_an_unreleased_in_flight_lease_dissolves_one_day_after_its_grant(
     with monkeypatch.context() as patch:
         patch.setattr(RunStore, "head", _stale_head)
         patch.setattr(
-            reporting_module, "release_publication_lease", lambda **_kwargs: False
+            reporting_module, "release_publication_lease", lambda **_kwargs: ""
         )
         corpus.publish("a")
     orphan = meters.last_publication().run_id
@@ -732,7 +732,7 @@ def test_the_release_reads_no_store_the_rollout_does_not_name(
     meters: _Meters,
 ) -> None:
     """Handed a leased publication under a rollout that names no store, the
-    release answers ``False`` without constructing one -- the kill switch
+    release refuses nothing (``""``) without constructing one -- the kill switch
     holds for the release as it does for every other store reader."""
     leased = _stored(
         collection=_receipt(candidates=1, held={GC_HOLD_HEAD: 1}),
@@ -741,7 +741,7 @@ def test_the_release_reads_no_store_the_rollout_does_not_name(
     released = release_publication_lease(
         config=RunStoreConfig(enabled=False), publication=leased
     )
-    assert released is False
+    assert released == ""
     assert meters.store_opens == 0
 
 

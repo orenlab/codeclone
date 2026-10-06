@@ -2065,6 +2065,25 @@ RUN_SNAPSHOT_PUBLICATION_FAILED_WARNING: Final = (
 )
 
 
+#: The one line a surface prints for a sweep the publication could not run
+#: to its end -- the GC owner's claim-free refusal receipt
+#: (``RunSnapshotPublication.collection``): the run is stored and every
+#: report is complete; only the collection is postponed.
+RUN_SNAPSHOT_SWEEP_REFUSED_WARNING: Final = (
+    "run store was not swept after this publication: {refusal}; analysis and "
+    "reports are complete; the next publication sweeps again"
+)
+
+#: The one line a surface prints for a publication lease the store refused
+#: to release: the release is contained (the analysis is done), and the
+#: lease's own deadline is the backstop that ends it.
+RUN_SNAPSHOT_LEASE_UNRELEASED_WARNING: Final = (
+    "run store publication lease was not released: {refusal}; analysis and "
+    "reports are complete; an unreleased lease holds its run until the "
+    "lease's deadline"
+)
+
+
 def _require_failure_iff_failed(outcome: str, failure_type: str) -> None:
     """The failure's type rides the ``failed`` outcome and no other."""
     if (outcome == RUN_SNAPSHOT_PUBLICATION_FAILED) != bool(failure_type):
@@ -2083,6 +2102,30 @@ def _run_snapshot_link_warning_lines(refusal: str, failure: str) -> tuple[str, .
     if failure:
         return (RUN_SNAPSHOT_PUBLICATION_FAILED_WARNING.format(failure=failure),)
     return ()
+
+
+def _require_store_steps_on_a_stored_link(
+    stored: bool, sweep_refusal: str, lease_refusal: str
+) -> None:
+    """A sweep and a lease release follow a STORED publication and nothing
+    else, so only a link that names a store run carries their refusals."""
+    if (sweep_refusal or lease_refusal) and not stored:
+        raise ValueError("a sweep or a lease release follows a stored publication only")
+
+
+def _contained_store_step_lines(
+    sweep_refusal: str, lease_refusal: str
+) -> tuple[str, ...]:
+    """One line for each post-publication store step the store refused: the
+    sweep after the write, then the release of the publisher's lease."""
+    lines: list[str] = []
+    if sweep_refusal:
+        lines.append(RUN_SNAPSHOT_SWEEP_REFUSED_WARNING.format(refusal=sweep_refusal))
+    if lease_refusal:
+        lines.append(
+            RUN_SNAPSHOT_LEASE_UNRELEASED_WARNING.format(refusal=lease_refusal)
+        )
+    return tuple(lines)
 
 
 #: Outcome of asking a store which analysis backs one report document.
@@ -2286,12 +2329,22 @@ class RunSnapshotLink:
     #: and on no other (ruling 2026-09-28).  A contained failure that no
     #: surface named was the silence the containment promised not to be.
     failure: str = ""
+    #: The refusal of the sweep that followed this publication, carried over
+    #: from the GC owner's receipt (``RunSnapshotPublication.collection``),
+    #: which no surface read before: present only on a stored link.
+    sweep_refusal: str = ""
+    #: Why the store refused to release the publisher's in-flight lease,
+    #: spelled ``"<Type>: <message>"``: present only on a stored link.
+    lease_refusal: str = ""
 
     def __post_init__(self) -> None:
         if self.state not in RUN_SNAPSHOT_LINK_STATES:
             raise ValueError(f"unknown run snapshot link state: {self.state!r}")
         stored = bool(self.store_run_id)
         evaluated = bool(self.report_run_identity)
+        _require_store_steps_on_a_stored_link(
+            stored, self.sweep_refusal, self.lease_refusal
+        )
         if self.state in RUN_SNAPSHOT_LINK_STATED and not (stored and evaluated):
             raise ValueError(f"a {self.state} bridge carries both addresses")
         _require_refusal_iff_unrecorded(self.state, self.refusal)
@@ -2309,8 +2362,11 @@ class RunSnapshotLink:
     def warnings(self) -> tuple[str, ...]:
         """What a surface says about this relation: the unrecorded state's
         one line, naming the refusal; a failed publication's one line,
-        naming the failure's type; and nothing for every other state."""
-        return _run_snapshot_link_warning_lines(self.refusal, self.failure)
+        naming the failure's type; one line for a refused sweep and one for
+        a refused lease release; and nothing for every other state."""
+        return _run_snapshot_link_warning_lines(
+            self.refusal, self.failure
+        ) + _contained_store_step_lines(self.sweep_refusal, self.lease_refusal)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

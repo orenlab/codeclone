@@ -698,6 +698,7 @@ def report(
             analysis=analysis, body=body, gate=gate_pair
         ),
     )
+    lease = _InFlightLease(run_store_config, publication)
     try:
         if report_document_required(
             boot,
@@ -787,6 +788,9 @@ def report(
             run_snapshot_link = _recorded_run_snapshot_link(
                 run_store_config.path, run_snapshot_link
             )
+        # The bridge was the publisher's last use of its run, so its in-flight
+        # lease ends here, and a release the store refused rides the link.
+        run_snapshot_link = lease.end(run_snapshot_link)
         return ReportArtifacts(
             html=contents["html"],
             json=contents["json"],
@@ -797,12 +801,46 @@ def report(
             run_snapshot_link=run_snapshot_link,
         )
     finally:
-        # The bridge was the publisher's last use of its run, so its in-flight
-        # lease ends here -- and on EVERY way out of this block, because a
-        # render, a seal or a bridge write that raises would otherwise leave
-        # the run rooted for a whole day behind a publisher that is gone.
-        # From now on the run is exactly as rooted as the store says.
-        release_publication_lease(config=run_store_config, publication=publication)
+        # And on EVERY other way out of this block: a render, a seal or a
+        # bridge write that raises would otherwise leave the run rooted for a
+        # whole day behind a publisher that is gone.
+        lease.end_if_open()
+
+
+class _InFlightLease:
+    """The publisher's in-flight lease, ended exactly once per report.
+
+    ``end`` is the normal way out: the bridge is stated and recorded, so
+    from here the run is exactly as rooted as the store says.  The release
+    is contained -- the lease's deadline is the backstop -- and the store's
+    refusal is put on the link, whose one warning line every surface
+    prints, instead of being dropped.  ``end_if_open`` is every other way
+    out: a report that raised still ends the operation, and has no link to
+    put a refusal on.
+    """
+
+    __slots__ = ("_config", "_open", "_publication")
+
+    def __init__(
+        self, config: RunStoreConfig, publication: RunSnapshotPublication
+    ) -> None:
+        self._config = config
+        self._publication = publication
+        self._open = True
+
+    def _release(self) -> str:
+        self._open = False
+        return release_publication_lease(
+            config=self._config, publication=self._publication
+        )
+
+    def end(self, link: RunSnapshotLink) -> RunSnapshotLink:
+        refusal = self._release()
+        return replace(link, lease_refusal=refusal) if refusal else link
+
+    def end_if_open(self) -> None:
+        if self._open:
+            self._release()
 
 
 def _recorded_run_snapshot_link(
