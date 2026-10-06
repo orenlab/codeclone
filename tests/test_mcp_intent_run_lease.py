@@ -364,9 +364,10 @@ def test_a_queued_intent_holds_no_lease_and_promote_takes_one(
     assert [row[0] for row in repo.lease_rows()] == [lease.lease_id]
 
 
-def test_a_retired_intent_keeps_its_lease_and_recover_rebinds_it(
-    repo: _Repo,
-) -> None:
+def _start_and_retire(repo: _Repo) -> tuple[str, RunLeaseState, str]:
+    """Start an intent, then lose its before-run from memory: the intent is
+    retired and keeps its lease.  Returns the intent id, its lease and the
+    run id an unchanged tree analyses to."""
     intent_id = repo.start()
     before = repo.lease(intent_id)
     assert before is not None
@@ -376,23 +377,77 @@ def test_a_retired_intent_keeps_its_lease_and_recover_rebinds_it(
     repo.service._runs.unpin_execution(bound)
     run_id = repo.analyze()
     assert intent_id in repo.service._before_run_evicted_intents
-    # Memory lost the run; the store still holds it, for part two to serve.
-    assert repo.lease(intent_id) == before
-    assert [row[0] for row in repo.lease_rows()] == [before.lease_id]
+    return intent_id, before, run_id
 
+
+def _recover(repo: _Repo, intent_id: str, run_id: str) -> RunLeaseState:
     recovered = repo.service.manage_change_intent(
         action="recover",
         root=str(repo.root),
         run_id=run_id,
         intent_id=intent_id,
     )
-
     assert recovered["action_taken"] == "recovered", recovered
     after = repo.lease(intent_id)
     assert after is not None
     assert after.held
+    return after
+
+
+def test_a_retired_intent_keeps_its_lease_and_recover_rebinds_it(
+    repo: _Repo,
+) -> None:
+    intent_id, before, run_id = _start_and_retire(repo)
+    # Memory lost the run; the store still holds it, for part two to serve.
+    assert repo.lease(intent_id) == before
+    assert [row[0] for row in repo.lease_rows()] == [before.lease_id]
+
+    after = _recover(repo, intent_id, run_id)
+
     assert after.lease_id != before.lease_id
     assert [row[0] for row in repo.lease_rows()] == [after.lease_id]
+
+
+def test_a_rebinding_takes_the_new_lease_before_it_releases_the_old_one(
+    repo: _Repo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recover rebinds a retired intent to the same stored run.  Between the
+    two grants the run must stay rooted: the new lease is in the store when
+    the old one is released, never after."""
+    from codeclone.api.intent_run_lease import acquire_intent_run_lease as acquire
+    from codeclone.api.intent_run_lease import release_intent_run_lease as release
+
+    stored = repo.latest_store_run_id()
+    intent_id, before, run_id = _start_and_retire(repo)
+    # The population holds the case: the rebinding names the same run.
+    assert repo.latest_store_run_id() == stored
+    calls: list[tuple[str, str, list[tuple[str, str, str]]]] = []
+
+    def _acquire(**kwargs: object) -> RunLeaseState:
+        calls.append(("acquire", str(kwargs["lease_id"]), repo.lease_rows()))
+        return acquire(**kwargs)  # type: ignore[arg-type]
+
+    def _release(*, root: Path, state: RunLeaseState) -> None:
+        calls.append(("release", state.lease_id, repo.lease_rows()))
+        release(root=root, state=state)
+
+    mixin = "codeclone.surfaces.mcp._session_run_lease_mixin"
+    monkeypatch.setattr(f"{mixin}.acquire_intent_run_lease", _acquire)
+    monkeypatch.setattr(f"{mixin}.release_intent_run_lease", _release)
+
+    after = _recover(repo, intent_id, run_id)
+
+    assert [(kind, lease_id) for kind, lease_id, _rows in calls] == [
+        ("acquire", after.lease_id),
+        ("release", before.lease_id),
+    ]
+    # At the moment the old grant is released, the new one already roots
+    # the run they both name.
+    released_while = calls[1][2]
+    assert (after.lease_id, RUN_LEASE_KIND, stored) in released_while
+    assert (before.lease_id, RUN_LEASE_KIND, stored) in released_while
+    assert repo.lease_rows() == [(after.lease_id, RUN_LEASE_KIND, stored)]
 
 
 @pytest.mark.parametrize(
