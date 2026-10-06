@@ -10,6 +10,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from codeclone.api.novelty import CLONE_NOVELTY_VALUES
 from codeclone.audit.analysis_completed import (
     ANALYSIS_SOURCE_CLI,
@@ -531,3 +533,36 @@ def test_compact_row_novelty_counters_cover_the_vocabulary() -> None:
     assert stored == counts
     assert compact["findings_total"] == total
     assert sum(stored.values()) == total
+
+
+@pytest.mark.parametrize("delta", [0, 4, -3, None])
+def test_the_cli_row_states_the_documents_health_comparison(delta: int | None) -> None:
+    """Not compared -> null (ruling 2026-10-03), one fact on both rows: the
+    CLI row reads the document's health pair -- the delta beside
+    ``baseline_diff_available`` true, a measured zero included, ``null``
+    beside false -- the figure the MCP row records for the same run.  It
+    used to state ``null`` for a comparison that ran."""
+    payload = analysis_completed_payload_from_report(
+        report_document={
+            "report_schema_version": REPORT_SCHEMA_VERSION,
+            "meta": {"analysis_mode": "full"},
+            "inventory": {},
+            "findings": {"summary": {"total": 0}},
+            "metrics": {
+                "summary": {"health": {"score": 70, "grade": "C", "delta": delta}},
+                "families": {
+                    "health": {
+                        "summary": {
+                            "baseline_diff_available": delta is not None,
+                            "delta": delta,
+                        }
+                    }
+                },
+            },
+        },
+        source=ANALYSIS_SOURCE_CLI,
+        new_func_count=0,
+        new_block_count=0,
+    )
+
+    assert cast(dict[str, object], payload["diff"])["health_delta"] == delta
