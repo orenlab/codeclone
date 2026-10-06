@@ -39,6 +39,12 @@ from ..messages.sections import METRICS_SKIPPED
 MARKDOWN_SCHEMA_VERSION = "1.0"
 _MAX_FINDING_LOCATIONS = 5
 _MAX_METRIC_ITEMS = 10
+#: Metric item fields whose value is repository text -- a module or symbol
+#: name derived from the analysed files -- rather than a measured number or a
+#: category CodeClone chose. Each renders as one owner-made code span.
+_REPOSITORY_TEXT_ITEM_KEYS = frozenset(
+    {"qualname", "evidence_symbol", "source", "target"}
+)
 
 _as_int = as_int
 _as_float = as_float
@@ -71,6 +77,18 @@ def _text(value: object) -> str:
         return "true" if value else "false"
     text = str(value).strip()
     return text or PROJECTION_NONE
+
+
+def _code_text(value: object) -> str:
+    """Repository text as one owner-made code span.
+
+    An absent value keeps the bare absence marker: in a code span it would
+    read as a name the repository chose.
+    """
+
+    if value is None or not str(value).strip():
+        return PROJECTION_NONE
+    return markdown_code(_text(value))
 
 
 def _health_headline(snapshot: Mapping[str, object]) -> str:
@@ -158,7 +176,7 @@ def _append_facts_block(
         return
     lines.append(f"- {title}:")
     lines.extend(
-        f"  - {markdown_code(key)}: {_text(facts[key])}" for key in sorted(facts)
+        f"  - {markdown_code(key)}: {_code_text(facts[key])}" for key in sorted(facts)
     )
 
 
@@ -269,6 +287,10 @@ def _append_suppressed_clone_findings(
         lines.append("")
 
 
+def _metric_item_value(key: str, value: object) -> str:
+    return _code_text(value) if key in _REPOSITORY_TEXT_ITEM_KEYS else _text(value)
+
+
 def _append_metric_items(
     lines: list[str],
     *,
@@ -281,7 +303,11 @@ def _append_metric_items(
         lines.append("")
         return
     for item in metric_rows:
-        parts = [f"{key}={_text(item[key])}" for key in key_order if key in item]
+        parts = [
+            f"{key}={_metric_item_value(key, item[key])}"
+            for key in key_order
+            if key in item
+        ]
         if "relative_path" in item:
             parts.append(_location_text(item))
         lines.append(f"- {'; '.join(parts)}")
@@ -344,7 +370,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             f"- {md_msgs.MD_SOURCE_SCHEMA_LABEL}: "
             f"{_text(payload.get('report_schema_version'))}"
         ),
-        f"- {md_msgs.MD_PROJECT_LABEL}: {_text(meta.get('project_name'))}",
+        f"- {md_msgs.MD_PROJECT_LABEL}: {_code_text(meta.get('project_name'))}",
         f"- {md_msgs.MD_ANALYSIS_MODE_LABEL}: {_text(meta.get('analysis_mode'))}",
         f"- {md_msgs.MD_SCOPE_SOURCE_LABEL}: {_text(meta.get('scope_source'))}",
         (
@@ -504,7 +530,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                 (
                     ("Finding", markdown_code(_text(suggestion.get("finding_id")))),
                     ("Summary", suggestion.get("summary")),
-                    ("Location", suggestion.get("location_label")),
+                    ("Location", _code_text(suggestion.get("location_label"))),
                     ("Effort", action.get("effort")),
                 ),
             )
