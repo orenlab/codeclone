@@ -5,6 +5,8 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
+import contextlib
+import io
 from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +17,7 @@ import pytest
 import codeclone.surfaces.cli.changed_scope as cli_changed_scope
 import codeclone.surfaces.cli.workflow as cli_workflow
 from codeclone.contracts import ExitCode
+from codeclone.contracts.comparison_state import COMPARISON_HEALTH, TERM_SCORE_DELTA
 from codeclone.core._types import AnalysisResult
 from codeclone.models import (
     HealthScore,
@@ -29,6 +32,7 @@ from codeclone.surfaces.cli.patch_verify import (
     validate_strictness,
 )
 from codeclone.surfaces.cli.post_run import DiffContext
+from tests import conftest as corpora
 from tests._report_fixtures import build_test_report_document
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
@@ -140,7 +144,8 @@ def test_patch_verify_accepts_clean_patch_quiet() -> None:
 
     assert exit_code == int(ExitCode.SUCCESS)
     assert printer.text == (
-        "patch-verify: accepted | health=0->0 regressions=0 gates=pass"
+        "patch-verify: accepted | health=0 delta=n/a (not compared) "
+        "regressions=0 gates=pass"
     )
 
 
@@ -150,12 +155,14 @@ def test_patch_verify_accepts_clean_patch_quiet() -> None:
         (
             "ci",
             int(ExitCode.GATING_FAILURE),
-            "patch-verify: violated | health=0->0 regressions=1 gates=FAIL",
+            "patch-verify: violated | health=0 delta=n/a (not compared) "
+            "regressions=1 gates=FAIL",
         ),
         (
             "relaxed",
             int(ExitCode.SUCCESS),
-            "patch-verify: violated | health=0->0 regressions=1 gates=pass",
+            "patch-verify: violated | health=0 delta=n/a (not compared) "
+            "regressions=1 gates=pass",
         ),
     ],
 )
@@ -444,7 +451,8 @@ def test_patch_verify_with_project_metrics_quiet() -> None:
     )
 
     assert exit_code == int(ExitCode.SUCCESS)
-    assert "health=85->85" in printer.text
+    # The context states no health comparison: the score, never "85->85".
+    assert "health=85 delta=n/a (not compared)" in printer.text
     assert "accepted" in printer.text
 
 
@@ -463,7 +471,8 @@ def test_patch_verify_with_project_metrics_verbose() -> None:
     )
 
     assert exit_code == int(ExitCode.SUCCESS)
-    assert "85 → 85 (+0)" in printer.text
+    # The context states no health comparison: never "(+0)".
+    assert "85 · health delta: not compared" in printer.text
 
 
 def _diff_context_with_metrics_diff(
@@ -483,11 +492,12 @@ def _diff_context_with_metrics_diff(
         ),
         coverage_adoption_diff_available=False,
         api_surface_diff_available=False,
+        stated_comparisons={COMPARISON_HEALTH: {TERM_SCORE_DELTA: health_delta}},
     )
 
 
 def test_patch_verify_health_delta_from_metrics_diff() -> None:
-    """Covers _health_delta with a real MetricsDiff object."""
+    """Covers _health_delta: the health comparison the run's state states."""
     printer = _RecordingPrinter()
 
     exit_code = render_patch_verify(
@@ -618,3 +628,146 @@ def test_run_controller_query_returns_none_without_controller_mode(
         baseline_state=cast(Any, _baseline_state()),
     )
     assert result is None
+
+
+# -- the health line: the health comparison the run's state states ---------------
+#
+# Not compared -> null (ruling 2026-10-03): the human line says the ruling's
+# words, never ``(+0)``, and a measured zero stays ``0``.  The state decides;
+# the raw metrics diff beside it carries another number that must never reach
+# the line.
+
+
+def _diff_context_stating(health_delta: int | None) -> DiffContext:
+    return DiffContext(
+        new_func=set(),
+        new_block=set(),
+        new_clones_count=0,
+        clone_novelty_available=True,
+        metrics_diff=MetricsDiff(
+            new_high_risk_functions=(),
+            new_high_coupling_classes=(),
+            new_cycles=(),
+            new_dead_code=(),
+            health_delta=7,
+        ),
+        coverage_adoption_diff_available=False,
+        api_surface_diff_available=False,
+        stated_comparisons=(
+            {}
+            if health_delta is None
+            else {COMPARISON_HEALTH: {TERM_SCORE_DELTA: health_delta}}
+        ),
+    )
+
+
+def _patch_verify_text(health_delta: int | None, *, quiet: bool) -> str:
+    printer = _RecordingPrinter()
+    render_patch_verify(
+        console=printer,
+        args=cast(Any, _args()),
+        strictness="ci",
+        report_document=_report_document(),
+        analysis=_analysis_with_metrics(health=85),
+        diff_context=_diff_context_stating(health_delta),
+        baseline_state=cast(Any, _baseline_state()),
+        quiet=quiet,
+    )
+    return printer.text
+
+
+@pytest.mark.parametrize(
+    ("health_delta", "line"),
+    [
+        pytest.param(None, "85 · health delta: not compared", id="not-compared"),
+        pytest.param(0, "85 → 85 (0)", id="measured-zero"),
+        pytest.param(5, "80 → 85 (+5)", id="rose"),
+        pytest.param(-3, "88 → 85 (-3)", id="fell"),
+    ],
+)
+def test_the_rich_health_line_is_the_states_health_comparison(
+    health_delta: int | None, line: str
+) -> None:
+    text = _patch_verify_text(health_delta, quiet=False)
+    assert line in text
+    assert "(+0)" not in text
+    assert "78 → 85" not in text, "the raw metrics diff reached the line"
+
+
+@pytest.mark.parametrize(
+    ("health_delta", "fragment"),
+    [
+        pytest.param(
+            None, "| health=85 delta=n/a (not compared) regressions=", id="not-compared"
+        ),
+        pytest.param(0, "| health=85->85 regressions=", id="measured-zero"),
+        pytest.param(5, "| health=80->85 regressions=", id="rose"),
+        pytest.param(-3, "| health=88->85 regressions=", id="fell"),
+    ],
+)
+def test_the_compact_health_line_is_the_states_health_comparison(
+    health_delta: int | None, fragment: str
+) -> None:
+    text = _patch_verify_text(health_delta, quiet=True)
+    assert fragment in text
+    assert "78->85" not in text, "the raw metrics diff reached the line"
+
+
+#: The comparison corpus through the real CLI, against the stage-A baseline:
+#: the health line each population prints, rich and compact.  ``compared``
+#: compares health (+4); with dead code and dependencies skipped two of the
+#: lanes health reads were never observed; against a baseline of another
+#: scope every lane is untrusted -- both state no health comparison.
+CLI_HEALTH_LINES: dict[tuple[str, bool], str] = {
+    ("compared", False): "66 → 70 (+4)",
+    ("compared", True): "| health=66->70 regressions=",
+    ("lanes_skipped", False): "82 · health delta: not compared",
+    ("lanes_skipped", True): "| health=82 delta=n/a (not compared) regressions=",
+    ("foreign_scope", False): "70 · health delta: not compared",
+    ("foreign_scope", True): "| health=70 delta=n/a (not compared) regressions=",
+}
+_CLI_FLAGS: dict[str, tuple[str, ...]] = {
+    "compared": ("--api-surface",),
+    "lanes_skipped": ("--api-surface", "--skip-dead-code", "--skip-dependencies"),
+    "foreign_scope": ("--api-surface",),
+}
+
+
+@pytest.fixture(scope="module")
+def cli_patch_verify_text(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[tuple[str, bool], str]:
+    base = tmp_path_factory.mktemp("patch_verify_health").resolve()
+    baseline = corpora._comparison_baseline(base)
+    texts: dict[tuple[str, bool], str] = {}
+    for population, quiet in CLI_HEALTH_LINES:
+        root = base / f"{population}{'-quiet' if quiet else ''}"
+        corpora.materialize_comparison_corpus(root, stage_b=True)
+        if population == "foreign_scope":
+            corpora._rewrite_scope_as_foreign(root)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            corpora._run_codeclone_cli_exit(
+                [
+                    str(root),
+                    "--no-progress",
+                    "--baseline",
+                    str(baseline),
+                    "--patch-verify",
+                    *(("--quiet",) if quiet else ()),
+                    *_CLI_FLAGS[population],
+                ],
+                {},
+            )
+        texts[(population, quiet)] = out.getvalue()
+    return texts
+
+
+@pytest.mark.parametrize(("population", "quiet"), list(CLI_HEALTH_LINES))
+def test_the_cli_patch_verify_health_line_reads_the_runs_state(
+    cli_patch_verify_text: dict[tuple[str, bool], str],
+    population: str,
+    quiet: bool,
+) -> None:
+    text = cli_patch_verify_text[(population, quiet)]
+    assert CLI_HEALTH_LINES[(population, quiet)] in text, text

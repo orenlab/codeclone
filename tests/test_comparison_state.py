@@ -448,7 +448,6 @@ _READS_AROUND_THE_CARRIER: dict[str, int] = {
     "codeclone/core/comparison_snapshot.py": 2,
     "codeclone/report/document/_common.py": 4,
     "codeclone/report/gates/evaluator.py": 13,
-    "codeclone/surfaces/cli/patch_verify.py": 1,
 }
 
 
