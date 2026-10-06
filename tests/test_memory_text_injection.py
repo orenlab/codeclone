@@ -19,15 +19,18 @@ from __future__ import annotations
 
 from dataclasses import replace
 from io import StringIO
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from rich.theme import Theme
 
 from codeclone.surfaces.cli.console import PlainConsole, grid_console_class
 from codeclone.surfaces.cli.memory_render import (
+    render_coverage_report,
     render_draft_candidates,
     render_governance_result,
+    render_init_result,
     render_search_results,
     render_stale_records,
 )
@@ -154,3 +157,45 @@ def test_memory_tables_keep_a_benign_statement() -> None:
 
     output = buffer.getvalue()
     assert output.count("Use `pkg.alpha:fn` for x[0] and y.") == 2
+
+
+def test_memory_tables_keep_a_statement_s_own_line_breaks() -> None:
+    console, buffer = _colour_console()
+    render_search_results(
+        console=console,
+        query="q",
+        records=[{"type": "risk_note", "status": "draft", "statement": "## T\nsecond"}],
+    )
+
+    # Its second line starts a row of its own, not a control picture.
+    assert "␊" not in buffer.getvalue()
+
+
+def test_memory_meta_rows_show_hostile_paths_as_text() -> None:
+    hostile = f"x\\[link=pwn:meta]PWNMETA{_ESC}]8;;pwn:osc8{_ESC}\\M"
+    console, buffer = _colour_console()
+    render_init_result(
+        console=console,
+        dry_run=False,
+        project_id="p",
+        db_path=hostile,
+        analysis_fingerprint=None,
+        stats=None,
+        planned_counts=None,
+    )
+    render_coverage_report(
+        console=console,
+        report=cast(
+            Any,
+            SimpleNamespace(
+                scope_paths_with_memory=0,
+                scope_paths_total=1,
+                scope_coverage_percent=0,
+                uncovered_paths=(hostile,),
+            ),
+        ),
+    )
+    output = buffer.getvalue()
+
+    assert not [marker for marker in _INJECTED if marker in output]
+    assert output.count(display_text(hostile)) == 2
