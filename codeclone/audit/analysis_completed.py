@@ -11,6 +11,11 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .. import __version__
+from ..contracts.comparison_state import (
+    COMPARISON_HEALTH,
+    TERM_SCORE_DELTA,
+    document_comparison_value,
+)
 from ..utils.mapping_paths import sections
 from .events import (
     ANALYSIS_SOURCE_CLI,
@@ -98,6 +103,7 @@ def analysis_completed_payload_from_report(
         inventory_code,
         findings_summary,
         health,
+        health_family,
     ) = sections(
         report_document,
         "meta",
@@ -105,6 +111,7 @@ def analysis_completed_payload_from_report(
         "inventory.code",
         "findings.summary",
         "metrics.summary.health",
+        "metrics.families.health.summary",
     )
     return {
         "source": source,
@@ -143,7 +150,12 @@ def analysis_completed_payload_from_report(
                 if new_func_count is None or new_block_count is None
                 else new_func_count + new_block_count
             ),
-            "health_delta": None,
+            # The document's health pair, read by its one reader: the delta
+            # when the health comparison ran -- the figure the MCP row
+            # records for the same run -- and null when it did not.
+            "health_delta": document_comparison_value(
+                health_family, COMPARISON_HEALTH, TERM_SCORE_DELTA
+            ),
         },
     }
 

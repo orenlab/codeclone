@@ -1241,7 +1241,19 @@ class _MCPSessionPatchContractMixin:
                 "reason": patch_msgs.ANALYZER_INVARIANT_EVIDENCE,
                 "regressions": [],
                 "improvements": [],
-                "health_delta": 0,
+                # One content-addressed run on both sides: the pair's health
+                # delta by the rule ``compare_runs`` states for any pair --
+                # ``0`` between two measured scores, ``None`` when the run
+                # measured none (ruling 2026-10-03, "not compared -> null").
+                "health_delta": _helpers._run_health_delta(
+                    before=before.health(),
+                    after=after.health(),
+                    comparable=bool(
+                        _helpers._comparison_scope(
+                            before=before.record, after=after.record
+                        )["comparable"]
+                    ),
+                ),
             },
             "contract_violations": [],
             "blocking_violations": [],

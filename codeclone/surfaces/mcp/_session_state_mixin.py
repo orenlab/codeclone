@@ -90,7 +90,6 @@ from ._session_shared import (
     MCPRunRecord,
     MCPServiceContractError,
     MetricsDetailFamily,
-    MetricsDiff,
     Namespace,
     OrderedDict,
     Path,
@@ -241,10 +240,8 @@ def compare_runs_on_facts(
         before=before, after=after, focus=validated_focus
     )
     comparable = bool(comparability["comparable"])
-    health_delta = (
-        health_after - health_before
-        if comparable and health_before is not None and health_after is not None
-        else None
+    health_delta = _helpers._run_health_delta(
+        before=health_before, after=health_after, comparable=comparable
     )
     verdict = (
         _helpers._comparison_verdict(
@@ -440,7 +437,7 @@ class _MCPSessionChangedProjectionMixin(_MCPSessionFindingMixin):
             for item in items
             if str(item.get("novelty", "")) == "new"
         )
-        health_delta = _helpers._summary_health_delta(record.summary)
+        health_delta = _helpers._summary_health_delta(record)
         return {
             "run_id": _helpers._short_run_id(record.run_id),
             "changed_paths": list(record.changed_paths),
@@ -756,7 +753,6 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
         #: re-derived from baseline trust: the surface that decided whether to
         #: compare is the only one that knows the answer.
         clone_novelty_available: bool,
-        metrics_diff: MetricsDiff | None,
         warnings: Sequence[str],
         failures: Sequence[str],
     ) -> dict[str, object]:
@@ -842,7 +838,6 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
                     else None
                 ),
             },
-            "metrics_diff": _helpers._metrics_diff_payload(metrics_diff),
             "warnings": list(warnings),
             "failures": list(failures),
         }
@@ -913,7 +908,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             "inventory": _helpers._summary_inventory_payload(inventory),
             "health": _helpers._summary_health_payload(summary),
             "findings": self._summary_findings_payload(summary, record=record),
-            "diff": _helpers._summary_diff_payload(summary),
+            "diff": _helpers._summary_diff_payload(record),
             "warnings": list(_helpers._as_sequence(summary.get("warnings"))),
             "failures": list(_helpers._as_sequence(summary.get("failures"))),
         }
@@ -1628,19 +1623,20 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             )
             resolved = _helpers._dict_rows(compare_payload.get("improvements"))
         gate_result = self._session_gate_result(record.run_id)
+        health_delta = _helpers._summary_health_delta(record)
         verdict = _helpers._changed_verdict(
             changed_projection={
                 "total": len(scoped_items),
                 "new": len(changed_items),
             },
-            health_delta=_helpers._summary_health_delta(record.summary),
+            health_delta=health_delta,
         )
         payload: dict[str, object] = {
             "run_id": _helpers._short_run_id(record.run_id),
             "changed_files": len(paths_filter),
             "findings_scope": findings_scope,
             "health": _helpers._summary_health_payload(record.summary),
-            "health_delta": _helpers._summary_health_delta(record.summary),
+            "health_delta": health_delta,
             "verdict": verdict,
             "new_findings_in_changed_files": changed_items,
             "resolved": resolved,

@@ -28,11 +28,17 @@ not evidence of sameness.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from ..baseline.trust import current_python_tag
+from ..canonical.comparison_projection import (
+    DIFF_DELTA_KEYS,
+    SUMMARY_COMPARISON_FIELDS,
+    SUMMARY_DIFF_BLOCK,
+)
+from ..canonical.comparison_state import document_comparison_state
 from ..contracts import population_universe_observed
 from ..contracts.comparison_state import COMPARISON_TERMS
 from ..core.comparison_state import run_comparison_state
@@ -319,13 +325,46 @@ def stated_comparisons(
     return {name: state.values(name) for name in COMPARISON_TERMS}
 
 
+#: The run summary's ``diff`` block in its key order: the clone comparison,
+#: the health comparison, and the six delta terms -- the order the store's
+#: block is built in (``canonical.serving``).
+SUMMARY_DIFF_KEYS: Final[tuple[str, ...]] = (
+    "new_clones",
+    "health_delta",
+    *DIFF_DELTA_KEYS,
+)
+
+
+def document_summary_diff(
+    document: Mapping[str, object], *, new_clone_groups: object
+) -> dict[str, int | None]:
+    """The run summary's ``diff`` block a sealed report document states,
+    read off the run's normalized comparison state
+    (``canonical.comparison_state.document_comparison_state``, the reading
+    the memory half of ``get_run_summary`` applies): each field the value of
+    the comparison it spells (``SUMMARY_COMPARISON_FIELDS``) when that
+    comparison ran -- a measured zero is ``0`` -- and ``None`` when it did
+    not (ruling 2026-10-03, "not compared -> null").  ``new_clone_groups``
+    is the caller's record of the clone comparison: ``None`` when no clone
+    lane was compared.  Handed through this door to the R4 surfaces, which
+    cannot reach the carrier's ring; a document that states nothing (``{}``)
+    states no comparison."""
+    state = document_comparison_state(document, new_clone_groups=new_clone_groups)
+    return {
+        key: state.value(*SUMMARY_COMPARISON_FIELDS[(SUMMARY_DIFF_BLOCK, key)])
+        for key in SUMMARY_DIFF_KEYS
+    }
+
+
 __all__ = [
     "CLONE_BLOCK_LANE",
     "CLONE_FUNCTION_LANE",
     "CONTEXT_INCOMPATIBLE_REASONS",
+    "SUMMARY_DIFF_KEYS",
     "ComparisonContext",
     "blocking_lanes",
     "build_comparison_context",
+    "document_summary_diff",
     "foreign_interpreter_provenance",
     "lane_is_trusted",
     "lane_opacity_warning",

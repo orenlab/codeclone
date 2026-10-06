@@ -629,7 +629,6 @@ class MCPSession(
             new_func=new_func,
             new_block=new_block,
             clone_novelty_available=clone_novelty_available,
-            metrics_diff=metrics_diff,
             warnings=warnings,
             failures=failures,
         )

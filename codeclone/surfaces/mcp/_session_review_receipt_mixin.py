@@ -635,7 +635,7 @@ class _MCPSessionReviewReceiptMixin:
         return {
             "score": health.get("score"),
             "grade": health.get("grade"),
-            "delta": _helpers._summary_health_delta(record.summary),
+            "delta": _helpers._summary_health_delta(record),
         }
 
 

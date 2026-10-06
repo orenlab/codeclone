@@ -13,6 +13,7 @@ from typing import Final, Literal
 from ...api.execution_event import EXECUTION_PROVENANCE_KEY
 from ...api.finding_groups import suppressed_clone_groups
 from ...contracts import REPORT_SCHEMA_VERSION
+from ...report.messages.comparison import comparison_text
 from ...report.messages.projections import HEALTH_ABSENCE_TEXT, HEALTH_NOT_MEASURED
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
@@ -470,9 +471,9 @@ def _inline_paths(value: object) -> str:
 
 
 def _signed_delta(value: object) -> str:
-    if isinstance(value, int):
-        return f"{value:+d}"
-    return "n/a"
+    """A health delta in the ruling's words (2026-10-03): its signed number
+    -- a measured zero ``0`` -- or ``not compared``."""
+    return comparison_text(value if isinstance(value, int) else None, signed=True)
 
 
 def _receipt_health_text(health: Mapping[str, object]) -> str:

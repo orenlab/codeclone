@@ -44,10 +44,10 @@ graph LR
 ### Analysis Tools
 
 **`analyze_repository(root)`**
-Run a deterministic CodeClone analysis on the repository at `root` and register the result as the latest MCP session run. Returns the `run_id`, a `health` block with `score`, `grade` and per-dimension scores, finding and inventory counts, and baseline and cache state; it writes no report files. Use as the first step in any workflow. The analysis cache is not a per-call option: its location and size limit come from `[tool.codeclone]` in `pyproject.toml`. The MCP writes the cache its own analysis produced only inside CodeClone's service directories (`.codeclone/` in the analysed repository and the per-user cache directory); a cache configured outside them is read and never written.
+Run a deterministic CodeClone analysis on the repository at `root` and register the result as the latest MCP session run. Returns the `run_id`, a `health` block with `score`, `grade` and per-dimension scores, finding and inventory counts, and baseline and cache state; it writes no report files. Its `diff` block and `health.delta` follow the same rule as `get_run_summary` below — a number only for a comparison against the baseline that ran in this run, `null` otherwise — and the `analysis.completed` audit row records the same `diff.new_clones` and `diff.health_delta`; so does the `codeclone://runs/{run_id}/summary` resource. Use as the first step in any workflow. The analysis cache is not a per-call option: its location and size limit come from `[tool.codeclone]` in `pyproject.toml`. The MCP writes the cache its own analysis produced only inside CodeClone's service directories (`.codeclone/` in the analysed repository and the per-user cache directory); a cache configured outside them is read and never written.
 
 **`analyze_changed_paths(root, changed_paths | git_diff_ref)`**
-Analyze only changed files from an explicit `changed_paths` list or a `git_diff_ref` revision (mutually exclusive). Faster than full analysis for PR-style review. Response includes a `next_tool` hint suggesting which inspection tool to use.
+Analyze only changed files from an explicit `changed_paths` list or a `git_diff_ref` revision (mutually exclusive). Faster than full analysis for PR-style review. Response includes a `next_tool` hint suggesting which inspection tool to use. Its `health_delta` (and the `codeclone://runs/{run_id}/changed` resource's) is the health comparison against the baseline: a number only when that comparison ran, `null` otherwise.
 
 ### Inspection Tools
 
@@ -75,7 +75,7 @@ Post-edit pipeline: perform hygiene checks, scope verification, contract validat
 Manage the agent change-intent lifecycle for the current MCP session and the optional workspace registry. Actions: `list_workspace`, `declare`, `get`, `check`, `clear`, `renew`, `promote`, `recover`, `gc_workspace`, `reset_workspace`. Used for queue/promote/recover flows that `start_controlled_change`/`finish_controlled_change` do not expose directly.
 
 **`check_patch_contract(mode, ...)`**
-Pre-edit budget query (`mode="budget"`) or post-edit structural verification (`mode="verify"`). Composes stored runs, gate evaluation, run comparison, and the session-local change intent without running analysis or mutating repository state.
+Pre-edit budget query (`mode="budget"`) or post-edit structural verification (`mode="verify"`). Composes stored runs, gate evaluation, run comparison, and the session-local change intent without running analysis or mutating repository state. `structural_delta.health_delta` is the health delta between the two runs: a number only when both runs measured a health score — `0` on the analyzer-invariant road, where both sides are one content-addressed run — and `null` otherwise.
 
 **`get_blast_radius(files, run_id, root, ...)`**
 Return the deterministic structural risk boundary for changing the given files: direct dependents, clone cohort members, coverage gaps, do-not-touch paths, and review-only context. Derived from the canonical report; no new analysis is performed.
@@ -124,7 +124,7 @@ Return an exact page for a `get_relevant_memory` omitted tail using the digest-b
 ### Audit and Receipt Tools
 
 **`create_review_receipt(...)`**
-Generate a deterministic, auditable review receipt from stored MCP state: report provenance, intent scope, blast radius, reviewed findings, patch-contract status, and human decision points. Markdown or JSON output; does not mutate repository state.
+Generate a deterministic, auditable review receipt from stored MCP state: report provenance, intent scope, blast radius, reviewed findings, patch-contract status, and human decision points. Markdown or JSON output; does not mutate repository state. `health.delta` is the health comparison against the baseline (`null` when it did not run); the markdown prints every health delta as its signed number, a measured zero as `0`, and `not compared` when there is none.
 
 **`get_review_receipt(root, run_id, receipt_digest, ...)`**
 Fetch a durably stored review receipt from the audit trail exactly as it was created. Read-only.
@@ -141,7 +141,7 @@ Validate cited review text against canonical report semantics: catches Security 
 ### Navigation Tools
 
 **`generate_pr_summary(run_id, changed_paths, format)`**
-Generate a PR-friendly CodeClone summary. `format` defaults to `markdown`, which produces LLM-facing compact output; `format="json"` is for machine post-processing.
+Generate a PR-friendly CodeClone summary. `format` defaults to `markdown`, which produces LLM-facing compact output; `format="json"` is for machine post-processing. The JSON `health_delta` is the health comparison against the baseline — a number only when it ran, `null` otherwise — and the markdown heading says `Delta: n/a (not compared)` for `null`, never `+0`; a measured zero is `Delta: 0`.
 
 **`compare_runs(before_run_id, after_run_id, ...)`**
 Compare two runs by finding groups and health deltas. Returns incomparable when repository roots or settings differ.

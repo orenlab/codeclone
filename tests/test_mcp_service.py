@@ -71,7 +71,7 @@ from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
 )
 from codeclone.contracts.errors import BaselineValidationError
-from codeclone.models import ApiBreakingChange, FileStat, LaneTrust, MetricsDiff
+from codeclone.models import FileStat, LaneTrust, MetricsDiff
 from codeclone.surfaces.mcp._run_store_serving import memory_slices
 from codeclone.surfaces.mcp._session_shared import (
     ExecutionEvent,
@@ -5506,74 +5506,46 @@ def test_mcp_service_root_and_helper_contract_errors(
         mcp_helpers_mod._report_digest({})
 
 
-def test_mcp_run_summary_diff_counts_compatible_changes_beside_breaking_ones() -> None:
+def test_mcp_run_summary_diff_counts_compatible_changes_beside_breaking_ones(
+    tmp_path: Path,
+) -> None:
     """``get_run_summary``'s diff carries both counts and never folds them.
 
     One breaking and two compatible changes: distinct numbers, so a surface
-    that summed them or printed one in the other's place reds.
+    that summed them or printed one in the other's place reds.  The block is
+    read off the run's normalized comparison state, which reads the
+    document's API pair.
     """
 
-    def change(
-        name: str, kind: Literal["removed", "signature_changed"]
-    ) -> ApiBreakingChange:
-        return ApiBreakingChange(
-            qualname=f"pkg.mod:{name}",
-            filepath="pkg/mod.py",
-            start_line=1,
-            end_line=1,
-            symbol_kind="function",
-            change_kind=kind,
-            detail=name,
-        )
-
-    metrics_diff = mcp_helpers_mod._metrics_diff_payload(
-        MetricsDiff(
-            new_high_risk_functions=(),
-            new_high_coupling_classes=(),
-            new_cycles=(),
-            new_dead_code=(),
-            health_delta=0,
-            new_api_breaking_changes=(change("gone", "removed"),),
-            new_api_signature_changes=(
-                change("grown", "signature_changed"),
-                change("widened", "signature_changed"),
-            ),
-        )
+    record = replace(
+        _dummy_run_record(tmp_path, "api-counts"),
+        served_report=build_served_projection(
+            {
+                "metrics": {
+                    "families": {
+                        "api_surface": {
+                            "summary": {
+                                "baseline_diff_available": True,
+                                "breaking": 1,
+                                "changed": 2,
+                                "added": 3,
+                            }
+                        }
+                    }
+                }
+            }
+        ),
     )
-    assert metrics_diff is not None
-    diff = mcp_helpers_mod._summary_diff_payload({"metrics_diff": metrics_diff})
-    assert (diff["api_breaking_changes"], diff["api_signature_changes"]) == (1, 2)
+    diff = mcp_helpers_mod._summary_diff_payload(record)
+    assert (
+        diff["api_breaking_changes"],
+        diff["api_signature_changes"],
+        diff["new_api_symbols"],
+    ) == (1, 2, 3)
 
 
 def test_mcp_service_helper_filters_and_metrics_payload() -> None:
     service = CodeCloneMCPService(history_limit=4)
-
-    payload = mcp_helpers_mod._metrics_diff_payload(
-        MetricsDiff(
-            new_high_risk_functions=("pkg.a:f",),
-            new_high_coupling_classes=("pkg.a:C",),
-            new_cycles=(("pkg.a", "pkg.b"),),
-            new_dead_code=("pkg.a:unused",),
-            health_delta=-3,
-            new_import_cycles=(("pkg.a", "pkg.b"),),
-        )
-    )
-    assert payload == {
-        "new_high_risk_functions": 1,
-        "new_high_coupling_classes": 1,
-        "new_cycles": 1,
-        "new_import_cycles": 1,
-        "new_deferred_cycles": 0,
-        "new_dead_code": 1,
-        "health_delta": -3,
-        "typing_param_permille_delta": 0,
-        "typing_return_permille_delta": 0,
-        "docstring_permille_delta": 0,
-        "new_api_symbols": 0,
-        "api_breaking_changes": 0,
-        "api_signature_changes": 0,
-    }
-    assert mcp_helpers_mod._metrics_diff_payload(None) is None
 
     finding = {
         "family": "clone",
@@ -9681,7 +9653,9 @@ def test_mcp_service_create_review_receipt_full_post_edit_workflow(
     assert patch["baseline_abuse_detected"] is True
     assert decisions[0]["category"] == "clone_divergence"
     assert claims[0]["claim_type"] == "security_vulnerability"
-    assert health == {"score": 70, "grade": "B", "delta": 0}
+    # The seeded document states no health comparison: no number, never 0
+    # (ruling 2026-10-03, "not compared -> null").
+    assert health == {"score": 70, "grade": "B", "delta": None}
     assert receipt["verdict"] == "needs_attention"
 
     markdown = service.create_review_receipt(
@@ -11213,7 +11187,10 @@ def test_mcp_service_metrics_diff_warning_and_projection_branches(
         )
     )
     diff = cast("dict[str, object]", summary["diff"])
-    assert diff["health_delta"] == -1
+    # The faked metrics baseline diffs against no trusted lane: the run's
+    # comparison state states no health comparison, so the raw -1 never
+    # reaches the answer -- the answer get_run_summary gives for the run.
+    assert diff["health_delta"] is None
     assert "cache warning" in cast("list[str]", summary["warnings"])
 
 
@@ -12285,15 +12262,13 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
     assert (
         mcp_helpers_mod._summary_health_score({"analysis_mode": "clones_only"}) is None
     )
-    assert (
-        mcp_helpers_mod._summary_health_delta(
-            {
-                "analysis_mode": "clones_only",
-                "metrics_diff": {"health_delta": 7},
-            }
-        )
-        is None
+    # A raw delta the record carries beside a document that states no health
+    # comparison never reaches the answer: the state alone decides.
+    clones_only_delta = _dummy_run_record(tmp_path, "clones-only-delta")
+    clones_only_delta.summary.update(
+        {"analysis_mode": "clones_only", "metrics_diff": {"health_delta": 7}}
     )
+    assert mcp_helpers_mod._summary_health_delta(clones_only_delta) is None
     clones_only_record = _dummy_run_record(tmp_path, "clones-only-security")
     clones_only_record.summary["analysis_mode"] = "clones_only"
     assert mcp_helpers_mod._summary_security_surfaces_payload(clones_only_record) == {

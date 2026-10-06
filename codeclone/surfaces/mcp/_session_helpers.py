@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from ...api.comparison import foreign_interpreter_provenance
+from ...api.comparison import document_summary_diff, foreign_interpreter_provenance
 from ...api.workspace import is_codeclone_service_path
 from ...cache.store import Cache
 from ...contracts import REPORT_RUN_IDENTITY_TIER, REPORT_SCHEMA_VERSION
@@ -33,7 +33,7 @@ from ...domain.source_scope import (
     SOURCE_KIND_ORDER,
     SOURCE_KIND_OTHER,
 )
-from ...models import MetricsDiff
+from ...report.messages.comparison import comparison_text_compact
 from ...report.messages.projections import HEALTH_ABSENCE_TEXT, HEALTH_NOT_MEASURED
 from ...utils import coerce as _coerce
 from ...utils.lane_selection import api_surface_collection_enabled
@@ -79,7 +79,6 @@ from ._session_shared import (
     _disambiguated_short_finding_id_payload,
     _leaf_symbol_name_payload,
     _suggestion_finding_id_payload,
-    _summarize_metrics_diff,
 )
 from .messages import remediation as remediation_msgs
 from .messages.facts import (
@@ -173,13 +172,45 @@ def _summary_health_score(summary: Mapping[str, object]) -> int | None:
     return _as_int(health.get("score", 0), 0)
 
 
-def _summary_health_delta(summary: Mapping[str, object]) -> int | None:
-    if _summary_health_payload(summary).get("available") is False:
+def _summary_diff_payload(record: MCPRunRecord | None) -> dict[str, object]:
+    """The run summary's ``diff`` block one run record states (ruling
+    2026-10-03, "not compared -> null"): read off the run's normalized
+    comparison state -- the sealed document the record serves, and the clone
+    comparison off the record's own account of it (``None`` new-clone
+    counts: no clone lane was compared) -- the reading ``get_run_summary``
+    answers by.  Every MCP answer that states a comparison against the
+    baseline states it off this block: its value when the comparison ran, a
+    measured zero included, and ``None`` when it did not; no answer decides
+    again.  Without a record there is no document, and no comparison is
+    stated."""
+    if record is None:
+        return dict(document_summary_diff({}, new_clone_groups=None))
+    baseline_diff = _as_mapping(record.summary.get("baseline_diff"))
+    return dict(
+        document_summary_diff(
+            record.served_report,
+            new_clone_groups=baseline_diff.get("new_clone_groups_total"),
+        )
+    )
+
+
+def _summary_health_delta(record: MCPRunRecord) -> int | None:
+    """The health comparison against the baseline: the delta when it ran,
+    ``None`` when it did not (no trusted baseline, a health lane untrusted or
+    skipped, a withheld or absent verdict)."""
+    delta = _summary_diff_payload(record)["health_delta"]
+    return delta if isinstance(delta, int) else None
+
+
+def _run_health_delta(
+    *, before: int | None, after: int | None, comparable: bool
+) -> int | None:
+    """The health delta between two runs: a number only when the pair is
+    comparable and both runs measured a score, ``None`` otherwise -- a run
+    that measured no score is not a score of ``0``."""
+    if not comparable or before is None or after is None:
         return None
-    if _summary_health_score(summary) is None:
-        return None
-    metrics_diff = _as_mapping(summary.get("metrics_diff"))
-    return _as_int(metrics_diff.get("health_delta", 0), 0)
+    return after - before
 
 
 def _severity_rank(severity: str) -> int:
@@ -1014,48 +1045,6 @@ def _summary_inventory_payload(inventory: Mapping[str, object]) -> dict[str, obj
     return payload
 
 
-def _summary_diff_payload(summary: Mapping[str, object]) -> dict[str, object]:
-    baseline_diff = _as_mapping(summary.get("baseline_diff"))
-    metrics_diff = _as_mapping(summary.get("metrics_diff"))
-    new_clone_groups_total = baseline_diff.get("new_clone_groups_total", 0)
-    return {
-        # Carry the "not compared" state through rather than coercing it to a
-        # zero the run never measured.
-        "new_clones": (
-            None
-            if new_clone_groups_total is None
-            else _as_int(new_clone_groups_total, 0)
-        ),
-        "health_delta": (
-            _as_int(metrics_diff.get("health_delta", 0), 0)
-            if (
-                metrics_diff
-                and _summary_health_payload(summary).get("available") is not False
-            )
-            else None
-        ),
-        "typing_param_permille_delta": _as_int(
-            metrics_diff.get("typing_param_permille_delta", 0),
-            0,
-        ),
-        "typing_return_permille_delta": _as_int(
-            metrics_diff.get("typing_return_permille_delta", 0),
-            0,
-        ),
-        "docstring_permille_delta": _as_int(
-            metrics_diff.get("docstring_permille_delta", 0),
-            0,
-        ),
-        "api_breaking_changes": _as_int(metrics_diff.get("api_breaking_changes", 0), 0),
-        # Compatible signature changes, reported beside the breaking count and
-        # never part of it.
-        "api_signature_changes": _as_int(
-            metrics_diff.get("api_signature_changes", 0), 0
-        ),
-        "new_api_symbols": _as_int(metrics_diff.get("new_api_symbols", 0), 0),
-    }
-
-
 def _summary_coverage_join_payload(record: MCPRunRecord) -> dict[str, object]:
     metrics = _as_mapping(record.served_report.get("metrics"))
     families = _as_mapping(metrics.get("families"))
@@ -1124,11 +1113,6 @@ def _compact_metrics_item(item: Mapping[str, object]) -> dict[str, object]:
     return compact
 
 
-def _metrics_diff_payload(metrics_diff: MetricsDiff | None) -> dict[str, object] | None:
-    payload = _summarize_metrics_diff(metrics_diff)
-    return dict(payload) if payload is not None else None
-
-
 def _schema_resource_payload() -> dict[str, object]:
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1176,7 +1160,7 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
     health = _as_mapping(payload.get("health"))
     score = health.get("score", "n/a")
     grade = health.get("grade", "n/a")
-    delta = _as_int(payload.get("health_delta", 0), 0)
+    delta = payload.get("health_delta")
     changed_items = [
         _as_mapping(item)
         for item in _as_sequence(payload.get("new_findings_in_changed_files"))
@@ -1189,7 +1173,11 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
         for item in _as_sequence(gate_evaluation.get("blocking_gates"))
         if str(item)
     ]
-    delta_text = f"{delta:+d}" if payload.get("health_delta") is not None else "n/a"
+    # The ruling's compact words (2026-10-03): ``Delta: n/a (not compared)``
+    # when the health comparison did not run, a measured zero ``0``.
+    delta_text = comparison_text_compact(
+        delta if isinstance(delta, int) else None, signed=True
+    )
     # This heading goes into someone else's pull request. "None/100 (None)"
     # is what an unread run used to publish there; the score is absent, so
     # the line says that instead of printing the repr of nothing — and says
