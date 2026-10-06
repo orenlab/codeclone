@@ -32,6 +32,7 @@ from ..models import (
     GitWorkspaceSnapshot,
 )
 from ..observability import record_counter, span
+from ..utils import git_process
 
 
 def _normalize_path(path: str) -> str:
@@ -63,14 +64,7 @@ def _git_subprocess_span(args: Sequence[str]) -> AbstractContextManager[object]:
 def _run_git_text(root: Path, args: Sequence[str], *, timeout: int) -> str | None:
     with _git_subprocess_span(args):
         try:
-            completed = subprocess.run(
-                ["git", *args],
-                cwd=root,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            completed = git_process.run_git_text(root, args, timeout=timeout)
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return None
         return completed.stdout
@@ -84,13 +78,8 @@ def _run_git_bytes(
     input_bytes: bytes | None = None,
 ) -> bytes | None:
     try:
-        completed = subprocess.run(
-            ["git", *args],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            input=input_bytes,
-            timeout=timeout,
+        completed = git_process.run_git_bytes(
+            root, args, timeout=timeout, input_bytes=input_bytes
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
@@ -136,13 +125,7 @@ def _run_git_bytes_or_reason(
     """
     with _git_subprocess_span(args):
         try:
-            completed = subprocess.run(
-                ["git", *args],
-                cwd=root,
-                check=True,
-                capture_output=True,
-                timeout=timeout,
-            )
+            completed = git_process.run_git_bytes(root, args, timeout=timeout)
         except OSError:
             return None, "os_error"
         except subprocess.CalledProcessError:

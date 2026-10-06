@@ -15,6 +15,7 @@ from ..baseline.trust import current_python_tag
 from ..config.memory import MemoryConfig, resolve_memory_config
 from ..paths.module_identity.projection import module_path_under_root
 from ..report.meta import current_report_timestamp_utc
+from ..utils import git_process
 from ..utils.mapping_paths import section
 from ..utils.repo_identity import resolve_repository_anchor_root
 from ..utils.repo_paths import (
@@ -203,14 +204,7 @@ def code_fingerprint_for_memory_subject(
 
 def _git_output_optional(root_path: Path, args: list[str]) -> str | None:
     try:
-        completed = subprocess.run(
-            ["git", *args],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5.0,
-        )
+        completed = git_process.run_git_text(root_path, args, timeout=5.0)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
     text = completed.stdout.strip()

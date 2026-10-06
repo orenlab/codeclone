@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..utils import git_process
 from ..utils.coerce import as_mapping, as_sequence
 
 
@@ -78,13 +79,8 @@ def cached_report_untrusted_reason(
 
 def _git_head_commit(root_path: Path) -> str | None:
     try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5.0,
+        completed = git_process.run_git_text(
+            root_path, ["rev-parse", "HEAD"], timeout=5.0
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
@@ -110,13 +106,8 @@ def assess_cached_report_trust(
 
 def _git_tracked_py_paths(root_path: Path) -> set[str] | None:
     try:
-        completed = subprocess.run(
-            ["git", "ls-files", "--", "*.py"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30.0,
+        completed = git_process.run_git_text(
+            root_path, ["ls-files", "--", "*.py"], timeout=30.0
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
@@ -129,13 +120,8 @@ def _git_tracked_py_paths(root_path: Path) -> set[str] | None:
 
 def _git_head_commit_unix(root_path: Path) -> int | None:
     try:
-        completed = subprocess.run(
-            ["git", "log", "-1", "--format=%ct", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5.0,
+        completed = git_process.run_git_text(
+            root_path, ["log", "-1", "--format=%ct", "HEAD"], timeout=5.0
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None

@@ -126,6 +126,7 @@ from ...report.gates.evaluator import MetricGateConfig
 from ...report.gates.evaluator import evaluate_gate_state as _evaluate_gate_state
 from ...report.gates.evaluator import evaluate_gates as _evaluate_report_gates
 from ...report.gates.evaluator import summarize_metrics_diff as _summarize_metrics_diff
+from ...utils import git_process
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.git_diff import validate_git_diff_ref
@@ -562,13 +563,8 @@ def _git_diff_lines_payload(
     except ValueError as exc:
         raise MCPGitDiffError(str(exc)) from exc
     try:
-        completed = subprocess.run(
-            ["git", "diff", "--name-only", validated_ref, "--"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
+        completed = git_process.run_git_text(
+            root_path, ["diff", "--name-only", validated_ref, "--"], timeout=30
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise MCPGitDiffError(

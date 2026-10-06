@@ -17,6 +17,7 @@ import orjson
 
 from ...config.memory import IngestConfig
 from ...report.meta import current_report_timestamp_utc
+from ...utils import git_process
 from ...utils.coerce import as_mapping, as_sequence
 from ...utils.mapping_paths import section
 from ..display import format_document_link_statement
@@ -888,18 +889,9 @@ def extract_git_hotspots(
     if not git.available:
         return batch
     try:
-        completed = subprocess.run(
-            [
-                "git",
-                "log",
-                f"--since={period_days}.days",
-                "--name-only",
-                "--pretty=format:",
-            ],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
+        completed = git_process.run_git_text(
+            root_path,
+            ["log", f"--since={period_days}.days", "--name-only", "--pretty=format:"],
             timeout=30.0,
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
