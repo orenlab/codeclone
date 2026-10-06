@@ -327,10 +327,23 @@ def _build_catalog() -> dict[str, str]:
         ),
         "fmt_patch_verify_compact": ui.fmt_patch_verify_compact(
             status="accepted",
-            health_before=81,
             health_after=92,
+            health_delta=11,
             regressions=0,
             gate_status="pass",
+        ),
+        "fmt_patch_verify_compact_not_compared": ui.fmt_patch_verify_compact(
+            status="accepted",
+            health_after=92,
+            health_delta=None,
+            regressions=0,
+            gate_status="pass",
+        ),
+        "fmt_patch_verify_health": ui.fmt_patch_verify_health(
+            health_after=92, health_delta=11
+        ),
+        "fmt_patch_verify_health_not_compared": ui.fmt_patch_verify_health(
+            health_after=92, health_delta=None
         ),
         "fmt_contract_error": ui.fmt_contract_error(
             ui.ERR_ROOT_NOT_FOUND.format(path="/tmp/project/missing")

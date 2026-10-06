@@ -177,7 +177,7 @@ which lane:
 | Condition | Behaviour |
 |-----------|-----------|
 | No untrusted lanes | Unchanged; the baseline is fully trusted |
-| Untrusted lane that **no** active gate reads | Run completes. The lane is named on stdout as opaque and its comparisons report `baseline_diff_available: false` beside `null` deltas in the JSON report; the summary prints `not compared` (compact: `n/a (not compared)`) instead of a count |
+| Untrusted lane that **no** active gate reads | Run completes. The lane is named on stdout as opaque and its comparisons report `baseline_diff_available: false` beside `null` deltas in the JSON report; the summary prints `not compared` (compact: `n/a (not compared)`) instead of a count, and `--patch-verify` prints its health line as `<score> · health delta: not compared` (compact: `health=<score> delta=n/a (not compared)`) instead of `before → after (+0)` |
 | Untrusted lane that an active gate **does** read | Contract error, exit code 2, fail-closed |
 
 Novelty for an opaque lane is reported as unavailable, never as zero: a

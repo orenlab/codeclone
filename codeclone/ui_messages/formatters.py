@@ -20,7 +20,11 @@ from typing import TYPE_CHECKING, Final, Literal
 from .. import __version__
 from ..contracts import ISSUES_URL
 from ..contracts.errors import DiagnosedUserError
-from ..report.messages.comparison import NOT_COMPARED, comparison_text_compact
+from ..report.messages.comparison import (
+    NOT_COMPARED,
+    comparison_text,
+    comparison_text_compact,
+)
 from .labels import (
     CLI_LAYOUT_MAX_WIDTH,
     SUMMARY_COMPACT,
@@ -106,6 +110,7 @@ from .runtime import (
 from .styling import (
     _HEALTH_GRADE_STYLE,
     _L,
+    GLYPH_ARROW,
     GLYPH_FAIL,
     GLYPH_OK,
     GLYPH_SEP,
@@ -987,18 +992,41 @@ def fmt_blast_radius_compact(
     )
 
 
+def fmt_patch_verify_health(*, health_after: int, health_delta: int | None) -> str:
+    """The patch-verify health value: ``before → after (delta)`` when the
+    health comparison ran -- a measured zero is ``(0)``, never ``(+0)`` --
+    and otherwise the score and the ruling's words (2026-10-03, "not
+    compared -> null"), never a delta the run did not measure."""
+    if health_delta is None:
+        return f"{health_after} {GLYPH_SEP} health delta: {NOT_COMPARED}"
+    delta = comparison_text(health_delta, signed=True)
+    return f"{health_after - health_delta} {GLYPH_ARROW} {health_after} ({delta})"
+
+
+def _patch_verify_compact_health(*, health_after: int, health_delta: int | None) -> str:
+    """The compact ``health=`` term: ``before->after`` when the health
+    comparison ran, else the score and ``delta=n/a (not compared)``."""
+    return (
+        f"{health_after} delta={comparison_text_compact(None)}"
+        if health_delta is None
+        else f"{health_after - health_delta}->{health_after}"
+    )
+
+
 def fmt_patch_verify_compact(
     *,
     status: str,
-    health_before: int,
     health_after: int,
+    health_delta: int | None,
     regressions: int,
     gate_status: str,
 ) -> str:
+    """The compact patch-verify line (:func:`_patch_verify_compact_health`)."""
     return SUMMARY_COMPACT_PATCH_VERIFY.format(
         status=status,
-        health_before=health_before,
-        health_after=health_after,
+        health=_patch_verify_compact_health(
+            health_after=health_after, health_delta=health_delta
+        ),
         regressions=regressions,
         gate_status=gate_status,
     )

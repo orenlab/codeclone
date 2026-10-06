@@ -15,6 +15,7 @@ from ...budget.patch_contract import (
     budgets_for_strictness,
 )
 from ...contracts import ExitCode
+from ...contracts.comparison_state import COMPARISON_HEALTH, TERM_SCORE_DELTA
 from ...core._types import AnalysisResult
 from ...report.gates.evaluator import GateResult, MetricGateConfig
 from ...ui_messages.styling import _L
@@ -55,10 +56,12 @@ def _health_after(analysis: AnalysisResult) -> int:
     return max(int(metrics.health.total), 0)
 
 
-def _health_delta(metrics_diff: object | None) -> int:
-    if metrics_diff is None:
-        return 0
-    return _as_int(getattr(metrics_diff, "health_delta", 0), 0)
+def _health_delta(diff_context: DiffContext) -> int | None:
+    """The health comparison the run states (its normalized comparison
+    state, ``DiffContext.stated_comparisons``): the delta when it ran,
+    ``None`` when it did not -- never a zero the run did not measure."""
+    stated = diff_context.stated_comparisons.get(COMPARISON_HEALTH)
+    return None if stated is None else stated[TERM_SCORE_DELTA]
 
 
 def patch_gate_config(
@@ -193,15 +196,15 @@ def render_patch_verify(
         else int(ExitCode.SUCCESS)
     )
     health_after = _health_after(analysis)
-    health_before = health_after - _health_delta(diff_context.metrics_diff)
+    health_delta = _health_delta(diff_context)
     gate_status = _gate_status(gate_result)
 
     if quiet:
         console.print(
             ui.fmt_patch_verify_compact(
                 status=status,
-                health_before=health_before,
                 health_after=health_after,
+                health_delta=health_delta,
                 regressions=diff_context.new_clones_count,
                 gate_status=gate_status,
             )
@@ -216,11 +219,10 @@ def render_patch_verify(
     )
     console.print(f"  {ui.PATCH_VERIFY_LABEL_STRICTNESS:<{_L}}{validated_strictness}")
     console.print(f"  {ui.PATCH_VERIFY_LABEL_STATUS:<{_L}}{_status_text(status)}")
-    console.print(
-        f"  {ui.PATCH_VERIFY_LABEL_HEALTH:<{_L}}"
-        f"{health_before} {ui.GLYPH_ARROW} {health_after} "
-        f"({health_after - health_before:+d})"
+    health_text = ui.fmt_patch_verify_health(
+        health_after=health_after, health_delta=health_delta
     )
+    console.print(f"  {ui.PATCH_VERIFY_LABEL_HEALTH:<{_L}}{health_text}")
     console.print(
         f"  {ui.PATCH_VERIFY_LABEL_REGRESSIONS:<{_L}}"
         f"{ui.n_of(diff_context.new_clones_count, 'new clone group')}"

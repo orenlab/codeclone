@@ -59,6 +59,6 @@ SUMMARY_COMPACT_BLAST_RADIUS = (
     "cycles={cycles} do-not-touch={do_not_touch}"
 )
 SUMMARY_COMPACT_PATCH_VERIFY = (
-    "patch-verify: {status} | health={health_before}->{health_after} "
+    "patch-verify: {status} | health={health} "
     "regressions={regressions} gates={gate_status}"
 )
