@@ -15,6 +15,7 @@ from ...memory.display import format_memory_record_line
 from ...memory.models import MemoryRecord
 from ...memory.status_report import MemoryStatusReport
 from ...memory.vacuum import VacuumReport
+from ...utils.display_text import display_text
 from ...utils.payload_narrow import is_record_mapping
 from .console import make_query_console, rich_panel_symbols, supports_rich_console
 from .types import PrinterLike
@@ -80,7 +81,7 @@ def render_search_results(
             row_builder=_search_row,
         )
         return
-    console.print(f"Engineering Memory search: {query!r}")
+    console.print(f"Engineering Memory search: {ui.esc(repr(query))}")
     _print_record_lines(console, records)
 
 
@@ -109,7 +110,7 @@ def render_path_results(
             row_builder=_search_row,
         )
         return
-    console.print(f"Engineering Memory for path: {rel_path}")
+    console.print(f"Engineering Memory for path: {ui.esc(rel_path)}")
     _print_record_lines(console, [_record_mapping(record) for record in records])
 
 
@@ -194,8 +195,8 @@ def render_stale_records(
         return
     for item in records:
         reason = item.get("stale_reason", "")
-        line = format_memory_record_line(item)
-        console.print(f"  - [{item.get('type')}] {line} ({reason})")
+        line = ui.esc(format_memory_record_line(item), multiline=True)
+        console.print(f"  - [{item.get('type')}] {line} ({ui.esc(reason)})")
 
 
 def render_vacuum_report(*, console: PrinterLike, report: VacuumReport) -> None:
@@ -220,7 +221,7 @@ def render_coverage_report(
     if report.uncovered_paths:
         console.print("  uncovered:")
         for path in report.uncovered_paths:
-            console.print(f"    - {path}")
+            console.print(f"    - {ui.esc(path)}")
 
 
 def render_draft_candidates(
@@ -250,7 +251,8 @@ def render_draft_candidates(
         console.print("  (none)")
         return
     for record in records:
-        console.print(f"  - {record.id} [{record.type}] {record.statement}")
+        statement = ui.esc(record.statement, multiline=True)
+        console.print(f"  - {record.id} [{record.type}] {statement}")
 
 
 def render_governance_result(
@@ -266,7 +268,7 @@ def render_governance_result(
         style = ui.STYLE_VERDICT_PASS if action == "approved" else ui.STYLE_VERDICT_WARN
         console.print(
             panel_cls(
-                text_cls(message, style=style),
+                text_cls(display_text(message, multiline=True), style=style),
                 border_style=style,
                 padding=(0, 1),
             )
@@ -323,32 +325,44 @@ def _search_row(
         str(index),
         record_type,
         text_cls(status, style=_status_style(status)),
-        format_memory_record_line(mapping),
+        _inert(text_cls, format_memory_record_line(mapping)),
     )
 
 
 def _stale_row(
     index: int,
     item: object,
-    _text_cls: type[RichText],
+    text_cls: type[RichText],
 ) -> Sequence[object]:
     mapping: Mapping[str, object] = item if is_record_mapping(item) else {}
     return (
         str(index),
         str(mapping.get("type", "?")),
-        str(mapping.get("stale_reason", "")),
-        format_memory_record_line(mapping),
+        _inert(text_cls, mapping.get("stale_reason", "")),
+        _inert(text_cls, format_memory_record_line(mapping)),
     )
 
 
 def _draft_row(
     index: int,
     item: object,
-    _text_cls: type[RichText],
+    text_cls: type[RichText],
 ) -> Sequence[object]:
     if not isinstance(item, MemoryRecord):
         return (str(index), "?", "?", "")
-    return (str(index), item.id, item.type, item.statement)
+    return (str(index), item.id, item.type, _inert(text_cls, item.statement))
+
+
+def _inert(text_cls: type[RichText], value: object) -> RichText:
+    """A table cell of repository or agent text: never markup, controls shown.
+
+    A ``str`` cell is Rich markup, so a statement's ``[link=...]`` or
+    ``[conceal]`` would become a link or hidden text on the very screen a
+    reviewer approves it from. A ``Text`` cell is text; the owner's control
+    filter keeps the statement's own lines and shows every escape sequence.
+    """
+
+    return text_cls(display_text(value, multiline=True))
 
 
 def _render_status_report_rich(
@@ -367,7 +381,7 @@ def _render_status_report_rich(
     meta.add_column(style="dim", no_wrap=True)
     meta.add_column()
     for label, value in _status_rows(report):
-        meta.add_row(label, value)
+        meta.add_row(label, _inert(text_cls, value))
     console.print(meta)
     unusable = _memory_store_unusable_line(report)
     if unusable is not None:
@@ -411,9 +425,9 @@ def _render_init_result_rich(
     meta.add_column(style="dim", no_wrap=True)
     meta.add_column()
     if dry_run:
-        meta.add_row("analysis_fp", analysis_fingerprint or "n/a")
+        meta.add_row("analysis_fp", _inert(text_cls, analysis_fingerprint or "n/a"))
     elif db_path is not None:
-        meta.add_row("db", db_path)
+        meta.add_row("db", _inert(text_cls, db_path))
     console.print(meta)
     _render_count_table(console, title="Upsert stats", counts=stats)
     _render_count_table(
@@ -473,7 +487,7 @@ def _render_coverage_report_rich(
     table = table_cls(box=box.SIMPLE, show_header=True, header_style="bold")
     table.add_column("Uncovered path", style=ui.STYLE_VERDICT_WARN)
     for path in report.uncovered_paths:
-        table.add_row(path)
+        table.add_row(_inert(text_cls, path))
     console.print(table)
 
 
@@ -504,7 +518,7 @@ def _render_status_report_plain(
 ) -> None:
     console.print("Engineering Memory status")
     for label, value in _status_rows(report):
-        console.print(f"  {label + ':':18} {value}")
+        console.print(f"  {label + ':':18} {ui.esc(value)}")
     unusable = _memory_store_unusable_line(report)
     if unusable is not None:
         console.print(unusable)
@@ -623,7 +637,7 @@ def _print_record_lines(
     for item in records:
         record_type = item.get("type", "?")
         status = item.get("status", "?")
-        line = format_memory_record_line(item)
+        line = ui.esc(format_memory_record_line(item), multiline=True)
         console.print(f"  - [{record_type}/{status}] {line}")
 
 
