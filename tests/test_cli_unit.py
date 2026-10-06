@@ -44,6 +44,11 @@ from codeclone.cache.store import Cache
 from codeclone.config.argparse_builder import build_parser
 from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
+from codeclone.contracts.comparison_state import (
+    TERM_ADDED_SYMBOLS,
+    TERM_BREAKING_CHANGES,
+    TERM_SIGNATURE_CHANGES,
+)
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.core._types import (
     AnalysisResult,
@@ -66,6 +71,7 @@ from codeclone.models import (
     ProjectMetrics,
     TrustVector,
 )
+from codeclone.report.messages.comparison import NOT_COMPARED_COMPACT
 from tests._assertions import assert_contains_all, assert_contains_none
 from tests._ast_metrics_helpers import module_registry_context, worker_registry_context
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
@@ -133,6 +139,8 @@ def test_diff_context_respects_independent_clone_lane_trust(
                 func_groups={},
                 block_groups={},
                 project_metrics=None,
+                metrics_payload=None,
+                observation_bundle=TEST_OBSERVATION_BUNDLE,
             ),
         ),
         baseline_path=tmp_path / "baseline.json",
@@ -155,7 +163,13 @@ def _diff_context_for_trust(*, trusted_for_diff: bool, tmp_path: Path) -> Any:
     return cli_post_run.build_diff_context(
         analysis=cast(
             Any,
-            SimpleNamespace(func_groups={}, block_groups={}, project_metrics=None),
+            SimpleNamespace(
+                func_groups={},
+                block_groups={},
+                project_metrics=None,
+                metrics_payload=None,
+                observation_bundle=TEST_OBSERVATION_BUNDLE,
+            ),
         ),
         baseline_path=tmp_path / "baseline.json",
         baseline_state=cast(Any, baseline_state),
@@ -2576,7 +2590,6 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
             breaking=1,
             changed=2,
             added=4,
-            diff_available=True,
         )
         == "Public API  symbols=3  modules=2  breaking=1  changed=2  added=4"
     )
@@ -2697,7 +2710,6 @@ def test_ui_summary_formatters_cover_optional_branches() -> None:
         breaking=1,
         changed=2,
         added=4,
-        diff_available=True,
     )
     assert_contains_all(
         api_surface, "symbols", "modules", "breaking", "changed", "added"
@@ -3023,7 +3035,7 @@ def test_print_metrics_in_quiet_mode_includes_adoption_public_api_and_coverage(
             api_surface_public_symbols=3,
             api_surface_added=4,
             api_surface_breaking=1,
-            api_surface_diff_available=True,
+            api_surface_changed=0,
             coverage_join_status="ok",
             coverage_join_overall_permille=735,
             coverage_join_coverage_hotspots=2,
@@ -3084,7 +3096,7 @@ def test_print_metrics_in_normal_mode_includes_adoption_public_api_and_coverage(
             api_surface_public_symbols=3,
             api_surface_added=4,
             api_surface_breaking=1,
-            api_surface_diff_available=True,
+            api_surface_changed=0,
             coverage_join_status="ok",
             coverage_join_overall_permille=735,
             coverage_join_coverage_hotspots=2,
@@ -3165,6 +3177,20 @@ def _api_surface_metrics_diff() -> MetricsDiff:
     )
 
 
+def _api_surface_values(*, compared: bool) -> dict[str, int] | None:
+    """The API comparison of the run's normalized state over
+    :func:`_api_surface_metrics_diff`: its three counts by term (``None`` for
+    a comparison that did not run)."""
+    if not compared:
+        return None
+    diff = _api_surface_metrics_diff()
+    return {
+        TERM_BREAKING_CHANGES: len(diff.new_api_breaking_changes),
+        TERM_SIGNATURE_CHANGES: len(diff.new_api_signature_changes),
+        TERM_ADDED_SYMBOLS: len(diff.new_api_symbols),
+    }
+
+
 def _api_signature_change(name: str, start_line: int) -> ApiBreakingChange:
     return ApiBreakingChange(
         qualname=f"pkg.mod:{name}",
@@ -3184,16 +3210,15 @@ def test_print_metrics_quiet_omits_api_diff_terms_when_comparison_withheld(
 
     ``breaking=`` / ``added=`` are facts about a baseline comparison; a run
     whose comparison never ran holds no such facts. The compact line keeps the
-    current-run facts (``symbols=`` / ``modules=``) and drops the diff terms,
-    following the ratified adoption pattern: the compact surface omits, the
-    rich surface pronounces (`G4`, `B8`).
+    current-run facts (``symbols=`` / ``modules=``) and says the comparison in
+    one term, the one compact "not compared" -- never a number, never nothing
+    (ruling 2026-10-03; `G4`, `B8`).
     """
 
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
     snapshot = cli_summary.build_metrics_snapshot(
         analysis_result=_api_surface_analysis_result(),
-        metrics_diff=_api_surface_metrics_diff(),
-        api_surface_diff_available=False,
+        api_surface_values=_api_surface_values(compared=False),
     )
     cli_summary._print_metrics(
         console=cast("cli_summary._Printer", cli.console),
@@ -3201,7 +3226,13 @@ def test_print_metrics_quiet_omits_api_diff_terms_when_comparison_withheld(
         metrics=snapshot,
     )
     out = capsys.readouterr().out
-    assert_contains_all(out, "Public API", "symbols=3", "modules=2")
+    assert_contains_all(
+        out,
+        "Public API",
+        "symbols=3",
+        "modules=2",
+        f"diff={NOT_COMPARED_COMPACT}",
+    )
     assert_contains_none(out, "breaking=", "changed=", "added=")
 
 
@@ -3213,8 +3244,7 @@ def test_print_metrics_quiet_keeps_api_diff_terms_for_an_available_comparison(
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
     snapshot = cli_summary.build_metrics_snapshot(
         analysis_result=_api_surface_analysis_result(),
-        metrics_diff=_api_surface_metrics_diff(),
-        api_surface_diff_available=True,
+        api_surface_values=_api_surface_values(compared=True),
     )
     cli_summary._print_metrics(
         console=cast("cli_summary._Printer", cli.console),
@@ -3241,8 +3271,7 @@ def test_print_metrics_rich_api_line_states_each_count_apart(
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
     snapshot = cli_summary.build_metrics_snapshot(
         analysis_result=_api_surface_analysis_result(),
-        metrics_diff=_api_surface_metrics_diff(),
-        api_surface_diff_available=True,
+        api_surface_values=_api_surface_values(compared=True),
     )
     cli_summary._print_metrics(
         console=cast("cli_summary._Printer", cli.console),
@@ -3254,33 +3283,34 @@ def test_print_metrics_rich_api_line_states_each_count_apart(
 
 
 def test_metrics_snapshot_transports_api_diff_availability_from_the_owner() -> None:
-    """The snapshot carries the comparison owner's flag; it derives nothing.
+    """The snapshot carries the normalized state's API comparison; it
+    derives nothing.
 
-    The value is decided once in ``api/comparison.py`` and travels here as a
-    parameter — the same value the report enrichment publishes as
-    ``api_surface.summary.baseline_diff_available``. The snapshot must
-    transport it, not recompute it from anything else (`G2`).
+    The answer is decided once by the producer the report document is
+    written from, and travels here as the state's values -- ``None`` when
+    the comparison did not run, the very counts the document's pair states
+    when it did. The snapshot must transport them, not recompute them from
+    anything else (`G2`).
     """
 
     for available in (True, False):
         snapshot = cli_summary.build_metrics_snapshot(
             analysis_result=_api_surface_analysis_result(),
-            metrics_diff=_api_surface_metrics_diff(),
-            api_surface_diff_available=available,
+            api_surface_values=_api_surface_values(compared=available),
         )
-        assert snapshot.api_surface_diff_available is available
+        assert (snapshot.api_surface_breaking is not None) is available
 
 
 @pytest.mark.parametrize(
     ("available", "expected"),
     [
         pytest.param(True, (1, 2, 4), id="compared"),
-        pytest.param(False, (0, 0, 0), id="withheld"),
+        pytest.param(False, (None, None, None), id="withheld"),
     ],
 )
 def test_metrics_snapshot_counts_breaking_and_compatible_changes_apart(
     available: bool,
-    expected: tuple[int, int, int],
+    expected: tuple[int | None, int | None, int | None],
 ) -> None:
     """``breaking`` counts the breaking set, ``changed`` the compatible one.
 
@@ -3290,8 +3320,7 @@ def test_metrics_snapshot_counts_breaking_and_compatible_changes_apart(
 
     snapshot = cli_summary.build_metrics_snapshot(
         analysis_result=_api_surface_analysis_result(),
-        metrics_diff=_api_surface_metrics_diff(),
-        api_surface_diff_available=available,
+        api_surface_values=_api_surface_values(compared=available),
     )
     assert (
         snapshot.api_surface_breaking,
@@ -3313,8 +3342,7 @@ def test_print_metrics_rich_api_line_pronounces_a_withheld_comparison(
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
     snapshot = cli_summary.build_metrics_snapshot(
         analysis_result=_api_surface_analysis_result(),
-        metrics_diff=_api_surface_metrics_diff(),
-        api_surface_diff_available=False,
+        api_surface_values=_api_surface_values(compared=False),
     )
     cli_summary._print_metrics(
         console=cast("cli_summary._Printer", cli.console),
@@ -3325,7 +3353,7 @@ def test_print_metrics_rich_api_line_pronounces_a_withheld_comparison(
     assert_contains_all(out, "Public API", "3 symbols", "2 modules")
     # Ownership pin: read from the named owner, never a respelled literal.
     assert_contains_all(out, ui.formatters._API_SURFACE_DIFF_ABSENCE)
-    assert_contains_none(out, "breaking", "added")
+    assert_contains_none(out, "0 breaking", "added")
 
 
 def test_print_metrics_rich_api_line_stays_silent_about_absence_when_compared(
@@ -3336,8 +3364,7 @@ def test_print_metrics_rich_api_line_stays_silent_about_absence_when_compared(
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
     snapshot = cli_summary.build_metrics_snapshot(
         analysis_result=_api_surface_analysis_result(),
-        metrics_diff=_api_surface_metrics_diff(),
-        api_surface_diff_available=True,
+        api_surface_values=_api_surface_values(compared=True),
     )
     cli_summary._print_metrics(
         console=cast("cli_summary._Printer", cli.console),

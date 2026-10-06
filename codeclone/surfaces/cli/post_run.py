@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ... import ui_messages as ui
-from ...api.comparison import build_comparison_context
+from ...api.comparison import build_comparison_context, stated_comparisons
 from ...contracts import ExitCode
+from ...contracts.comparison_state import COMPARISON_API_SURFACE
 from ...contracts.errors import ContractInvariantError
 from ...core._types import AnalysisResult
 from ...models import MetricsDiff, TrustVector
@@ -37,8 +38,21 @@ class DiffContext:
     #: new" -- the rule WARN_BASELINE_LANES_OPAQUE already states in words.
     clone_novelty_available: bool
     metrics_diff: MetricsDiff | None
+    #: The comparison context's own flags: the producer's INPUTS (they travel
+    #: to the report document, whose producer decides), never an answer a
+    #: surface may print -- that is :attr:`stated_comparisons`.
     coverage_adoption_diff_available: bool
     api_surface_diff_available: bool
+    #: The run's normalized comparison state as this surface may read it
+    #: (``api.comparison.stated_comparisons``): per comparison, its deltas
+    #: by term when it ran, ``None`` when it did not.  A context built
+    #: without it states no comparison.
+    stated_comparisons: dict[str, dict[str, int] | None] = field(default_factory=dict)
+
+    @property
+    def api_surface_values(self) -> dict[str, int] | None:
+        """The API comparison the run states: its counts, or ``None``."""
+        return self.stated_comparisons.get(COMPARISON_API_SURFACE)
 
 
 def build_diff_context(
@@ -80,6 +94,9 @@ def build_diff_context(
         metrics_diff=comparison.metrics_diff,
         coverage_adoption_diff_available=comparison.coverage_adoption_diff_available,
         api_surface_diff_available=comparison.api_surface_diff_available,
+        stated_comparisons=stated_comparisons(
+            analysis=analysis, comparison=comparison, baseline_trust=baseline_trust
+        ),
     )
 
 
@@ -87,8 +104,7 @@ def print_metrics_if_available(
     *,
     args: CLIArgsLike,
     analysis: AnalysisResult,
-    metrics_diff: MetricsDiff | None,
-    api_surface_diff_available: bool,
+    api_surface_values: Mapping[str, int] | None,
     console: PrinterLike,
     build_metrics_snapshot_fn: Callable[..., object],
     print_metrics_fn: Callable[..., None],
@@ -100,8 +116,7 @@ def print_metrics_if_available(
         quiet=args.quiet,
         metrics=build_metrics_snapshot_fn(
             analysis_result=analysis,
-            metrics_diff=metrics_diff,
-            api_surface_diff_available=api_surface_diff_available,
+            api_surface_values=api_surface_values,
         ),
     )
 
@@ -203,8 +218,7 @@ def has_locatable_findings(
     # boolean rather than counted a second time here.
     snapshot = build_metrics_snapshot(
         analysis_result=analysis,
-        metrics_diff=diff_context.metrics_diff,
-        api_surface_diff_available=diff_context.api_surface_diff_available,
+        api_surface_values=diff_context.api_surface_values,
     )
     return bool(snapshot.dead_code_count or snapshot.high_risk_count)
 

@@ -6,12 +6,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
 from ... import ui_messages as ui
+from ...contracts.comparison_state import (
+    TERM_ADDED_SYMBOLS,
+    TERM_BREAKING_CHANGES,
+    TERM_SIGNATURE_CHANGES,
+)
 from ...core._types import AnalysisResult, DiscoveryResult, ProcessingResult
-from ...models import MetricsDiff, cycle_kind_counts
+from ...models import cycle_kind_counts
 from ...utils import coerce as _coerce
 
 _as_int = _coerce.as_int
@@ -61,17 +67,16 @@ class MetricsSnapshot:
     api_surface_enabled: bool = False
     api_surface_modules: int = 0
     api_surface_public_symbols: int = 0
-    api_surface_added: int = 0
-    api_surface_breaking: int = 0
+    #: The API comparison's counts as the run's normalized comparison state
+    #: states them (``api.comparison.stated_comparisons``): integers when the
+    #: comparison ran -- a measured zero is ``0`` -- and ``None`` when it did
+    #: not, which no surface may print as a number (`G4`, `B8`).  Transported
+    #: verbatim from the state; never derived here (`G2`).
+    api_surface_added: int | None = None
+    api_surface_breaking: int | None = None
     #: Compatible signature changes (``signature_changed``): reported beside
     #: ``api_surface_breaking`` and never part of it.
-    api_surface_changed: int = 0
-    #: Whether the API-surface baseline comparison actually ran. ``False``
-    #: means ``api_surface_added`` / ``api_surface_breaking`` /
-    #: ``api_surface_changed`` are not facts —
-    #: no surface may print them (`G4`, `B8`). Transported verbatim from the
-    #: comparison owner in ``api/comparison.py``; never derived here (`G2`).
-    api_surface_diff_available: bool = False
+    api_surface_changed: int | None = None
     coverage_join_status: str = ""
     coverage_join_overall_permille: int = 0
     coverage_join_coverage_hotspots: int = 0
@@ -112,11 +117,16 @@ def build_summary_counts(
     }
 
 
+def _api_comparison_count(values: Mapping[str, int] | None, term: str) -> int | None:
+    """One API comparison count of the snapshot: the state's integer when the
+    comparison ran, ``None`` when it did not."""
+    return None if values is None else values[term]
+
+
 def build_metrics_snapshot(
     *,
     analysis_result: AnalysisResult,
-    metrics_diff: MetricsDiff | None,
-    api_surface_diff_available: bool,
+    api_surface_values: Mapping[str, int] | None,
 ) -> MetricsSnapshot:
     project_metrics = analysis_result.project_metrics
     if project_metrics is None:
@@ -131,8 +141,6 @@ def build_metrics_snapshot(
     api_surface_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("api_surface")).get("summary")
     )
-    # The API counts are facts only when the comparison ran.
-    api_diff = metrics_diff if api_surface_diff_available else None
     dead_code_summary = _as_mapping(
         _as_mapping(metrics_payload_map.get("dead_code")).get("summary")
     )
@@ -216,18 +224,15 @@ def build_metrics_snapshot(
         api_surface_enabled=bool(api_surface_summary.get("enabled")),
         api_surface_modules=_as_int(api_surface_summary.get("modules")),
         api_surface_public_symbols=_as_int(api_surface_summary.get("public_symbols")),
-        api_surface_added=(
-            len(api_diff.new_api_symbols) if api_diff is not None else 0
+        # Transport, not computation: the counts the run's normalized state
+        # states, the ones the report document's pair is written from.
+        api_surface_added=_api_comparison_count(api_surface_values, TERM_ADDED_SYMBOLS),
+        api_surface_breaking=_api_comparison_count(
+            api_surface_values, TERM_BREAKING_CHANGES
         ),
-        api_surface_breaking=(
-            len(api_diff.new_api_breaking_changes) if api_diff is not None else 0
+        api_surface_changed=_api_comparison_count(
+            api_surface_values, TERM_SIGNATURE_CHANGES
         ),
-        api_surface_changed=(
-            len(api_diff.new_api_signature_changes) if api_diff is not None else 0
-        ),
-        # Transport, not computation: the same owner value the report
-        # enrichment publishes as ``api_surface.summary.baseline_diff_available``.
-        api_surface_diff_available=bool(api_surface_diff_available),
         coverage_join_status=str(coverage_join_summary.get("status", "")).strip(),
         coverage_join_overall_permille=_as_int(
             coverage_join_summary.get("overall_permille")
@@ -428,10 +433,9 @@ def _print_metrics(
                     modules=metrics.api_surface_modules,
                     added=metrics.api_surface_added,
                     breaking=metrics.api_surface_breaking,
+                    # ``None`` counts are a comparison that did not run: the
+                    # formatter spells them, this call site never decides.
                     changed=metrics.api_surface_changed,
-                    # The formatter, not this call site, decides whether the
-                    # diff terms exist — same split as ``fmt_metrics_health``.
-                    diff_available=metrics.api_surface_diff_available,
                 )
             )
         if metrics.coverage_join_status:
@@ -523,7 +527,6 @@ def _print_metrics(
                     added=metrics.api_surface_added,
                     breaking=metrics.api_surface_breaking,
                     changed=metrics.api_surface_changed,
-                    diff_available=metrics.api_surface_diff_available,
                 )
             )
         if metrics.coverage_join_status:

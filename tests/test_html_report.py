@@ -70,9 +70,14 @@ from codeclone.report.html.widgets.snippets import (
     _render_code_block,
     _try_pygments,
 )
+from codeclone.report.messages.comparison import NOT_COMPARED
 from codeclone.report.messages.coverage_join import COVERAGE_JOIN_UNAVAILABLE
 from codeclone.report.messages.glossary import GLOSSARY_FAMILY_DEAD_CODE
-from codeclone.report.messages.overview import ADOPTION_API_DIFF_UNAVAILABLE
+from codeclone.report.messages.overview import (
+    ADOPTION_ADDED_SYMBOLS,
+    ADOPTION_BREAKING_CHANGES,
+    ADOPTION_CHANGED_SIGNATURES,
+)
 from codeclone.report.messages.sections import (
     DEPENDENCY_GRAPH_UNAVAILABLE,
     METRICS_SKIPPED,
@@ -2340,12 +2345,18 @@ def test_html_report_api_surface_pronounces_a_withheld_baseline_comparison() -> 
         "Public API surface",
         "Public symbols",
         "Modules",
-        # Ownership pin: the expectation is read from the named owner, so the
-        # page cannot drift apart from its vocabulary.
-        ADOPTION_API_DIFF_UNAVAILABLE,
+        # Ownership pin: the words are read from the one human formatter, so
+        # the page cannot drift apart from its vocabulary.
+        *(
+            f'{label}</span><span class="overview-fact-value">{NOT_COMPARED}<'
+            for label in (
+                ADOPTION_BREAKING_CHANGES,
+                ADOPTION_CHANGED_SIGNATURES,
+                ADOPTION_ADDED_SYMBOLS,
+            )
+        ),
     )
-    assert "Breaking changes" not in html
-    assert "Added symbols" not in html
+    assert 'Breaking changes</span><span class="overview-fact-value">0<' not in html
 
 
 def test_html_report_api_surface_stays_silent_about_absence_when_compared() -> None:
@@ -2381,7 +2392,7 @@ def test_html_report_api_surface_stays_silent_about_absence_when_compared() -> N
     _assert_html_contains(html, "Breaking changes", "Added symbols")
     # Ownership pin: read from the owner, so a shifted spelling cannot make
     # this negative guard vacuously green.
-    assert ADOPTION_API_DIFF_UNAVAILABLE not in html
+    assert f'<span class="overview-fact-value">{NOT_COMPARED}<' not in html
 
 
 def test_html_report_api_card_states_compatible_changes_apart_from_breaks() -> None:

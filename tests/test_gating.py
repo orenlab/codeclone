@@ -741,8 +741,7 @@ def test_cli_dead_code_summary_shows_the_number_the_gate_cites(
     )
     snapshot = build_metrics_snapshot(
         analysis_result=_analysis_result(metrics),
-        metrics_diff=None,
-        api_surface_diff_available=False,
+        api_surface_values=None,
     )
     gate = _cli_gate_result(
         tmp_path=tmp_path,
@@ -774,8 +773,7 @@ def test_cli_dead_code_summary_never_understates_the_gate(tmp_path: Path) -> Non
     )
     snapshot = build_metrics_snapshot(
         analysis_result=_analysis_result(metrics),
-        metrics_diff=None,
-        api_surface_diff_available=False,
+        api_surface_values=None,
     )
     gate = _cli_gate_result(
         tmp_path=tmp_path,

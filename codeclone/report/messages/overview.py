@@ -224,13 +224,9 @@ KPI_NOT_COMPARED: Final = "not compared"
 HEALTH_DELTA_SUFFIX: Final = " since baseline"
 
 ADOPTION_API_DISABLED: Final = "Disabled in this run."
-# The API card's absence sentence: the surface was measured, but the baseline
-# comparison never ran, so there are no breaking/added facts to show. Said in
-# words because omitting the rows rendered a withheld run identical to
-# "compared, nothing to report".
-ADOPTION_API_DIFF_UNAVAILABLE: Final = (
-    "Baseline comparison is unavailable for this run."
-)
+# A measured API surface whose baseline comparison never ran prints its three
+# comparison rows with the one human spelling of "not compared"
+# (``report.messages.comparison``), not a card-specific sentence.
 
 ADOPTION_CLUSTER_TITLE: Final = "Adoption & API"
 ADOPTION_COVERAGE_LABEL: Final = "Adoption coverage"

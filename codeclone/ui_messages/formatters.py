@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Final, Literal
 from .. import __version__
 from ..contracts import ISSUES_URL
 from ..contracts.errors import DiagnosedUserError
+from ..report.messages.comparison import NOT_COMPARED, comparison_text_compact
 from .labels import (
     CLI_LAYOUT_MAX_WIDTH,
     SUMMARY_COMPACT,
@@ -554,27 +555,43 @@ def fmt_summary_compact_adoption(
     )
 
 
+def _compared_api_counts(
+    breaking: int | None, changed: int | None, added: int | None
+) -> tuple[int, int, int] | None:
+    """The API comparison's counts when it ran; ``None`` when they are the
+    normalized state's ``None`` -- the comparison did not run, and no count
+    of it is a fact."""
+    if breaking is None or changed is None or added is None:
+        return None
+    return breaking, changed, added
+
+
 def fmt_summary_compact_api_surface(
     *,
     public_symbols: int,
     modules: int,
-    added: int,
-    breaking: int,
-    changed: int,
-    diff_available: bool,
+    added: int | None,
+    breaking: int | None,
+    changed: int | None,
 ) -> str:
     # ``symbols=`` / ``modules=`` are facts of the current run and always
     # print. ``breaking=`` / ``changed=`` / ``added=`` are facts about a
-    # baseline comparison: when that comparison never ran there is nothing to
-    # print, and printing the default zeros rendered a withheld run
-    # byte-identical to "compared, clean". The compact line omits the terms;
-    # the rich surfaces pronounce the absence in words — the ratified adoption
-    # split. ``changed=`` counts compatible signature changes and is never
-    # part of ``breaking=``.
+    # baseline comparison, each the run's normalized comparison state: a
+    # count when the comparison ran (a measured zero prints ``0``). ``None``
+    # is a comparison that did not run, and the line says so in one term, the
+    # one compact spelling of "not compared" -- never the default zeros,
+    # which rendered a withheld run byte-identical to "compared, clean", and
+    # never nothing (ruling 2026-10-03). ``changed=`` counts compatible
+    # signature changes and is never part of ``breaking=``.
     line = f"Public API  symbols={public_symbols}  modules={modules}"
-    if not diff_available:
-        return line
-    return f"{line}  breaking={breaking}  changed={changed}  added={added}"
+    counts = _compared_api_counts(breaking, changed, added)
+    if counts is None:
+        return f"{line}  diff={comparison_text_compact(None)}"
+    return (
+        f"{line}  breaking={comparison_text_compact(counts[0])}"
+        f"  changed={comparison_text_compact(counts[1])}"
+        f"  added={comparison_text_compact(counts[2])}"
+    )
 
 
 def fmt_summary_compact_coverage_join(
@@ -814,10 +831,11 @@ def fmt_metrics_adoption(
     return f"  {'Adoption':<{_L}}{f' {GLYPH_SEP} '.join(parts)}"
 
 
-#: The rich line's absence sentence for an API comparison that never ran.
-#: One owner for the wording, mirroring the coverage-join "join unavailable"
-#: pattern: the fact is stated in words, never as fabricated zeros.
-_API_SURFACE_DIFF_ABSENCE: Final = "not compared with the baseline"
+#: The rich line's absence term for an API comparison that never ran: the
+#: ruling's "API breaking changes: not compared" on the ``Public API`` line,
+#: its words from the one human formatter of a comparison delta -- the fact
+#: is stated in words, never as fabricated zeros and never as silence.
+_API_SURFACE_DIFF_ABSENCE: Final = f"breaking changes: {NOT_COMPARED}"
 
 #: The metrics line's absence term for a coverage join that never ran.
 #: Same role, same register: the fact is stated in words by a named owner,
@@ -829,29 +847,30 @@ def fmt_metrics_api_surface(
     *,
     public_symbols: int,
     modules: int,
-    added: int,
-    breaking: int,
-    changed: int,
-    diff_available: bool,
+    added: int | None,
+    breaking: int | None,
+    changed: int | None,
 ) -> str:
     parts = [
         f"{_v(public_symbols, STYLE_COUNT_NEUTRAL)} symbols",
         f"{_v(modules, STYLE_COUNT_NEUTRAL)} modules",
     ]
-    if not diff_available:
-        # The comparison never ran, so there are no breaking/added facts.
-        # Silence here rendered a withheld run byte-identical to "compared,
-        # clean"; the rich surface pronounces the absence instead.
+    counts = _compared_api_counts(breaking, changed, added)
+    if counts is None:
+        # The comparison never ran (the state's ``None``), so there are no
+        # breaking/added facts. Silence here rendered a withheld run
+        # byte-identical to "compared, clean"; the rich surface pronounces
+        # the absence instead.
         parts.append(f"[dim]{_API_SURFACE_DIFF_ABSENCE}[/dim]")
-    elif max(breaking, changed, added) > 0:
+    elif max(counts) > 0:
         # ``changed`` is its own word in the neutral style: a compatible
         # signature change is recorded, never counted or colored as breaking.
         parts.append(
             " / ".join(
                 [
-                    f"{_v(breaking, STYLE_COUNT_CRITICAL)} breaking",
-                    f"{_v(changed, STYLE_COUNT_NEUTRAL)} changed",
-                    f"{_v(added, STYLE_COUNT_NEUTRAL)} added",
+                    f"{_v(counts[0], STYLE_COUNT_CRITICAL)} breaking",
+                    f"{_v(counts[1], STYLE_COUNT_NEUTRAL)} changed",
+                    f"{_v(counts[2], STYLE_COUNT_NEUTRAL)} added",
                 ]
             )
         )

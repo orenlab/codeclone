@@ -139,7 +139,6 @@ def test_fmt_metrics_api_surface_includes_breaking_and_added() -> None:
         added=3,
         breaking=1,
         changed=0,
-        diff_available=True,
     )
     assert "breaking" in text
     assert "added" in text
@@ -152,7 +151,6 @@ def test_fmt_metrics_api_surface_without_delta() -> None:
         added=0,
         breaking=0,
         changed=0,
-        diff_available=True,
     )
     assert "breaking" not in text
 
@@ -170,24 +168,23 @@ def test_fmt_metrics_api_surface_says_changed_as_its_own_word() -> None:
         added=0,
         breaking=0,
         changed=2,
-        diff_available=True,
     )
     plain = re.sub(r"\[/?[^\]]*\]", "", text)
     assert "0 breaking / 2 changed / 0 added" in plain
 
 
 def test_fmt_summary_compact_api_surface_omits_diff_terms_when_withheld() -> None:
-    """No surface prints the numbers of a comparison that never ran."""
+    """No surface prints the numbers of a comparison that never ran, nor
+    nothing: one term says the one compact spelling of "not compared"."""
 
     text = formatters.fmt_summary_compact_api_surface(
         public_symbols=3,
         modules=2,
-        added=0,
-        breaking=0,
-        changed=0,
-        diff_available=False,
+        added=None,
+        breaking=None,
+        changed=None,
     )
-    assert text == "Public API  symbols=3  modules=2"
+    assert text == "Public API  symbols=3  modules=2  diff=n/a (not compared)"
 
 
 def test_fmt_summary_compact_api_surface_keeps_diff_terms_when_available() -> None:
@@ -203,7 +200,6 @@ def test_fmt_summary_compact_api_surface_keeps_diff_terms_when_available() -> No
         added=4,
         breaking=1,
         changed=5,
-        diff_available=True,
     )
     assert text == "Public API  symbols=3  modules=2  breaking=1  changed=5  added=4"
 
@@ -214,15 +210,14 @@ def test_fmt_metrics_api_surface_pronounces_a_withheld_comparison() -> None:
     text = formatters.fmt_metrics_api_surface(
         public_symbols=10,
         modules=3,
-        added=0,
-        breaking=0,
-        changed=0,
-        diff_available=False,
+        added=None,
+        breaking=None,
+        changed=None,
     )
     # Ownership pin: the expectation is read from the named owner, so the
     # compact line cannot drift apart from its vocabulary.
     assert formatters._API_SURFACE_DIFF_ABSENCE in text
-    assert all(term not in text for term in ("breaking", "changed", "added"))
+    assert all(term not in text for term in ("0 breaking", "changed", "added"))
 
 
 def test_fmt_metrics_api_surface_compared_clean_stays_silent_about_absence() -> None:
@@ -234,7 +229,6 @@ def test_fmt_metrics_api_surface_compared_clean_stays_silent_about_absence() -> 
         added=0,
         breaking=0,
         changed=0,
-        diff_available=True,
     )
     assert "unavailable" not in text
     assert "breaking" not in text

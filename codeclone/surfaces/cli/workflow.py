@@ -657,8 +657,7 @@ def _main_impl() -> None:
             print_metrics_if_available(
                 args=args,
                 analysis=analysis_result,
-                metrics_diff=diff_context.metrics_diff,
-                api_surface_diff_available=diff_context.api_surface_diff_available,
+                api_surface_values=diff_context.api_surface_values,
                 console=_console(),
                 build_metrics_snapshot_fn=build_metrics_snapshot,
                 print_metrics_fn=_print_metrics,
@@ -834,7 +833,9 @@ def _main_impl() -> None:
                 analysis=analysis_result, diff_context=diff_context
             ),
             api_surface_enabled=api_surface_collection_enabled(args),
-            api_surface_diff_available=diff_context.api_surface_diff_available,
+            # The state's answer, the one the summary above printed -- never
+            # the comparison context's own flag, an input of the producer.
+            api_surface_diff_available=diff_context.api_surface_values is not None,
             files_found=discovery_result.files_found,
             gate_exit_code=gate_result.exit_code,
         )

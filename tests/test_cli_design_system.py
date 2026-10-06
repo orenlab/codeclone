@@ -177,16 +177,14 @@ def _build_catalog() -> dict[str, str]:
             added=488,
             breaking=22,
             changed=31,
-            diff_available=True,
         ),
         "fmt_summary_compact_api_surface_unavailable": (
             ui.fmt_summary_compact_api_surface(
                 public_symbols=9340,
                 modules=842,
-                added=0,
-                breaking=0,
-                changed=0,
-                diff_available=False,
+                added=None,
+                breaking=None,
+                changed=None,
             )
         ),
         "fmt_summary_compact_coverage_join": ui.fmt_summary_compact_coverage_join(
@@ -281,15 +279,13 @@ def _build_catalog() -> dict[str, str]:
             added=488,
             breaking=22,
             changed=31,
-            diff_available=True,
         ),
         "fmt_metrics_api_surface_unavailable": ui.fmt_metrics_api_surface(
             public_symbols=9340,
             modules=842,
-            added=0,
-            breaking=0,
-            changed=0,
-            diff_available=False,
+            added=None,
+            breaking=None,
+            changed=None,
         ),
         "fmt_metrics_coverage_join": ui.fmt_metrics_coverage_join(
             status="ok",

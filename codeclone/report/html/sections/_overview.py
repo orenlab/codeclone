@@ -13,14 +13,34 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from codeclone.contracts import TIER_STATE_COMPLETE
+from codeclone.contracts.comparison_state import (
+    COMPARISON_ADOPTION,
+    COMPARISON_API_SURFACE,
+    COMPARISON_COMPLEXITY,
+    COMPARISON_COUPLING,
+    COMPARISON_DEAD_CODE,
+    COMPARISON_DEPENDENCIES,
+    COMPARISON_HEALTH,
+    TERM_ADDED_SYMBOLS,
+    TERM_BREAKING_CHANGES,
+    TERM_DOCSTRING_DELTA,
+    TERM_NEW_CYCLES,
+    TERM_NEW_HIGH_RISK,
+    TERM_NEW_ITEMS,
+    TERM_SCORE_DELTA,
+    TERM_SIGNATURE_CHANGES,
+    TERM_TYPING_PARAM_DELTA,
+    TERM_TYPING_RETURN_DELTA,
+    document_comparison_value,
+)
 from codeclone.utils import coerce as _coerce
 
 from ...messages.clone_health import clone_health_summary_sentence
+from ...messages.comparison import NOT_COMPARED, comparison_text
 from ...messages.explain import plural_word
 from ...messages.glossary import GLOSSARY_FAMILY_OVERVIEW
 from ...messages.overview import (
     ADOPTION_ADDED_SYMBOLS,
-    ADOPTION_API_DIFF_UNAVAILABLE,
     ADOPTION_API_DISABLED,
     ADOPTION_API_SURFACE_LABEL,
     ADOPTION_BREAKING_CHANGES,
@@ -236,16 +256,19 @@ def _health_gauge_html(
             )
 
     delta_html = ""
-    if health_delta is not None and health_delta != 0:
-        if health_delta > 0:
-            cls = "health-ring-delta--up"
-            sign = "+"
-        else:
-            cls = "health-ring-delta--down"
-            sign = ""
+    if health_delta is None:
+        # The health comparison did not run: the ring says so in the one
+        # spelling every human surface uses, instead of drawing the same
+        # nothing a measured zero draws.
+        delta_html = (
+            f'<div class="health-ring-delta">{_escape_html(NOT_COMPARED)}</div>'
+        )
+    elif health_delta != 0:
+        cls = "health-ring-delta--up" if health_delta > 0 else "health-ring-delta--down"
         delta_html = (
             f'<div class="health-ring-delta {cls}">'
-            f"{sign}{health_delta}{_escape_html(HEALTH_DELTA_SUFFIX)}</div>"
+            f"{comparison_text(health_delta, signed=True)}"
+            f"{_escape_html(HEALTH_DELTA_SUFFIX)}</div>"
         )
 
     # "Get Badge" button — shown for grades A, B, C
@@ -561,28 +584,28 @@ def _fact_row(
 
 
 def _adoption_card_html(adoption_summary: Mapping[str, object]) -> str:
-    has_baseline = bool(adoption_summary.get("baseline_diff_available"))
-
-    def _delta_or_none(key: str) -> str | None:
-        if not has_baseline:
-            return None
-        return _format_permille_delta(adoption_summary.get(key))
+    def _delta(term: str) -> str:
+        # The document's pair, read by the owner's one reader: a permille
+        # delta when the comparison ran (a measured zero is "0.0pt"), the
+        # words when it did not.
+        value = document_comparison_value(adoption_summary, COMPARISON_ADOPTION, term)
+        return comparison_text(None) if value is None else _format_permille_delta(value)
 
     rows = [
         _fact_row(
             ADOPTION_PARAM_ANNOTATIONS,
             _format_permille_pct(adoption_summary.get("param_permille")),
-            delta=_delta_or_none("param_delta"),
+            delta=_delta(TERM_TYPING_PARAM_DELTA),
         ),
         _fact_row(
             ADOPTION_RETURN_ANNOTATIONS,
             _format_permille_pct(adoption_summary.get("return_permille")),
-            delta=_delta_or_none("return_delta"),
+            delta=_delta(TERM_TYPING_RETURN_DELTA),
         ),
         _fact_row(
             ADOPTION_DOCSTRINGS,
             _format_permille_pct(adoption_summary.get("docstring_permille")),
-            delta=_delta_or_none("docstring_delta"),
+            delta=_delta(TERM_DOCSTRING_DELTA),
         ),
     ]
 
@@ -614,24 +637,26 @@ def _api_card_html(api_summary: Mapping[str, object]) -> str:
         _fact_row(ADOPTION_MODULES, _format_count(modules)),
     ]
 
-    diff_available = bool(api_summary.get("baseline_diff_available"))
-    if diff_available:
-        breaking = _as_int(api_summary.get("breaking"))
-        added = _as_int(api_summary.get("added"))
-        rows.append(
-            _fact_row(
-                ADOPTION_BREAKING_CHANGES,
-                _format_count(breaking),
-                value_cls="warn" if breaking > 0 else "good",
-            )
+    # The three comparison rows always print: each is the document's pair,
+    # read by the owner's one reader -- the count when the comparison ran (a
+    # measured zero is "0"), the words when it did not.  Omitting the rows
+    # once left this card identical to "compared, nothing to report" (`G4`).
+    breaking = document_comparison_value(
+        api_summary, COMPARISON_API_SURFACE, TERM_BREAKING_CHANGES
+    )
+    rows.append(
+        _fact_row(
+            ADOPTION_BREAKING_CHANGES,
+            _comparison_count(breaking),
+            value_cls="" if breaking is None else ("warn" if breaking else "good"),
         )
-        rows.append(
-            _fact_row(
-                ADOPTION_CHANGED_SIGNATURES,
-                _format_count(_as_int(api_summary.get("changed"))),
-            )
-        )
-        rows.append(_fact_row(ADOPTION_ADDED_SYMBOLS, _format_count(added)))
+    )
+    for label, term in (
+        (ADOPTION_CHANGED_SIGNATURES, TERM_SIGNATURE_CHANGES),
+        (ADOPTION_ADDED_SYMBOLS, TERM_ADDED_SYMBOLS),
+    ):
+        value = document_comparison_value(api_summary, COMPARISON_API_SURFACE, term)
+        rows.append(_fact_row(label, _comparison_count(value)))
 
     if bool(api_summary.get("strict_types")):
         rows.append(
@@ -640,16 +665,12 @@ def _api_card_html(api_summary: Mapping[str, object]) -> str:
             )
         )
 
-    body = '<div class="overview-fact-list">' + "".join(rows) + "</div>"
-    if not diff_available:
-        # The comparison never ran. Omitting the breaking/added rows alone
-        # left this card identical to "compared, nothing to report"; the
-        # muted sentence states the absence as a fact of the run (`G4`),
-        # in the same style the disabled branch above already uses.
-        body += (
-            f'<div class="overview-summary-value">{ADOPTION_API_DIFF_UNAVAILABLE}</div>'
-        )
-    return body
+    return '<div class="overview-fact-list">' + "".join(rows) + "</div>"
+
+
+def _comparison_count(value: int | None) -> str:
+    """A comparison count in a fact row: the number, or the words."""
+    return comparison_text(None) if value is None else _format_count(value)
 
 
 def _adoption_and_api_section(ctx: ReportContext) -> str:
@@ -1103,31 +1124,23 @@ def render_overview_panel(ctx: ReportContext) -> str:
     health_grade = str(health_summary.get("grade") or KPI_HEALTH_NA)
     health_population = str(health_summary.get("population", ""))
 
-    # Canonical comparison and count facts; no raw MetricsDiff proxy.
-    _new_complexity = (
-        _as_int(complexity_summary.get("new_high_risk"))
-        if complexity_summary.get("baseline_diff_available") is True
-        else None
+    # Canonical comparison facts, each read off the document's pair by the
+    # owner's one reader: the delta when the comparison ran, ``None`` when it
+    # did not -- never decided again here.
+    _new_complexity = document_comparison_value(
+        complexity_summary, COMPARISON_COMPLEXITY, TERM_NEW_HIGH_RISK
     )
-    _new_coupling = (
-        _as_int(coupling_summary.get("new_high_risk"))
-        if coupling_summary.get("baseline_diff_available") is True
-        else None
+    _new_coupling = document_comparison_value(
+        coupling_summary, COMPARISON_COUPLING, TERM_NEW_HIGH_RISK
     )
-    _new_dead = (
-        _as_int(dead_code_summary.get("new_items"))
-        if dead_code_summary.get("baseline_diff_available") is True
-        else None
+    _new_dead = document_comparison_value(
+        dead_code_summary, COMPARISON_DEAD_CODE, TERM_NEW_ITEMS
     )
-    _new_cycles = (
-        _as_int(dependencies_summary.get("new_cycles"))
-        if dependencies_summary.get("baseline_diff_available") is True
-        else None
+    _new_cycles = document_comparison_value(
+        dependencies_summary, COMPARISON_DEPENDENCIES, TERM_NEW_CYCLES
     )
-    _health_delta = (
-        _as_int(health_summary.get("delta"))
-        if health_summary.get("baseline_diff_available") is True
-        else None
+    _health_delta = document_comparison_value(
+        health_summary, COMPARISON_HEALTH, TERM_SCORE_DELTA
     )
     presentation_counts = _as_mapping(ctx.overview_data.get("presentation_counts"))
     suggestion_counts = _as_mapping(presentation_counts.get("suggestions_by_family"))

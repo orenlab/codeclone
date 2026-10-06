@@ -219,6 +219,15 @@ def document_comparison_values(
     }
 
 
+def document_comparison_value(
+    summary: Mapping[str, object], comparison: str, term: str
+) -> int | None:
+    """One delta a family ``summary`` states: its integer when the comparison
+    ran, ``None`` when it did not (:func:`document_comparison_values`)."""
+    values = document_comparison_values(summary, comparison)
+    return None if values is None else values[term]
+
+
 def not_compared_reason(*, enabled: bool, lanes_trusted: bool) -> NotComparedReason:
     """Why a comparison that did not run did not run: the one spelling the
     producer, the store reader and the document reader share."""
@@ -263,6 +272,7 @@ __all__ = [
     "ComparisonKey",
     "NotComparedReason",
     "document_comparison_fields",
+    "document_comparison_value",
     "document_comparison_values",
     "not_compared_reason",
 ]

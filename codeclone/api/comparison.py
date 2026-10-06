@@ -34,10 +34,13 @@ from typing import TYPE_CHECKING
 
 from ..baseline.trust import current_python_tag
 from ..contracts import population_universe_observed
+from ..contracts.comparison_state import COMPARISON_TERMS
+from ..core.comparison_state import run_comparison_state
 from ..core.reporting import gate_required_lanes, resolve_report_baseline_trust
 
 if TYPE_CHECKING:
     from ..baseline import Baseline, MetricsBaseline
+    from ..core._types import AnalysisResult
     from ..models import (
         BaselineContainerV3,
         GroupMapLike,
@@ -288,6 +291,34 @@ def build_comparison_context(
     )
 
 
+def stated_comparisons(
+    *,
+    analysis: AnalysisResult,
+    comparison: ComparisonContext,
+    baseline_trust: TrustVector | None,
+) -> dict[str, dict[str, int] | None]:
+    """Every comparison the run states, by name: its deltas by term when it
+    ran, ``None`` when it did not -- the run's normalized comparison state
+    (``core.comparison_state.run_comparison_state``, the producer the report
+    document is written from), handed through this door to the R4 surfaces
+    that cannot reach the carrier's ring.  The comparison context's own
+    availability flags are the producer's inputs, never an answer: against
+    the container of another scope they still say "available" while every
+    lane the comparison reads is untrusted (measured 2026-10-06, the CLI
+    summary printed ``2 breaking / 1 changed / 37 added`` beside a document
+    stating no API comparison)."""
+    state = run_comparison_state(
+        analysis=analysis,
+        metrics_diff=comparison.metrics_diff,
+        new_func=comparison.new_func,
+        new_block=comparison.new_block,
+        coverage_adoption_diff_available=comparison.coverage_adoption_diff_available,
+        api_surface_diff_available=comparison.api_surface_diff_available,
+        baseline_trust=baseline_trust,
+    )
+    return {name: state.values(name) for name in COMPARISON_TERMS}
+
+
 __all__ = [
     "CLONE_BLOCK_LANE",
     "CLONE_FUNCTION_LANE",
@@ -301,4 +332,5 @@ __all__ = [
     "required_gate_lanes",
     "resolve_baseline_trust",
     "runtime_python_tag",
+    "stated_comparisons",
 ]
