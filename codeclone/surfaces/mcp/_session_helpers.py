@@ -36,6 +36,7 @@ from ...domain.source_scope import (
 from ...report.messages.comparison import comparison_text_compact
 from ...report.messages.projections import HEALTH_ABSENCE_TEXT, HEALTH_NOT_MEASURED
 from ...utils import coerce as _coerce
+from ...utils.display_text import markdown_code
 from ...utils.lane_selection import api_surface_collection_enabled
 from ...utils.payload_narrow import is_record_mapping
 from ...utils.repo_paths import (
@@ -1218,7 +1219,7 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
                 (
                     f"- **{str(item.get('severity', 'info')).upper()}** "
                     f"{item.get('kind', 'finding')} in "
-                    f"`{_finding_display_location(item)}`"
+                    f"{markdown_code(_finding_display_location(item))}"
                 )
                 for item in changed_items[:10]
             ]
@@ -1230,7 +1231,7 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
         lines.extend(
             [
                 f"- {item.get('kind', 'finding')} in "
-                f"`{_finding_display_location(item)}`"
+                f"{markdown_code(_finding_display_location(item))}"
                 for item in resolved[:10]
             ]
         )
@@ -1244,7 +1245,7 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
     elif not blocking_gates:
         lines.append("- none")
     else:
-        lines.extend([f"- `{reason}`" for reason in blocking_gates])
+        lines.extend([f"- {markdown_code(reason)}" for reason in blocking_gates])
     return "\n".join(lines)
 
 

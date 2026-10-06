@@ -17,7 +17,7 @@ from ...report.messages.comparison import comparison_text
 from ...report.messages.projections import HEALTH_ABSENCE_TEXT, HEALTH_NOT_MEASURED
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
-from ...utils.display_text import markdown_code
+from ...utils.display_text import display_text, markdown_code
 from ...utils.mapping_paths import section
 from ...utils.payload_narrow import is_record_mapping
 from ._verification_profile import (
@@ -288,7 +288,7 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     else:
         lines.extend(
             [
-                f"**Intent:** {scope.get('intent_description') or 'none'}",
+                f"**Intent:** {_agent_prose(scope.get('intent_description'))}",
                 f"**Status:** {scope.get('intent_status') or 'unknown'}",
                 f"**Declared files:** {_inline_paths(scope.get('declared_files'))}",
                 f"**Changed files:** {_inline_paths(scope.get('changed_files'))}",
@@ -330,7 +330,7 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
     )
     for item in _mapping_rows(reviewed.get("items")):
         note = item.get("note")
-        suffix = f" - note: {note}" if note else ""
+        suffix = f" - note: {_agent_prose(note)}" if note else ""
         lines.append(
             f"- {markdown_code(item.get('finding_id', ''))}: "
             f"{item.get('kind', 'finding')}"
@@ -400,7 +400,7 @@ def _structural_delta_evidence(
     """
 
     reason = str(structural_delta.get("reason", "")).strip()
-    return [f"**Evidence:** {reason}"] if reason else []
+    return [f"**Evidence:** {_agent_prose(reason)}"] if reason else []
 
 
 def _render_verification_profile(
@@ -472,6 +472,19 @@ def _suppressed_clone_count(report_document: Mapping[str, object]) -> int:
     """
 
     return suppressed_clone_groups(report_document).count
+
+
+def _agent_prose(value: object) -> str:
+    """Agent-written prose (intent, note, evidence) as its author wrote it.
+
+    The author is the agent asking for this receipt, so its Markdown is kept
+    and its line breaks are kept; only control characters are replaced, so a
+    raw escape sequence cannot rewrite the terminal the receipt is read in.
+    Repository text, which nobody reviewing the receipt wrote, is a code span
+    instead (:func:`_inline_paths`).
+    """
+
+    return display_text(value or "none", multiline=True)
 
 
 def _inline_paths(value: object) -> str:
