@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import cast
 
 from ...api.execution_event import EXECUTION_PROVENANCE_KEY
@@ -39,10 +40,11 @@ from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
+    MCPHeldRun,
     MCPRunRecord,
     MCPServiceContractError,
 )
-from ._session_state_mixin import _MCPSessionStateMixin
+from ._session_state_mixin import _MCPSessionStateMixin, held_run_comparison
 
 
 def _intent_session(
@@ -67,6 +69,60 @@ def _state_session(
     session: _MCPSessionReviewReceiptMixin,
 ) -> _MCPSessionStateMixin:
     return cast(_MCPSessionStateMixin, session)
+
+
+def _receipt_intent_of(
+    session: _MCPSessionReviewReceiptMixin,
+    *,
+    record: MCPRunRecord,
+    intent_id: str | None,
+) -> IntentRecord | None:
+    # The intent's root, off its run whole or by identity alone: the
+    # check below needs no payload.
+    intent_root: Path | None = None
+    intent: IntentRecord | None
+    if intent_id is not None:
+        intent_run, intent = _intent_session(session)._resolve_intent(
+            run_id=None,
+            intent_id=intent_id,
+        )
+        intent_root = intent_run.root
+    else:
+        intent = _patch_session(session)._optional_intent(
+            record=record,
+            intent_id=None,
+        )
+    if intent is not None and intent.run_id != record.run_id:
+        intent_root = (
+            intent_root or _intent_session(session)._held_intent_bound_run(intent).root
+        )
+        if intent_root != record.root:
+            raise MCPServiceContractError(
+                "Receipt intent must belong to the selected run or the same root."
+            )
+    return intent
+
+
+def _attested_before_run(
+    session: _MCPSessionReviewReceiptMixin,
+    *,
+    record: MCPRunRecord,
+    intent: IntentRecord | None,
+) -> MCPHeldRun | None:
+    """Return the comparison base attested by the change intent, or ``None``.
+
+    gh #57 family C: a receipt's structural delta may only ever describe the
+    run pair the verification actually used — after = the receipt's own run,
+    before = the intent's run.  An arbitrary same-root store neighbour
+    (``_previous_run_for_root``) is not evidence about this patch: comparing
+    against one fabricated ``structural_regressions`` violations in durable
+    receipts for changes the controller had already accepted.  The intent's
+    run is answered whole or by its resident identity: the pair is compared
+    over the store's facts when the before-run's payload was dropped.
+    """
+    if intent is None or intent.run_id == record.run_id:
+        return None
+    return _intent_session(session)._held_intent_bound_run(intent)
 
 
 class _MCPSessionReviewReceiptMixin:
@@ -245,27 +301,7 @@ class _MCPSessionReviewReceiptMixin:
         record: MCPRunRecord,
         intent_id: str | None,
     ) -> IntentRecord | None:
-        intent_record: MCPRunRecord | None = None
-        intent: IntentRecord | None
-        if intent_id is not None:
-            intent_record, intent = _intent_session(self)._resolve_intent(
-                run_id=None,
-                intent_id=intent_id,
-            )
-        else:
-            intent = _patch_session(self)._optional_intent(
-                record=record,
-                intent_id=None,
-            )
-        if intent is not None and intent.run_id != record.run_id:
-            intent_record = intent_record or _intent_session(self)._intent_bound_run(
-                intent
-            )
-            if intent_record.root != record.root:
-                raise MCPServiceContractError(
-                    "Receipt intent must belong to the selected run or the same root."
-                )
-        return intent
+        return _receipt_intent_of(self, record=record, intent_id=intent_id)
 
     def _receipt_changed_paths(
         self,
@@ -461,25 +497,6 @@ class _MCPSessionReviewReceiptMixin:
                 return finding
         return None
 
-    def _attested_before_run(
-        self,
-        *,
-        record: MCPRunRecord,
-        intent: IntentRecord | None,
-    ) -> MCPRunRecord | None:
-        """Return the comparison base attested by the change intent, or ``None``.
-
-        gh #57 family C: a receipt's structural delta may only ever describe the
-        run pair the verification actually used — after = the receipt's own run,
-        before = the intent's run.  An arbitrary same-root store neighbour
-        (``_previous_run_for_root``) is not evidence about this patch: comparing
-        against one fabricated ``structural_regressions`` violations in durable
-        receipts for changes the controller had already accepted.
-        """
-        if intent is None or intent.run_id == record.run_id:
-            return None
-        return _intent_session(self)._intent_bound_run(intent)
-
     def _receipt_structural_delta(
         self,
         record: MCPRunRecord,
@@ -495,7 +512,7 @@ class _MCPSessionReviewReceiptMixin:
                 "health_delta": None,
                 "verdict": "not_applicable",
             }
-        previous = self._attested_before_run(record=record, intent=intent)
+        previous = _attested_before_run(self, record=record, intent=intent)
         if previous is None:
             # Same-id before/after is the analyzer-invariant case, not an
             # absent comparison — but only when the store shows this exact run
@@ -527,7 +544,13 @@ class _MCPSessionReviewReceiptMixin:
         # Both records are already root-bound (the attested before-run at the
         # intent's own root); compare them directly instead of re-resolving
         # ids that same-commit sibling worktrees share.
-        compare_payload, _serving = _state_session(self)._served_compare_run_records(
+        compare_payload, _serving = held_run_comparison(
+            self,
+            whole=lambda whole_before, whole_after: _state_session(
+                self
+            )._served_compare_run_records(
+                before=whole_before, after=whole_after, focus="all"
+            ),
             before=previous,
             after=record,
             focus="all",

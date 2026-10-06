@@ -61,6 +61,8 @@ from ._session_shared import (
 )
 from ._workspace_drift import compute_drift
 from .messages.run_payload import (
+    CLAIMS_NOT_VALIDATED,
+    CLAIMS_NOT_VALIDATED_MESSAGE,
     PAYLOAD_EVICTED,
     payload_evicted_message,
     payload_evicted_next_step,
@@ -213,6 +215,24 @@ def payload_evicted_run_summary(
     return payload
 
 
+def held_claims(
+    record: MCPHeldRun,
+    validate: Callable[[MCPRunRecord], dict[str, object] | None],
+) -> dict[str, object] | None:
+    """The claims block of a finish: ``validate`` over the before-run held
+    whole; for one held without its payload, not validated -- typed, with
+    ``valid`` unknown (``None``), never a pass and never a violation."""
+    if isinstance(record, MCPRunRecord):
+        return validate(record)
+    return {
+        "run_id": _helpers._short_run_id(record.run_id),
+        "status": CLAIMS_NOT_VALIDATED,
+        "reason": PAYLOAD_EVICTED,
+        "valid": None,
+        "message": CLAIMS_NOT_VALIDATED_MESSAGE,
+    }
+
+
 def payload_evicted_blast_radius(
     identity: MCPRunIdentity,
     compute: Callable[[BlastRadiusFacts], BlastRadiusResult],
@@ -231,6 +251,7 @@ def payload_evicted_blast_radius(
 __all__ = [
     "PAYLOAD_EVICTED",
     "SERVING_DETAIL_PAYLOAD_EVICTED",
+    "held_claims",
     "payload_evicted_answer",
     "payload_evicted_blast_radius",
     "payload_evicted_outcome",

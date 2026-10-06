@@ -51,6 +51,7 @@ from ._intent import (
     normalize_intent_scope,
 )
 from ._patch_trail_bridge import build_patch_trail_inputs
+from ._run_residence import held_claims
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
@@ -64,7 +65,9 @@ from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
+    MCPHeldRun,
     MCPRunNotFoundError,
+    MCPRunPayloadEvictedError,
     MCPRunRecord,
     MCPRunRootMismatchError,
     MCPServiceContractError,
@@ -76,6 +79,7 @@ from ._workspace_intents import (
 )
 from .messages import errors as err_msgs
 from .messages import workflow as workflow_msgs
+from .messages.run_payload import PAYLOAD_EVICTED
 
 TRANSITIVE_SUMMARY_LIMIT: Final[int] = 10
 
@@ -164,6 +168,68 @@ def _attested_evidence_bundle(
         if patch_trail_digest:
             bundle["patch_trail_digest"] = patch_trail_digest
     return bundle
+
+
+def _finish_intent_or_answer(
+    session: _MCPSessionWorkflowMixin,
+    intent_id: str,
+) -> tuple[MCPHeldRun, IntentRecord] | dict[str, object]:
+    """The intent finish verifies -- its before-run whole or by its resident
+    identity alone -- or the typed answer for one it cannot.
+
+    A queued intent is answered as queued whatever became of its run:
+    that answer never needed the run, and promote is where its loss is
+    named.  Any other intent whose before-run is gone answers
+    ``before_run_evicted``.
+    """
+
+    try:
+        record, active_intent = _intent_session(session)._resolve_intent(
+            run_id=None,
+            intent_id=intent_id,
+        )
+    except MCPIntentBeforeRunEvictedError as evicted:
+        active_intent = evicted.intent
+        if active_intent.status != IntentStatus.QUEUED:
+            return session._finish_before_run_evicted_response(active_intent)
+        return session._finish_queued_response(intent_id)
+    if active_intent.status == IntentStatus.QUEUED:
+        return session._finish_queued_response(intent_id)
+    return record, active_intent
+
+
+def _receipt_or_refusal(
+    receipt: dict[str, object],
+) -> tuple[dict[str, object] | None, str | None]:
+    """A receipt, or the typed refusal the service answers in its place for
+    a run held without its payload -- which is no receipt."""
+    if receipt.get("reason") == PAYLOAD_EVICTED:
+        return None, str(receipt.get("message", PAYLOAD_EVICTED))
+    return receipt, None
+
+
+def _claims_asked(
+    verify_payload: Mapping[str, object], claims_text: str | None
+) -> bool:
+    """Whether a finish validates claims at all: claims text was given and
+    the verification recommends validating it."""
+    return bool(claims_text) and bool(
+        verify_payload.get("claim_validation_recommended")
+    )
+
+
+def _finish_claims(
+    record: MCPHeldRun,
+    *,
+    asked: bool,
+    validate: Callable[[MCPRunRecord], dict[str, object] | None],
+) -> dict[str, object] | None:
+    """The claims block of a finish: ``validate`` against the before-run held
+    whole; not validated -- typed -- against one held without its payload;
+    ``None`` when the finish was not ``asked`` to validate any."""
+    if not asked:
+        return None
+    return held_claims(record, validate)
 
 
 class _MCPSessionWorkflowMixin:
@@ -578,9 +644,8 @@ class _MCPSessionWorkflowMixin:
         patch_trail_detail: str = "summary",
     ) -> dict[str, object]:
         intent_session = _intent_session(self)
-        patch_session = _patch_session(self)
         # 1. Resolve intent -- or answer for one that cannot be verified
-        resolved = self._finish_intent_or_answer(intent_id)
+        resolved = _finish_intent_or_answer(self, intent_id)
         if isinstance(resolved, dict):
             return resolved
         record, active_intent = resolved
@@ -694,7 +759,8 @@ class _MCPSessionWorkflowMixin:
                     "claims": None,
                     "receipt": None,
                     "patch_trail": self._finish_patch_trail(
-                        record=record,
+                        root=record.root,
+                        run_id=record.run_id,
                         intent=active_intent,
                         check_payload=check_payload,
                         verify_payload=_NOT_REACHED_VERIFY_PAYLOAD,
@@ -711,18 +777,17 @@ class _MCPSessionWorkflowMixin:
             )
 
         # 5. Verify (before_run_id auto-resolves from intent)
-        verify_payload = patch_session._patch_contract_verify(
-            before_run_id=None,
+        verify_payload = self._finish_verification(
+            intent=active_intent,
             after_run_id=after_run_id,
-            intent_id=intent_id,
-            strictness=patch_session._validated_strictness(strictness),
-            diff_ref=None,
+            strictness=strictness,
             changed_files=scope_files,
         )
         verify_status = str(verify_payload.get("status", ""))
         patch_verify_audit_sequence = _pop_audit_sequence(verify_payload)
         patch_trail_payload = self._finish_patch_trail(
-            record=record,
+            root=record.root,
+            run_id=record.run_id,
             intent=active_intent,
             check_payload=check_payload,
             verify_payload=verify_payload,
@@ -779,43 +844,37 @@ class _MCPSessionWorkflowMixin:
             )
 
         health_regression_advisory = verify_payload.get("health_regression_advisory")
-        claims_payload = self._conditional_claim_validation(
-            record=record,
-            verify_payload=verify_payload,
-            claims_text=claims_text,
+        claims_payload = _finish_claims(
+            record,
+            asked=_claims_asked(verify_payload, claims_text),
+            validate=lambda whole: self._conditional_claim_validation(
+                record=whole,
+                verify_payload=verify_payload,
+                claims_text=claims_text,
+            ),
         )
 
         # 8. Receipt (after claims, before clear)
-        receipt_payload: dict[str, object] | None = None
-        receipt_error: str | None = None
-        if create_receipt:
-            try:
-                # gh #57 family A: the receipt's evidence inputs are exactly the
-                # inputs this finish attested — the after-run the verification
-                # consumed, falling back to the intent's run only when the
-                # profile required no after-run (docs-only / non-Python), plus
-                # the attested outcome itself.  Passing record.run_id
-                # unconditionally sourced reviewed evidence, provenance, health
-                # and generated_at from the pre-fix before-run.
-                receipt_payload = _receipt_session(self).create_review_receipt(
-                    run_id=(
-                        after_run_id if after_run_id is not None else record.run_id
-                    ),
-                    intent_id=intent_id,
-                    verification_accepted=verify_status in _ACCEPTED_STATUSES,
-                    # A receipt that lists what it does NOT claim must list the
-                    # paths it never checked; otherwise the attestation reads as
-                    # covering the whole tree.
-                    unverified_paths=finish_hygiene.unverified_python_unscoped_dirty,
-                )
-            except (
-                MCPServiceContractError,
-                MCPRunNotFoundError,
-                MCPRunRootMismatchError,
-            ) as exc:
-                # A run the receipt needed was lost after the verification
-                # accepted: reported in-band, never raised out of finish.
-                receipt_error = str(exc)
+        # gh #57 family A: the receipt's evidence inputs are exactly the
+        # inputs this finish attested — the after-run the verification
+        # consumed, falling back to the intent's run only when the profile
+        # required no after-run (docs-only / non-Python), plus the attested
+        # outcome itself.  Passing record.run_id unconditionally sourced
+        # reviewed evidence, provenance, health and generated_at from the
+        # pre-fix before-run.
+        receipt_payload, receipt_error = (
+            self._finish_receipt(
+                run_id=after_run_id if after_run_id is not None else record.run_id,
+                intent_id=intent_id,
+                accepted=verify_status in _ACCEPTED_STATUSES,
+                # A receipt that lists what it does NOT claim must list the
+                # paths it never checked; otherwise the attestation reads as
+                # covering the whole tree.
+                unverified_paths=finish_hygiene.unverified_python_unscoped_dirty,
+            )
+            if create_receipt
+            else (None, None)
+        )
 
         # 9. Memory side effects — the LAST fallible operations this finish's
         # success depends on, and therefore the last that run BEFORE authority
@@ -828,7 +887,8 @@ class _MCPSessionWorkflowMixin:
         accepted = verify_status in _ACCEPTED_STATUSES
         try:
             memory_hook, projection_hook = self._finish_memory_hooks(
-                record=record,
+                root=record.root,
+                run_id=record.run_id,
                 verify_payload=verify_payload,
                 receipt_payload=receipt_payload,
                 patch_trail_payload=patch_trail_payload,
@@ -948,7 +1008,8 @@ class _MCPSessionWorkflowMixin:
     def _finish_memory_hooks(
         self,
         *,
-        record: MCPRunRecord,
+        root: Path,
+        run_id: str,
         verify_payload: dict[str, object],
         receipt_payload: dict[str, object] | None,
         patch_trail_payload: dict[str, object],
@@ -974,7 +1035,7 @@ class _MCPSessionWorkflowMixin:
         if propose_memory:
             profile = verify_payload.get("verification_profile")
             memory_hook = memory_session.finish_propose_memory(
-                root_path=record.root,
+                root_path=root,
                 changed_files=resolved_files,
                 claims_text=claims_text,
                 review_text=review_text,
@@ -982,18 +1043,19 @@ class _MCPSessionWorkflowMixin:
                 attested_evidence=_attested_evidence_bundle(
                     receipt_payload=receipt_payload,
                     patch_trail_payload=patch_trail_payload,
-                    run_id=record.run_id,
+                    run_id=run_id,
                 ),
             )
         projection_hook = memory_session.maybe_auto_enqueue_projection_rebuild(
-            root_path=record.root
+            root_path=root
         )
         return memory_hook, projection_hook
 
     def _finish_patch_trail(
         self,
         *,
-        record: MCPRunRecord,
+        root: Path,
+        run_id: str,
         intent: IntentRecord,
         check_payload: dict[str, object],
         verify_payload: dict[str, object],
@@ -1004,7 +1066,7 @@ class _MCPSessionWorkflowMixin:
     ) -> dict[str, object]:
         detail = "full" if patch_trail_detail == "full" else "summary"
         inputs = build_patch_trail_inputs(
-            root_path=record.root,
+            root_path=root,
             intent=intent,
             check_payload=check_payload,
             verify_payload=verify_payload,
@@ -1026,10 +1088,10 @@ class _MCPSessionWorkflowMixin:
         )
         intent_session = _intent_session(self)
         patch_trail_audit_sequence = intent_session._audit_emit(
-            root=record.root,
+            root=root,
             event_type=EVENT_PATCH_TRAIL_COMPUTED,
             severity=severity,
-            run_id=_helpers._short_run_id(record.run_id),
+            run_id=_helpers._short_run_id(run_id),
             intent_id=intent.intent_id,
             report_digest=intent.report_digest,
             status=trail.scope_check_status,
@@ -1188,31 +1250,66 @@ class _MCPSessionWorkflowMixin:
         """
         return not _intent_session(self)._knows_intent(intent_id)
 
-    def _finish_intent_or_answer(
+    def _finish_receipt(
         self,
+        *,
+        run_id: str,
         intent_id: str,
-    ) -> tuple[MCPRunRecord, IntentRecord] | dict[str, object]:
-        """The intent finish verifies, or the typed answer for one it cannot.
-
-        A queued intent is answered as queued whatever became of its run:
-        that answer never needed the run, and promote is where its loss is
-        named.  Any other intent whose before-run is gone answers
-        ``before_run_evicted``.
-        """
+        accepted: bool,
+        unverified_paths: tuple[str, ...],
+    ) -> tuple[dict[str, object] | None, str | None]:
+        """The receipt this finish attests, or why there is none: a run the
+        receipt needed was lost after the verification accepted -- or is held
+        without the payload its findings live in -- is reported in-band, never
+        raised out of finish, and keeps the intent until a receipt is made."""
 
         try:
-            record, active_intent = _intent_session(self)._resolve_intent(
-                run_id=None,
+            receipt = _receipt_session(self).create_review_receipt(
+                run_id=run_id,
                 intent_id=intent_id,
+                verification_accepted=accepted,
+                unverified_paths=unverified_paths,
             )
-        except MCPIntentBeforeRunEvictedError as evicted:
-            active_intent = evicted.intent
-            if active_intent.status != IntentStatus.QUEUED:
-                return self._finish_before_run_evicted_response(active_intent)
-            return self._finish_queued_response(intent_id)
-        if active_intent.status == IntentStatus.QUEUED:
-            return self._finish_queued_response(intent_id)
-        return record, active_intent
+        except (
+            MCPServiceContractError,
+            MCPRunNotFoundError,
+            MCPRunPayloadEvictedError,
+            MCPRunRootMismatchError,
+        ) as exc:
+            return None, str(exc)
+        return _receipt_or_refusal(receipt)
+
+    def _finish_verification(
+        self,
+        *,
+        intent: IntentRecord,
+        after_run_id: str | None,
+        strictness: str,
+        changed_files: Sequence[str],
+    ) -> dict[str, object]:
+        """The verification finish decides by.  A before-run held without its
+        payload is verified over the run store's facts; when the store cannot
+        answer for it either, nothing is left to verify against: the intent is
+        retired -- kept, announced, its row moved -- and the verification is
+        the typed ``before_run_evicted`` with the recover-or-clear road."""
+
+        patch_session = _patch_session(self)
+        try:
+            return patch_session._patch_contract_verify(
+                before_run_id=None,
+                after_run_id=after_run_id,
+                intent_id=intent.intent_id,
+                strictness=patch_session._validated_strictness(strictness),
+                diff_ref=None,
+                changed_files=changed_files,
+            )
+        except MCPRunPayloadEvictedError as evicted:
+            _intent_session(self)._retire_unanswerable_intent(intent)
+            return {
+                "mode": "verify",
+                **before_run_evicted_answer(intent),
+                "serving": evicted.serving,
+            }
 
     def _finish_queued_response(self, intent_id: str) -> dict[str, object]:
         return _budgeted_finish_response(
@@ -1576,6 +1673,14 @@ def _finish_claim_status(
         return "skipped_no_claims_text"
     if claims_payload is None:
         return "skipped_not_recommended"
+    return _claim_verdict(claims_payload)
+
+
+def _claim_verdict(claims_payload: Mapping[str, object]) -> str:
+    """Valid, violated -- or, for claims a before-run without its payload
+    could not be read against, not validated: neither of the two."""
+    if claims_payload.get("valid") is None and "status" in claims_payload:
+        return str(claims_payload["status"])
     return "valid" if claims_payload.get("valid") is True else "violated"
 
 

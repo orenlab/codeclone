@@ -60,7 +60,6 @@ from ._session_shared import (
     MCPRunRecord,
     MCPRunRootMismatchError,
     MCPServiceContractError,
-    whole_record,
 )
 from ._workspace_intent_store import (
     InaccessibleRegistryEntry,
@@ -957,13 +956,13 @@ class _MCPSessionIntentMixin:
         run_id: str | None,
         intent_id: str | None,
         root: str | None = None,
-    ) -> tuple[MCPRunRecord, IntentRecord]:
-        """:meth:`_resolve_held_intent` for a reader of the run's payload: a
-        run held without it is the typed refusal."""
-        record, intent = self._resolve_held_intent(
-            run_id=run_id, intent_id=intent_id, root=root
-        )
-        return whole_record(record), intent
+    ) -> tuple[MCPHeldRun, IntentRecord]:
+        """The intent and its run, whole or by its resident identity alone
+        (:meth:`_resolve_held_intent`): what an intent is checked, verified
+        and attested by is the run's identity and witnesses; a reader of
+        the payload asks the registry for the record and is refused, typed,
+        when the payload is gone."""
+        return self._resolve_held_intent(run_id=run_id, intent_id=intent_id, root=root)
 
     def _resolve_held_intent(
         self,
@@ -1965,6 +1964,20 @@ class _MCPSessionIntentMixin:
                 self._before_run_evicted_intents[intent.intent_id] = intent
         for intent in retired:
             self._announce_retirement(intent)
+
+    def _retire_unanswerable_intent(self, intent: IntentRecord) -> None:
+        """Retire an intent whose before-run is held without its payload and
+        that the run store can no longer answer for either: nothing is left
+        to verify it against.  The same transition as a lost before-run --
+        kept, announced, its registry row moved -- and its pin released, so
+        the identity nothing can answer from ages out like any other."""
+
+        with self._state_lock:
+            if self._active_intents.pop(intent.intent_id, None) is None:
+                return
+            self._before_run_evicted_intents[intent.intent_id] = intent
+        self._unpin_intent_run(intent)
+        self._announce_retirement(intent)
 
     def _announce_retirement(self, intent: IntentRecord) -> None:
         # The row carries the fate: an intent that held scope now needs

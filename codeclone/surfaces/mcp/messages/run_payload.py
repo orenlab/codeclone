@@ -29,6 +29,17 @@ PAYLOAD_EVICTED_MESSAGE: Final = (
 )
 
 
+#: The claims block of a finish whose before-run is held without its payload:
+#: the claims are read against the run's findings, which only the payload
+#: holds, so they are not validated -- the verdict does not depend on them.
+CLAIMS_NOT_VALIDATED: Final = "not_validated"
+CLAIMS_NOT_VALIDATED_MESSAGE: Final = (
+    "The claims were not validated: the before-run's analysis is no longer "
+    "held in memory and its findings are not read from the run store. The "
+    "verification verdict does not depend on them."
+)
+
+
 def payload_evicted_next_step(*, root: str, run_id: str) -> str:
     return PAYLOAD_EVICTED_NEXT.format(root=root, run_id=run_id)
 
@@ -38,6 +49,8 @@ def payload_evicted_message(*, run_id: str) -> str:
 
 
 __all__ = [
+    "CLAIMS_NOT_VALIDATED",
+    "CLAIMS_NOT_VALIDATED_MESSAGE",
     "PAYLOAD_EVICTED",
     "PAYLOAD_EVICTED_MESSAGE",
     "PAYLOAD_EVICTED_NEXT",
