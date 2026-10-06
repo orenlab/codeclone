@@ -39,7 +39,10 @@ program, with a clean twin as control (``tests/test_git_process_hardening*``):
 * a worktree ``diff`` reads a private copy of the index (``GIT_INDEX_FILE``,
   mtime kept, ``core.splitIndex=false``): with stat-only dirt it refreshes and
   rewrites the index even under ``--no-optional-locks``, and a split index
-  would also write a new shared index into ``.git``.
+  would also write a new shared index into ``.git``. The copy lives in the
+  per-user CodeClone cache directory, one of the two places CodeClone may
+  write; when that directory cannot be used the diff is refused, never moved
+  to the OS temporary directory.
 * the child environment drops every variable git itself drops when it enters
   another repository (``git rev-parse --local-env-vars``), so an inherited
   ``GIT_DIR`` or ``GIT_INDEX_FILE`` cannot point the answer at another
@@ -141,6 +144,12 @@ _REPOSITORY_LOCAL_ENV: Final = frozenset(
 _WITHHELD_ENV: Final = frozenset({"CODECLONE_MCP_AUTH_TOKEN"})
 
 _NO_LAZY_FETCH_ENV: Final = "GIT_NO_LAZY_FETCH"
+
+#: The per-user CodeClone cache directory: the service directory outside every
+#: checkout (``paths.workspace.service_directories``). This ring cannot import
+#: that one, so ``tests/test_git_process_owner.py`` holds the spelling to it.
+_USER_CACHE_DIR: Final = "~/.cache/codeclone"
+_PRIVATE_INDEX_DIR: Final = "git-index"
 
 _Out = TypeVar("_Out", str, bytes)
 
@@ -342,6 +351,21 @@ def _filter_driver_overrides(root: Path, *, timeout: float) -> tuple[str, ...]:
     return tuple(overrides)
 
 
+def _private_index_parent() -> Path:
+    """Where private index copies are made, created on first use.
+
+    An unresolvable home or an unusable directory refuses the call: the copy
+    has no other place CodeClone may write.
+    """
+
+    try:
+        parent = Path(_USER_CACHE_DIR).expanduser() / _PRIVATE_INDEX_DIR
+        parent.mkdir(parents=True, exist_ok=True)
+    except (OSError, RuntimeError) as exc:
+        raise GitInvocationRefused(f"no private index for git: {exc}") from exc
+    return parent
+
+
 def _reads_worktree_index(verb: str, rest: Sequence[str]) -> bool:
     if verb != "diff":
         return False
@@ -375,8 +399,9 @@ def _private_index(
     index_path = Path(os.fsdecode(located.stdout).rstrip("\n"))
     if not index_path.is_absolute():
         index_path = root / index_path
+    parent = _private_index_parent()
     try:
-        directory = Path(tempfile.mkdtemp(prefix="codeclone-git-index-"))
+        directory = Path(tempfile.mkdtemp(prefix="index-", dir=parent))
     except OSError as exc:
         raise GitInvocationRefused(f"no private index for git: {exc}") from exc
     try:

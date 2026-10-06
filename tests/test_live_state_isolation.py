@@ -730,3 +730,32 @@ def test_a_write_into_the_host_codeclone_reds_the_wired_gate(
 
     result.assert_outcomes(**outcomes)
     result.stdout.fnmatch_lines(named)
+
+
+def test_a_git_private_index_under_the_real_home_goes_to_the_test_scratch(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Under the real home the product's private index directory is the live
+    per-user cache; the guard hands the owner the test's scratch instead. The
+    fence makes a missing guard red before anything is created there."""
+
+    from codeclone.utils import git_process
+
+    guard = _guard(request)
+    live_cache = Path(git_process._USER_CACHE_DIR).expanduser()
+    assert guard.boundary.state_dir_of(live_cache) is not None, (
+        "positive control: the per-user cache is a live service directory"
+    )
+    real_mkdir = Path.mkdir
+
+    def fenced_mkdir(
+        self: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False
+    ) -> None:
+        if self.resolve().is_relative_to(live_cache.resolve()):
+            raise AssertionError(f"a test created {self} in the live user cache")
+        real_mkdir(self, mode, parents, exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", fenced_mkdir)
+    parent = git_process._private_index_parent()
+    assert parent.is_relative_to(guard.scratch)
+    assert not parent.resolve().is_relative_to(live_cache.resolve())

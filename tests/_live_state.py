@@ -42,6 +42,9 @@ durable write has to pass:
 * a ``git`` subprocess that would mutate a live repository is refused before
   it is spawned, on a read-verb allowlist (an unknown verb under a live root
   is refused, never assumed harmless);
+* the git owner's private index copies, which the product makes in the
+  per-user CodeClone cache directory, go to the running test's scratch when
+  that directory is the live one (a test under the real home);
 * the working tree of the hosting checkout is compared before and after the
   session, so residue that reached the tree by any other route is named --
   and so are the files inside its ``.codeclone/`` that no other fence
@@ -538,6 +541,37 @@ def git_mutation_under_live_root(
     )
 
 
+def make_private_index_relocator(
+    original: Callable[[], Path],
+    *,
+    boundary: LiveStateBoundary,
+    scratch_anchor: Callable[[], Path],
+    lifted: Callable[[], bool],
+) -> Callable[[], Path]:
+    """The git owner's private index directory, moved off a live per-user cache.
+
+    The product copies the index into the per-user CodeClone cache directory
+    for every worktree ``git diff``. A test under the real home would write
+    there; a test that isolates its home already writes into its own scratch
+    and keeps the product's answer, refusals included.
+    """
+
+    from codeclone.utils import git_process
+
+    def private_index_parent() -> Path:
+        try:
+            candidate = Path(git_process._USER_CACHE_DIR).expanduser()
+        except RuntimeError:
+            return original()
+        if lifted() or boundary.state_dir_of(candidate) is None:
+            return original()
+        relocated = scratch_anchor() / git_process._PRIVATE_INDEX_DIR
+        relocated.mkdir(parents=True, exist_ok=True)
+        return relocated
+
+    return private_index_parent
+
+
 def make_guarded_popen_init(
     real_init: Callable[..., None],
     *,
@@ -765,6 +799,7 @@ class LiveStateGuard:
         """Patch the in-process choke points for the whole session."""
 
         import codeclone.config.memory as memory_config
+        import codeclone.utils.git_process as git_process
         import codeclone.utils.repo_paths as repo_paths
 
         boundary = discover_live_state_boundary(checkout=hosting_checkout)
@@ -792,6 +827,16 @@ class LiveStateGuard:
                 boundary=boundary,
                 scratch_anchor=lambda: guard.scratch,
                 on_redirect=guard.record_twin,
+            ),
+        )
+        guard._patch(
+            git_process,
+            "_private_index_parent",
+            lambda original: make_private_index_relocator(
+                original,
+                boundary=boundary,
+                scratch_anchor=lambda: guard.scratch,
+                lifted=lifted,
             ),
         )
         guard._patch(

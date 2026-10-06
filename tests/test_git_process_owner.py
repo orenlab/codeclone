@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from codeclone.api.workspace import is_codeclone_service_path
 from codeclone.surfaces.mcp.auth import MCP_AUTH_TOKEN_ENV
 from codeclone.utils import git_process
 
@@ -127,7 +128,9 @@ def test_no_private_index_means_no_diff(
     def mkdtemp(*args: object, **kwargs: object) -> str:
         if failing == "mkdtemp":
             raise PermissionError("no temporary directory")
-        made.append(Path(real_mkdtemp(prefix="codeclone-git-index-")))
+        made.append(
+            Path(real_mkdtemp(prefix="index-", dir=git_process._private_index_parent()))
+        )
         return str(made[-1])
 
     def copy2(*_args: object, **_kwargs: object) -> None:
@@ -142,6 +145,76 @@ def test_no_private_index_means_no_diff(
         )
     assert (repo.root / ".git" / "index").read_bytes() == before
     assert [path.exists() for path in made] == ([False] if failing == "copy2" else [])
+
+
+_WORKTREE_DIFF = ["diff", "--name-only", "HEAD", "--"]
+
+
+def _watched_os_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An empty directory standing in for the OS temporary directory."""
+
+    os_temp = tmp_path / "os-temp"
+    os_temp.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(os_temp))
+    return os_temp
+
+
+def test_the_owner_cache_directory_is_a_codeclone_service_directory(
+    tmp_path: Path,
+) -> None:
+    """The owner spells the per-user cache directory itself (its ring cannot
+    import the layout module); the layout module's boundary must admit it."""
+
+    private_parent = (
+        Path(git_process._USER_CACHE_DIR).expanduser() / git_process._PRIVATE_INDEX_DIR
+    )
+    assert is_codeclone_service_path(private_parent, root=tmp_path)
+    assert not is_codeclone_service_path(tmp_path / "elsewhere", root=tmp_path)
+
+
+def test_private_index_lives_in_the_per_user_cache_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = build_repo(tmp_path / "repo")
+    os_temp = _watched_os_temp(tmp_path, monkeypatch)
+    copies: list[tuple[Path, list[str]]] = []
+    real_copy2 = shutil.copy2
+
+    def copy2(src: Path, dst: Path, **kwargs: bool) -> object:
+        copies.append((Path(dst), sorted(path.name for path in os_temp.iterdir())))
+        return real_copy2(src, dst, **kwargs)
+
+    monkeypatch.setattr(shutil, "copy2", copy2)
+    answer = git_process.run_git_text(repo.root, _WORKTREE_DIFF, timeout=10)
+
+    assert answer.stdout.split() == ["a.py", "c.py", "staged.py"]
+    ((private, os_temp_during_the_call),) = copies
+    parent = Path("~/.cache/codeclone/git-index").expanduser()
+    assert private.is_relative_to(parent)
+    assert is_codeclone_service_path(private, root=repo.root)
+    assert os_temp_during_the_call == []
+    assert sorted(os_temp.iterdir()) == []
+    assert sorted(parent.iterdir()) == [], "the copy outlived its call"
+
+
+@pytest.mark.parametrize("failure", ["not-a-directory", "home-unresolved"])
+def test_an_unusable_cache_directory_refuses_the_worktree_diff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """No other place may take the copy: the diff is refused, the same typed
+    road a driver git cannot be kept from running takes."""
+
+    repo = build_repo(tmp_path / "repo")
+    os_temp = _watched_os_temp(tmp_path, monkeypatch)
+    before = (repo.root / ".git" / "index").read_bytes()
+    if failure == "not-a-directory":
+        (Path(os.environ["HOME"]) / ".cache").write_text("", "utf-8")
+    else:
+        monkeypatch.setattr(os.path, "expanduser", lambda path: path)
+    with pytest.raises(git_process.GitInvocationRefused, match="no private index"):
+        git_process.run_git_text(repo.root, _WORKTREE_DIFF, timeout=10)
+    assert sorted(os_temp.iterdir()) == []
+    assert (repo.root / ".git" / "index").read_bytes() == before
 
 
 def test_failure_reports_the_command_asked_for(tmp_path: Path) -> None:
