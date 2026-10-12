@@ -406,15 +406,43 @@ def _require_priority(value: object, what: str) -> None:
         raise CanonicalModelError(f"{what} priority must be a float")
 
 
+def _pricing_efforts(severity: str, priority: float) -> tuple[str, ...]:
+    """The efforts under which the document prices a finding of this
+    severity at ``priority`` — ``severity rank / effort weight``, the one
+    formula of ``report.document._common._priority`` and
+    ``report.suggestions._priority``.  The weights are distinct, so at most
+    one effort prices any priority."""
+    return tuple(
+        effort
+        for effort, weight in EFFORT_WEIGHT.items()
+        if priority == float(SEVERITY_RANK[severity]) / float(weight)
+    )
+
+
 def finding_priority_is_admissible(severity: str, priority: float) -> bool:
     """Whether ``priority`` is the document's priority of a finding of this
-    severity under SOME effort — ``severity rank / effort weight``, the one
-    formula of ``report.document._common._priority`` and
-    ``report.suggestions._priority``."""
-    return any(
-        priority == float(SEVERITY_RANK[severity]) / float(weight)
-        for weight in EFFORT_WEIGHT.values()
-    )
+    severity under SOME effort."""
+    return bool(_pricing_efforts(severity, priority))
+
+
+def finding_effort(severity: str, priority: float) -> str:
+    """The effort a finding of this severity was priced under at
+    ``priority``: the admissibility law read backwards, unique because no
+    two effort weights are equal.
+
+    The store states the verdict on a finding and never the suggestion
+    beside it; this is how a store answer states the suggestion's effort —
+    which is the suggestion's own exactly while the document's group
+    builders and ``report.suggestions`` name one effort for one finding
+    (``tests/test_finding_effort.py`` holds the two producers to it).  A
+    priority no effort prices is refused, never answered with a default.
+    """
+    efforts = _pricing_efforts(severity, priority)
+    if not efforts:
+        raise CanonicalModelError(
+            f"priority {priority!r} is no effort's priority of a {severity!r} finding"
+        )
+    return efforts[0]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -602,6 +630,7 @@ __all__ = [
     "HotlistRow",
     "UnitRiskRow",
     "document_selections",
+    "finding_effort",
     "finding_priority_is_admissible",
     "finding_verdicts",
     "flatten_health_params",

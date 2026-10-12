@@ -332,3 +332,94 @@ __all__ = [
     "triage_account",
     "triage_answer",
 ]
+
+
+# -- the two producers of a suggestion's effort ------------------------------
+#
+# The document prices every finding group ``severity rank / effort weight``
+# under the effort its builder names (``report.document._findings_groups``,
+# ``_design_groups``), and the suggestion of the same finding states an
+# effort of its own (``report.suggestions``).  The store carries the price,
+# never the suggestion: the effort it answers is the price read backwards
+# (``canonical.evaluation_rows.finding_effort``), which is the suggestion's
+# effort exactly while the two producers name the same effort.
+
+
+@dataclass(frozen=True, slots=True)
+class SuggestionPricing:
+    """One suggestion of one population, beside the price of its finding.
+
+    ``severity`` / ``priority`` are the finding group's as the document
+    publishes them; ``suggested_effort`` is the suggestion's own
+    (``report.suggestions``) and ``published_effort`` the one the document's
+    ``derived.suggestions`` row states for it.
+    """
+
+    population: str
+    finding_id: str
+    category: str
+    severity: str
+    priority: float
+    suggested_effort: str
+    published_effort: str
+
+
+def suggestion_pricings(population: SummaryPopulation) -> tuple[SuggestionPricing, ...]:
+    """Every suggestion of the population's execution, priced."""
+    record = population.record
+    groups = {
+        str(finding.get("id", "")): finding
+        for finding in population.service._base_findings(record)
+    }
+    derived = as_mapping(record.served_report.get("derived"))
+    published = {
+        str(as_mapping(row).get("finding_id", "")): str(
+            as_mapping(as_mapping(row).get("action")).get("effort", "")
+        )
+        for row in as_sequence(derived.get("suggestions"))
+    }
+    pricings: list[SuggestionPricing] = []
+    for suggestion in record.suggestions:
+        finding_id = surface_helpers._suggestion_finding_id(suggestion)
+        group = as_mapping(groups.get(finding_id))
+        pricings.append(
+            SuggestionPricing(
+                population=population.name,
+                finding_id=finding_id,
+                category=suggestion.category,
+                severity=str(group.get("severity", "")),
+                priority=float(str(group.get("priority", "nan"))),
+                suggested_effort=suggestion.effort,
+                published_effort=published.get(finding_id, ""),
+            )
+        )
+    return tuple(pricings)
+
+
+__all__ += ["SuggestionPricing", "suggestion_pricings"]
+
+
+# -- the memory answer --------------------------------------------------------
+
+
+def without_serving(answer: Mapping[str, object]) -> dict[str, object]:
+    """An answer without the one block the serving edge adds."""
+    return {key: value for key, value in answer.items() if key != "serving"}
+
+
+def memory_triage(
+    population: SummaryPopulation, *, max_hotspots: int = 3, max_suggestions: int = 3
+) -> dict[str, object]:
+    """The answer the surface builds from the record alone: the triage
+    under the memory switch, without its ``serving`` block."""
+    return without_serving(
+        triage_answer(
+            population,
+            serve_from="memory",
+            max_hotspots=max_hotspots,
+            max_suggestions=max_suggestions,
+        )
+    )
+
+
+__all__ += ["memory_triage", "without_serving"]
