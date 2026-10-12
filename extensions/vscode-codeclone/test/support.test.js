@@ -196,6 +196,40 @@ test("spawnEnvForMcp keeps launcher-relevant env keys only", () => {
     assert.equal(env.SECRET_TOKEN, undefined);
 });
 
+// The CI markers CodeClone reads (codeclone/utils/ci.py), spelled out here on
+// purpose: a test that iterated the launcher's own list would shrink with it.
+for (const key of ["CI", "GITHUB_ACTIONS", "BUILDKITE", "TF_BUILD", "TEAMCITY_VERSION"]) {
+    test(`spawnEnvForMcp carries the CI marker ${key} to the MCP process`, () => {
+        const env = spawnEnvForMcp("", {PATH: "/bin", [key]: "true"});
+        assert.deepEqual(env, {PATH: "/bin", [key]: "true"});
+    });
+}
+
+for (const value of ["false", "", " 1 "]) {
+    test(`spawnEnvForMcp passes CI=${JSON.stringify(value)} through unchanged`, () => {
+        assert.deepEqual(spawnEnvForMcp("", {CI: value}), {CI: value});
+    });
+}
+
+test("spawnEnvForMcp never invents a CI marker the parent lacks", () => {
+    const env = spawnEnvForMcp("/workspace/repo", {PATH: "/bin", HOME: "/home/user"});
+    assert.deepEqual(env, {
+        PATH: "/bin",
+        HOME: "/home/user",
+        CODECLONE_WORKSPACE_ROOT: "/workspace/repo",
+    });
+});
+
+test("spawnEnvForMcp still strips variables outside the allowlist", () => {
+    const env = spawnEnvForMcp("", {
+        CI: "true",
+        GITLAB_CI: "true",
+        JENKINS_URL: "https://ci.example",
+        SECRET_TOKEN: "hidden",
+    });
+    assert.deepEqual(env, {CI: "true"});
+});
+
 test("launchSpecOrigin makes launcher provenance explicit", () => {
     assert.equal(
         launchSpecOrigin({
