@@ -8,12 +8,13 @@
 
 CodeClone reads CI from its own environment to choose behaviour
 (``codeclone/utils/ci.py`` is the one owner of the keys and the rule). The
-plugin launchers and the VS Code extension start ``codeclone-mcp`` with an
-environment rebuilt from an allowlist, so a key missing from that allowlist
-is a signal the launcher silently destroys. They run before the package is
-importable and cannot import the owner's list: each holds a copy, and this
-module holds every copy equal to the owner, carries each key through a real
-launcher into a real process, and proves the launcher invents nothing.
+plugin launchers, the VS Code extension and the Claude Desktop extension start
+``codeclone-mcp`` with an environment rebuilt from an allowlist, so a key
+missing from that allowlist is a signal the launcher silently destroys. They
+run before the package is importable and cannot import the owner's list: each
+holds a copy, and this module holds every copy equal to the owner, carries each
+key through a real launcher into a real process, and proves the launcher
+invents nothing.
 """
 
 from __future__ import annotations
@@ -35,6 +36,9 @@ from codeclone.utils.ci import _CI_ENV_KEYS
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SHARED_LAUNCHER = _REPO_ROOT / "plugins" / "codeclone" / "scripts" / "launch_mcp.py"
 _VSCODE_SUPPORT = _REPO_ROOT / "extensions" / "vscode-codeclone" / "src" / "support.js"
+_DESKTOP_LAUNCHER = (
+    _REPO_ROOT / "extensions" / "claude-desktop-codeclone" / "src" / "launcher.js"
+)
 
 #: Every monorepo entrypoint an MCP host spawns. The Claude Code and Cursor
 #: entrypoints delegate to the shared launcher here, and their storefront
@@ -80,13 +84,13 @@ def _child_env(parent: Mapping[str, str]) -> dict[str, str]:
     return child
 
 
-def _vscode_ci_keys() -> tuple[str, ...]:
-    source = _VSCODE_SUPPORT.read_text(encoding="utf-8")
+def _declared_ci_keys(launcher: Path) -> tuple[str, ...]:
+    source = launcher.read_text(encoding="utf-8")
     declaration = re.search(
         r"const SPAWN_ENV_CI_KEYS = Object\.freeze\(\[(?P<body>[^\]]*)\]\);",
         source,
     )
-    assert declaration is not None, "support.js declares no SPAWN_ENV_CI_KEYS"
+    assert declaration is not None, f"{launcher.name} declares no SPAWN_ENV_CI_KEYS"
     return tuple(re.findall(r'"([^"]*)"', declaration.group("body")))
 
 
@@ -129,8 +133,15 @@ def test_the_python_launcher_carries_exactly_the_owner_keys() -> None:
     assert _launcher["_SPAWN_ENV_CI_KEYS"] == frozenset(_CI_ENV_KEYS)
 
 
-def test_the_vscode_launcher_carries_exactly_the_owner_keys() -> None:
-    assert sorted(_vscode_ci_keys()) == sorted(_CI_ENV_KEYS)
+@pytest.mark.parametrize(
+    "launcher",
+    [_VSCODE_SUPPORT, _DESKTOP_LAUNCHER],
+    ids=["vscode", "claude-desktop"],
+)
+def test_each_extension_launcher_carries_exactly_the_owner_keys(
+    launcher: Path,
+) -> None:
+    assert sorted(_declared_ci_keys(launcher)) == sorted(_CI_ENV_KEYS)
 
 
 def _probe_workspace(tmp_path: Path) -> tuple[Path, Path]:
