@@ -357,3 +357,74 @@ def test_mcp_answers_with_the_unrecorded_warning_and_keeps_the_run(
     _assert_not_restorable(warnings)
     assert answer["run_id"]
     assert _store_rows(db)[1:] == (0, 0)
+
+
+def _raising(error: Exception) -> Callable[..., object]:
+    def raise_it(*_args: object, **_kwargs: object) -> object:
+        raise error
+
+    return raise_it
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        UnknownRunError("the leased run is gone", reason=UNKNOWN_RUN_NOT_PUBLISHED),
+        StoreIntegrityError("the registry cannot be read"),
+        RunReportLinkError("the two halves disagree"),
+        ValueError("a programming error at the finalization"),
+    ],
+    ids=["unknown-run", "integrity", "relation", "defect"],
+)
+def test_any_other_failure_at_the_finalization_stays_loud_and_roots_nothing(
+    tmp_path: Path,
+    run_store_mcp: RunStoreMcpRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    """MCP writes the edge with the execution record in one finalization;
+    every refusal there but the store's own unavailability escapes -- after
+    the publisher's lease is released, so the publication roots nothing."""
+    root, _beside = _corpus(tmp_path)
+    db = run_store_service_path(root)
+    monkeypatch.setattr(store_module, "finalize_execution", _raising(error))
+    with pytest.raises(type(error)) as raised:
+        run_store_mcp(root, db)
+    assert raised.value is error
+    runs, edges, leases = _store_rows(db)
+    assert (len(runs), edges, leases) == (1, 0, 0)
+
+
+def test_a_refused_finalization_sweep_rides_the_link_and_the_record_stands(
+    tmp_path: Path,
+    run_store_mcp: RunStoreMcpRunner,
+    monkeypatch: pytest.MonkeyPatch,
+    links: list[RunSnapshotLink],
+) -> None:
+    """The publication's own sweep runs; the one after the finalization is
+    refused.  The refusal is said on the link and in the answer, and the
+    finalization it followed stands: the run is linked and recorded."""
+    root, _beside = _corpus(tmp_path)
+    db = run_store_service_path(root)
+    real = store_module.RunStoreRetentionJob.collect
+    sweeps: list[int] = []
+
+    def second_refused(job: store_module.RunStoreRetentionJob) -> object:
+        sweeps.append(len(sweeps))
+        if len(sweeps) > 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(job)
+
+    monkeypatch.setattr(store_module.RunStoreRetentionJob, "collect", second_refused)
+    answer = run_store_mcp(root, db)
+    assert len(sweeps) == 2
+    link = links[-1]
+    assert link.state == RUN_SNAPSHOT_LINK_LINKED
+    assert "database is locked" in link.sweep_refusal
+    warnings = [str(item) for item in answer["warnings"]]  # type: ignore[attr-defined]
+    assert any(link.sweep_refusal in line for line in warnings), warnings
+    with RunStore(db, create=False) as store:
+        recorded = store._connection.execute(
+            "SELECT COUNT(*) FROM run_executions"
+        ).fetchone()[0]
+    assert recorded == 1

@@ -512,3 +512,68 @@ def test_authority_candidates_of_a_run_without_payload_come_from_the_store(
         assert {k: v for k, v in answer.items() if k != "serving"} == {
             k: v for k, v in whole.items() if k != "serving"
         }
+
+
+def test_candidates_of_a_run_the_store_states_none_for_are_refused_typed(
+    repo: Repo,
+) -> None:
+    """The same reading on a run whose analysis did not rank candidates (the
+    semantic-authority lane off): the store states no population, so a
+    server that does not hold the payload refuses it typed, never empty."""
+    run_id = _analyze(CodeCloneMCPService(), repo)
+    answer = CodeCloneMCPService().check_authority(
+        run_id=run_id, root=str(repo.root), section="candidates"
+    )
+    assert answer["reason"] == "payload_evicted", answer
+    assert answer["retryable"] is False
+
+
+def test_candidates_of_a_run_that_is_not_a_full_analysis_are_a_contract_error(
+    repo: Repo,
+) -> None:
+    """A clones-only run without its payload is refused in the record path's
+    own words: the check needs a full analysis."""
+    service = CodeCloneMCPService()
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(repo.root), respect_pyproject=True, analysis_mode="clones_only"
+        )
+    )
+    run_id = str(summary["run_id"])
+    _evicted(service, run_id, repo)
+    with pytest.raises(MCPServiceContractError, match="not compatible with this check"):
+        service.check_authority(
+            run_id=run_id, root=str(repo.root), section="candidates"
+        )
+
+
+def test_a_run_that_recorded_no_manifest_promises_nothing(repo: Repo) -> None:
+    """A record without the run's file manifest cannot tell whether the tree
+    moved: the step never promises the same run back."""
+    run_id, record, link = _analyzed(repo)
+    identity = resident_identity(record)
+    identity = replace(
+        identity,
+        execution=replace(
+            identity.execution, execution_event_id="no-manifest", manifest=None
+        ),
+    )
+    _write_record(repo, link, identity, execution="no-manifest")
+    answer = CodeCloneMCPService().get_production_triage(
+        run_id=run_id, root=str(repo.root)
+    )
+    assert answer["reason"] == "payload_evicted", answer
+    assert "or the run recorded no manifest" in str(answer["next_step"])
+    assert "registers this same run whole" not in str(answer["next_step"])
+
+
+def test_a_second_restoration_of_one_execution_is_the_run_already_held(
+    repo: Repo,
+) -> None:
+    _run_id, record, _link = _analyzed(repo)
+    identity = resident_identity(record)
+    runs = CodeCloneMCPService()._runs
+    first = runs.restore(identity)
+    again = runs.restore(replace(identity))
+    assert again is first
+    assert runs._registration_seq == 1
