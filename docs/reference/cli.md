@@ -455,6 +455,24 @@ The `streamable-http` transport requires the `CODECLONE_MCP_AUTH_TOKEN`
 environment variable to hold a bearer token of at least 32 characters; the
 server refuses HTTP without it.
 
+### CI environment
+
+CodeClone treats a process as running in CI when any of `CI`,
+`GITHUB_ACTIONS`, `BUILDKITE`, `TF_BUILD` or `TEAMCITY_VERSION` holds a
+non-empty value, whatever the value: `CI=false` counts as CI. The Codex,
+Claude Code and Cursor plugin launchers and the VS Code extension start
+`codeclone-mcp` with a reduced environment; they pass these five variables
+through exactly as the parent process set them and never add one the parent
+did not have.
+
+In CI, an explicit setting wins only where this table says so:
+
+| Behaviour | In CI | Explicit setting |
+|-----------|-------|------------------|
+| Memory projection rebuild jobs: `memory jobs enqueue`, `manage_engineering_memory(action="enqueue_projection_rebuild")` and the automatic enqueue after `finish_controlled_change` | Skipped; an explicit enqueue answers `reason: ci_environment` | None lifts it, `--force` included |
+| Run store, enabled by `CODECLONE_RUN_STORE_ENABLED=1` | Disabled | `CODECLONE_RUN_STORE_FORCE=1` keeps the enabled store on; it enables nothing by itself |
+| [Observability](observability.md), enabled by `CODECLONE_OBSERVABILITY_ENABLED=1` | No change | The explicit enable decides, in CI and outside it |
+
 ## Machine-readable output
 
 Reports are written to `.codeclone/report.<ext>` by default unless FILE is specified.
