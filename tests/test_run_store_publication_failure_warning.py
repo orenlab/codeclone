@@ -36,7 +36,7 @@ from typing import Final
 
 import pytest
 
-from codeclone.canonical.errors import CanonicalModelError
+from codeclone.canonical.errors import STORE_GENERATION_NEXT_STEP, CanonicalModelError
 from codeclone.core.canonical_snapshot import bridge_run_snapshot
 from codeclone.models import (
     RUN_SNAPSHOT_LINK_UNEVALUATED,
@@ -47,6 +47,7 @@ from codeclone.models import (
     RunSnapshotLink,
     RunSnapshotPublication,
 )
+from tests._run_store_paths import run_store_service_path
 from tests._run_store_schema_evidence import byte_state
 from tests.conftest import RunStoreCorpusRunner, RunStoreMcpRunner
 
@@ -127,11 +128,10 @@ def _colliding_corpus(tmp_path: Path, *, pyproject: bool = False) -> Path:
     return root
 
 
-def _old_generation_store(tmp_path: Path) -> tuple[Path, dict[str, object]]:
-    """A copy of the previous generation's real store and its byte state,
-    taken before any connection touched it."""
-    store = tmp_path / "old" / "runs.sqlite3"
-    store.parent.mkdir()
+def _old_generation_store(store: Path) -> tuple[Path, dict[str, object]]:
+    """A copy of the previous generation's real store at ``store`` and its
+    byte state, taken before any connection touched it."""
+    store.parent.mkdir(parents=True)
     shutil.copy(_GENERATION_2, store)
     return store, byte_state(store)
 
@@ -213,6 +213,37 @@ def test_the_bridge_carries_the_failure_and_the_link_says_one_line(
     assert link.warnings() == (_line(_COMPATIBILITY),)
 
 
+@pytest.mark.parametrize("document", [True, False], ids=["evaluated", "gate-only"])
+def test_the_bridge_carries_the_cure_and_the_link_says_it_on_the_same_line(
+    document: bool,
+) -> None:
+    """A contained failure that names its cure (a store this build refused:
+    move or delete it; the one migration command) carries it from the
+    publication onto the link, on both roads, and the one line says it."""
+    step = STORE_GENERATION_NEXT_STEP
+    link = bridge_run_snapshot(
+        publication=_failed(failure_next_step=step),
+        report_document=_document() if document else None,
+    )
+    assert (link.failure, link.failure_next_step) == (_COMPATIBILITY, step)
+    assert link.warnings() == (f"{_line(_COMPATIBILITY)}; next_step: {step}",)
+
+
+def test_a_cure_rides_a_contained_failure_and_nothing_else() -> None:
+    with pytest.raises(ValueError, match="next step rides a contained failure"):
+        RunSnapshotPublication(
+            outcome=RUN_SNAPSHOT_PUBLICATION_DISABLED,
+            admissible=False,
+            failure_next_step=STORE_GENERATION_NEXT_STEP,
+        )
+    with pytest.raises(ValueError, match="next step rides a contained failure"):
+        RunSnapshotLink(
+            state=RUN_SNAPSHOT_LINK_UNEVALUATED,
+            outcome=RUN_SNAPSHOT_PUBLICATION_DISABLED,
+            failure_next_step=STORE_GENERATION_NEXT_STEP,
+        )
+
+
 def test_a_link_carries_a_failure_on_the_failed_outcome_and_on_no_other() -> None:
     with pytest.raises(ValueError, match="failure's own type"):
         RunSnapshotLink(
@@ -243,7 +274,7 @@ def test_the_cli_says_the_old_generation_store_refusal_once_and_keeps_its_exit(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     root = _plain_corpus(tmp_path)
-    store, before = _old_generation_store(tmp_path)
+    store, before = _old_generation_store(tmp_path / "old" / "runs.sqlite3")
     report = root / "report.json"
     code = run_store_cli(root, *_ARGS, "--json", str(report), store=store)
     printed = _printed(capsys)
@@ -346,10 +377,14 @@ def test_mcp_answers_the_old_generation_store_with_the_same_line(
     tmp_path: Path, run_store_mcp: RunStoreMcpRunner
 ) -> None:
     root = _plain_corpus(tmp_path)
-    store, before = _old_generation_store(tmp_path)
+    # Inside the root's own ``.codeclone/``: MCP writes a run store nowhere
+    # else, so a store beside the root is never opened at all.
+    store, before = _old_generation_store(run_store_service_path(root))
     answer = run_store_mcp(root, store)
     assert answer["run_id"]
-    assert _warnings(answer).count(_line(_COMPATIBILITY)) == 1, answer["warnings"]
+    # The same line, carrying the cure the refusal names (2026-10-12).
+    line = f"{_line(_COMPATIBILITY)}; next_step: {STORE_GENERATION_NEXT_STEP}"
+    assert _warnings(answer).count(line) == 1, answer["warnings"]
     assert byte_state(store) == before, "the refused store was written"
 
 
@@ -357,7 +392,7 @@ def test_mcp_publishes_the_colliding_property_without_a_warning(
     tmp_path: Path, run_store_mcp: RunStoreMcpRunner
 ) -> None:
     root = _colliding_corpus(tmp_path, pyproject=True)
-    store = tmp_path / "runs.sqlite3"
+    store = run_store_service_path(root)
     answer = run_store_mcp(root, store)
     assert answer["run_id"]
     assert not any("publication failed" in item for item in _warnings(answer))
