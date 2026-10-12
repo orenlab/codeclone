@@ -101,6 +101,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - `compare_runs` no longer states `unchanged: 0` / `stable` for a focus the analysis mode did not analyse: it answers `comparable: false`, reason `focus_not_analyzed`.
 - The CLI summary, the HTML report, the PR summary and review receipt markdown and the CLI `--patch-verify` health line print `not compared` (compact `n/a (not compared)`) instead of a count for a comparison that did not run, and a measured zero prints `0`, never `+0`.
 - Run store: a sweep or a lease release the store refuses after publication is one warning line on the CLI and in MCP `warnings[]` instead of silence.
+- The Codex, Claude Code and Cursor plugin launchers and the VS Code extension pass `CI`, `GITHUB_ACTIONS`, `BUILDKITE`, `TF_BUILD` and `TEAMCITY_VERSION` to `codeclone-mcp` exactly as set (they were stripped), so the MCP server applies its CI rules: projection rebuild jobs are skipped and an enabled run store needs `CODECLONE_RUN_STORE_FORCE=1`; any non-empty value, `CI=false` included, counts as CI.
 
 ### Security
 
