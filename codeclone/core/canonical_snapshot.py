@@ -72,6 +72,7 @@ from ..canonical.analysis_rows import (
 from ..canonical.errors import (
     RunReportLinkError,
     SemanticGrammarError,
+    StoreCompatibilityError,
     UnknownRunError,
 )
 from ..canonical.evaluation_rows import UnitRiskRow
@@ -1799,7 +1800,18 @@ def publish_run_snapshot(
                 admissible=False,
                 reason=f"{type(failure).__name__}: {failure}",
                 failure_type=type(failure).__name__,
+                failure_next_step=_failure_next_step(failure),
             )
+
+
+def _failure_next_step(failure: Exception) -> str:
+    """The cure a contained failure carries, or ``""``.  Read off the store's
+    own refusal of a file this build may not open (its generation, its
+    schema): that refusal carries the one action that ends it, and the
+    publication's line says it.  Nothing else this edge contains names one."""
+    if isinstance(failure, StoreCompatibilityError):
+        return failure.next_step
+    return ""
 
 
 def _publish_enabled(
@@ -1825,6 +1837,17 @@ def _publish_enabled(
     sweep after it.
     """
 
+    # Imported at use, not at module scope: the store is opened only on the
+    # enabled path, so a disabled rollout never touches sqlite.
+    from ..canonical.store import RunStore, look_before_publishing
+
+    # The open's own look, before anything is built for it: a file of another
+    # generation, or of this one without a declared object, is refused here
+    # with the open's type and words -- contained below as ``failed``, exactly
+    # as the open's refusal was -- and no model is built for a store that was
+    # never going to take it.  An absent file passes to the build and the
+    # creating open, as before; the open still decides for itself.
+    look_before_publishing(path)
     with _cyclic_collector_paused():
         population = producer_execution_population(
             discovery=discovery,
@@ -1846,10 +1869,6 @@ def _publish_enabled(
         admissible = population_is_admissible(population)
         target = profile_head_target(population)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Imported at use, not at module scope: the store is opened only on
-        # the enabled path, so a disabled rollout never touches sqlite.
-        from ..canonical.store import RunStore
-
         with RunStore(path) as store:
             receipt, in_flight_lease, collection = _publish_and_collect(
                 store, model, namespace=namespace, target=target
@@ -2110,6 +2129,7 @@ def bridge_run_snapshot(
                 state=RUN_SNAPSHOT_LINK_UNEVALUATED,
                 outcome=publication.outcome,
                 failure=publication.failure_type,
+                failure_next_step=publication.failure_next_step,
             )
         # The report half, whole: the identity AND the receipt this document
         # re-derives.  A process holding only this half -- every process but
@@ -2123,6 +2143,7 @@ def bridge_run_snapshot(
             analysis_scope_digest=report_scope_receipt(report_document),
             report_run_identity=identity,
             failure=publication.failure_type,
+            failure_next_step=publication.failure_next_step,
         )
     if report_document is None:
         return RunSnapshotLink(

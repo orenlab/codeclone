@@ -2067,6 +2067,12 @@ RUN_SNAPSHOT_PUBLICATION_FAILED_WARNING: Final = (
     "analysis complete, publication failed ({failure})"
 )
 
+#: What follows that line when the contained failure carries the action that
+#: cures it -- a store the build refused names its own ``next_step`` (move or
+#: delete the file; the one migration command) -- so the line a user reads
+#: is the one that says what to do, not only what went wrong.
+RUN_SNAPSHOT_PUBLICATION_NEXT_STEP: Final = "; next_step: {next_step}"
+
 
 #: The one line a surface prints for a sweep the publication could not run
 #: to its end -- the GC owner's claim-free refusal receipt
@@ -2096,15 +2102,33 @@ def _require_failure_iff_failed(outcome: str, failure_type: str) -> None:
         )
 
 
-def _run_snapshot_link_warning_lines(refusal: str, failure: str) -> tuple[str, ...]:
+def _require_next_step_on_a_failure(failure: str, next_step: str) -> None:
+    """A cure rides a contained failure that carries one, and nothing else."""
+    if next_step and not failure:
+        raise ValueError("a next step rides a contained failure and nothing else")
+
+
+def _run_snapshot_link_warning_lines(
+    refusal: str, failure: str, next_step: str = ""
+) -> tuple[str, ...]:
     """The one line a link asks a surface to say, or none.  The two carriers
     exclude each other by construction -- a refusal rides a STORED relation,
-    a failure an unstored one -- so no link has two lines."""
+    a failure an unstored one -- so no link has two lines.  A failure that
+    carries its cure says it on the same line."""
     if refusal:
         return (RUN_SNAPSHOT_LINK_UNRECORDED_WARNING.format(refusal=refusal),)
     if failure:
-        return (RUN_SNAPSHOT_PUBLICATION_FAILED_WARNING.format(failure=failure),)
+        return (_failed_publication_line(failure, next_step),)
     return ()
+
+
+def _failed_publication_line(failure: str, next_step: str) -> str:
+    """The failed publication's line: its type, then its cure when it
+    carries one."""
+    line = RUN_SNAPSHOT_PUBLICATION_FAILED_WARNING.format(failure=failure)
+    if not next_step:
+        return line
+    return line + RUN_SNAPSHOT_PUBLICATION_NEXT_STEP.format(next_step=next_step)
 
 
 def _require_store_steps_on_a_stored_link(
@@ -2237,6 +2261,11 @@ class RunSnapshotPublication:
     #: it: a surface that parsed a message would be recomputing a fact the
     #: producer edge already held.
     failure_type: str = ""
+    #: The action that cures the contained failure, when the failure carries
+    #: one -- the ``next_step`` a store this build refused names (move or
+    #: delete the file; the one migration command).  Carried, never parsed
+    #: out of ``reason``, for the same reason ``failure_type`` is.
+    failure_next_step: str = ""
 
     def __post_init__(self) -> None:
         if self.outcome not in RUN_SNAPSHOT_PUBLICATION_OUTCOMES:
@@ -2270,6 +2299,7 @@ class RunSnapshotPublication:
                 "and no other outcome carries one"
             )
         _require_failure_iff_failed(self.outcome, self.failure_type)
+        _require_next_step_on_a_failure(self.failure_type, self.failure_next_step)
         if self.admissible and self.outcome == RUN_SNAPSHOT_PUBLICATION_HEAD_WITHHELD:
             raise ValueError(
                 "head_withheld is the inadmissible-profile outcome; an "
@@ -2332,6 +2362,10 @@ class RunSnapshotLink:
     #: and on no other (ruling 2026-09-28).  A contained failure that no
     #: surface named was the silence the containment promised not to be.
     failure: str = ""
+    #: The cure the contained failure carried, carried over from the
+    #: publication witness beside it: present only with ``failure``, and said
+    #: on the same warning line.
+    failure_next_step: str = ""
     #: The refusal of the sweep that followed this publication, carried over
     #: from the GC owner's receipt (``RunSnapshotPublication.collection``),
     #: which no surface read before: present only on a stored link.
@@ -2352,6 +2386,7 @@ class RunSnapshotLink:
             raise ValueError(f"a {self.state} bridge carries both addresses")
         _require_refusal_iff_unrecorded(self.state, self.refusal)
         _require_failure_iff_failed(self.outcome, self.failure)
+        _require_next_step_on_a_failure(self.failure, self.failure_next_step)
         if self.state == RUN_SNAPSHOT_LINK_UNPUBLISHED and stored:
             raise ValueError("an unpublished bridge carries no store address")
         if self.state == RUN_SNAPSHOT_LINK_UNEVALUATED and evaluated:
@@ -2368,7 +2403,7 @@ class RunSnapshotLink:
         naming the failure's type; one line for a refused sweep and one for
         a refused lease release; and nothing for every other state."""
         return _run_snapshot_link_warning_lines(
-            self.refusal, self.failure
+            self.refusal, self.failure, self.failure_next_step
         ) + _contained_store_step_lines(self.sweep_refusal, self.lease_refusal)
 
 

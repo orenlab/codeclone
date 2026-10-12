@@ -3141,6 +3141,31 @@ def _look_before_opening(path: str, *, create: bool) -> bool:
                 cursor.execute("ROLLBACK")
 
 
+def look_before_publishing(path: str | Path) -> None:
+    """Refuse an existing file a publishing open would refuse, before the
+    publisher builds anything to write into it.
+
+    The publisher's creating open of :class:`RunStore` takes this same look first
+    (:func:`_look_before_opening`, one decision: :func:`_decide_open`), but
+    only after the whole canonical model was built -- measured 2026-10-12,
+    3.5-4.9 s of every analysis of this repository spent on a model a store
+    of another generation then refused.  Asked here first, the refusal is the
+    open's own: the same type, the same words, the same ``next_step``, and
+    the file is left exactly as it was found -- no pragma, no ``-wal``/
+    ``-shm`` beside it.
+
+    A path with no file says nothing: a creating open makes the store there,
+    exactly as before.  An empty file is where a store is created, and a
+    compatible store is opened; neither is refused.  The open still decides
+    for itself afterwards, so a file that appears or changes between this
+    look and the write is refused by the open, as it always was.
+    """
+    target = str(path)
+    with _typed_sqlite_faults(target):
+        if Path(target).exists():
+            _look_before_opening(target, create=True)
+
+
 @contextmanager
 def _typed_sqlite_faults(path: str) -> Iterator[None]:
     """Turn the raw ``sqlite3`` faults of an open or a read into the store's
@@ -5571,6 +5596,7 @@ __all__ = [
     "forget_proven_memberships",
     "link_run_report",
     "linked_run",
+    "look_before_publishing",
     "migrate_store_schema",
     "prove_run_membership",
     "read_named_families",
