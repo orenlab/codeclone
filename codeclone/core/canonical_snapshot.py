@@ -173,7 +173,7 @@ from ..models import (
     SemanticAuthorityResult,
 )
 from ..observability import SpanHandle, span
-from ..paths.workspace import REL_RUN_STORE_DB_PATH
+from ..paths.workspace import REL_RUN_STORE_DB_PATH, is_service_path
 from ..report.document._common import contract_path, design_findings_thresholds_payload
 from ..utils.ci import is_ci_environment
 from ..utils.coerce import as_float as _as_float
@@ -302,6 +302,47 @@ def resolve_run_store_config(
     else:
         path = root / REL_RUN_STORE_DB_PATH
     return RunStoreConfig(enabled=True, path=path)
+
+
+def run_store_outside_boundary(
+    path: Path | None, *, boundary: Path | None
+) -> Path | None:
+    """``path`` when a surface's write boundary withholds it, else ``None``.
+
+    ``boundary`` is the analysed root whose CodeClone service directories a
+    surface writes inside -- the MCP surface states that boundary to every
+    client, and the analysis cache has obeyed it since 2026-09-02 -- or
+    ``None`` for a caller with no such law (the CLI writes where its user
+    pointed it).  A store outside those directories is withheld: nothing may
+    open it for writing on that surface's behalf.  The one containment test
+    is the paths owner's (both sides resolved, so a sibling named
+    ``.codeclone-x`` and a ``.codeclone/../`` path are outside), the same one
+    the cache's boundary asks.
+
+    The ONE decision of the boundary for every write a surface makes in the
+    store -- the publication and its link here, the intent lease in
+    ``api.intent_run_lease`` -- so the two cannot draw it in two places.  A
+    rollout that names no store withholds nothing.
+    """
+    if boundary is None or path is None:
+        return None
+    if is_service_path(path, root=boundary):
+        return None
+    return path
+
+
+def confine_run_store_config(
+    config: RunStoreConfig, *, boundary: Path | None
+) -> tuple[RunStoreConfig, str]:
+    """``config`` as a surface with write ``boundary`` may use it, and the
+    store path the boundary withheld, as text (empty: nothing withheld).  A
+    withheld store becomes the frozen disabled config: the publication opens
+    nothing, states ``disabled`` -- true, no store file was opened -- and the
+    link is persisted nowhere."""
+    withheld = run_store_outside_boundary(config.path, boundary=boundary)
+    if withheld is None:
+        return config, ""
+    return _DISABLED_RUN_STORE, str(withheld)
 
 
 # ---------------------------------------------------------------------------
@@ -2287,6 +2328,7 @@ __all__ = [
     "RunSnapshotBridgeError",
     "bridge_run_snapshot",
     "canonical_snapshot_from_producers",
+    "confine_run_store_config",
     "persist_run_snapshot_link",
     "population_is_admissible",
     "producer_execution_population",
@@ -2297,5 +2339,6 @@ __all__ = [
     "report_scope_receipt",
     "resolve_run_snapshot_link",
     "resolve_run_store_config",
+    "run_store_outside_boundary",
     "verified_linked_run",
 ]

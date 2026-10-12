@@ -36,6 +36,16 @@ busy timeout, which the store's lease writes leave raw (the run-store
 contention suite pins that as its positive control) and which is answered
 here exactly as the store answers it everywhere else, ``store_unavailable``.
 
+**A lease is a write, so it obeys the surface's write boundary.**  The
+door's one caller is the MCP surface, which writes only inside CodeClone's
+service directories of the analysed root -- the boundary its publication
+obeys (``core.canonical_snapshot.run_store_outside_boundary``, the one
+decision for both).  The store the road actually opened is asked, so the
+answer names the file the grant would have been written into: outside the
+boundary nothing is written, and the state says so (``store_disabled`` --
+this surface's writes into that store are off -- with the boundary in
+``detail``).
+
 **A lease id names one grant.**  It is built from the server session (the
 agent pid and start epoch the workspace registry already identifies a session
 by), a sequence the session never resets, and the intent id: two servers on one
@@ -60,11 +70,14 @@ from ..canonical.errors import (
     UnknownRunError,
 )
 from ..canonical.store import RunStore, acquire_run_lease, release_run_lease
+from ..core.canonical_snapshot import run_store_outside_boundary
 from ..models import RunSnapshotLink
 from .run_store_serving import (
     SERVING_REASON_DIVERGENT,
     SERVING_REASON_SERVED,
+    SERVING_REASON_STORE_DISABLED,
     SERVING_REASONS,
+    SERVING_SOURCE_MEMORY,
     RunStoreServingOutcome,
     _read_published,
 )
@@ -96,6 +109,13 @@ RUN_LEASE_REASONS: Final[tuple[str, ...]] = tuple(
             ),
         }
     )
+)
+
+#: ``detail`` of a lease the write boundary withheld: where the store is,
+#: and why nothing was written into it.
+RUN_LEASE_OUTSIDE_SERVICE_DIRECTORIES: Final = (
+    "run store {store_path} is outside CodeClone's service directories of "
+    "{root}; a lease is a write, and this surface writes only inside them"
 )
 
 #: The refusals the road itself classifies; a reader lets them through.
@@ -196,10 +216,12 @@ def release_intent_run_lease(*, root: Path, state: RunLeaseState) -> RunLeaseSta
 
 @dataclass(frozen=True, slots=True)
 class _StoreAnswer:
-    """What one write through the road came back with."""
+    """What one write through the road came back with: the store's answer,
+    its refusal, or the opened store the write boundary withheld."""
 
     expires_at: int | None = None
     refusal: str = ""
+    withheld: str = ""
 
 
 def _grant(
@@ -249,9 +271,13 @@ def _over_the_road(
     link: RunSnapshotLink | None,
     write: Callable[[RunStore, str], int | None],
 ) -> tuple[_StoreAnswer | None, RunStoreServingOutcome]:
-    """One write to the run the road resolves, or the road's typed reason."""
+    """One write to the run the road resolves, or the road's typed reason --
+    and no write at all into a store outside the surface's write boundary."""
 
     def read(store: RunStore, store_run_id: str) -> _StoreAnswer:
+        opened = Path(store.file_identity()[0])
+        if run_store_outside_boundary(opened, boundary=root) is not None:
+            return _StoreAnswer(withheld=str(opened))
         try:
             return _StoreAnswer(expires_at=write(store, store_run_id))
         except sqlite3.OperationalError as fault:
@@ -265,7 +291,26 @@ def _over_the_road(
         except RunStoreError as refused:
             return _StoreAnswer(refusal=str(refused))
 
-    return _read_published(root=root, link=link, read=read)
+    answer, outcome = _read_published(root=root, link=link, read=read)
+    return _unless_withheld(answer, outcome, root=root)
+
+
+def _unless_withheld(
+    answer: _StoreAnswer | None, outcome: RunStoreServingOutcome, *, root: Path
+) -> tuple[_StoreAnswer | None, RunStoreServingOutcome]:
+    """The road's answer as it came -- or, when the write boundary withheld
+    the store the road opened, no answer and the typed ``store_disabled``
+    that names the store and the boundary."""
+    if answer is None or not answer.withheld:
+        return answer, outcome
+    return None, RunStoreServingOutcome(
+        source=SERVING_SOURCE_MEMORY,
+        reason=SERVING_REASON_STORE_DISABLED,
+        store_run_id=outcome.store_run_id,
+        detail=RUN_LEASE_OUTSIDE_SERVICE_DIRECTORIES.format(
+            store_path=answer.withheld, root=root
+        ),
+    )
 
 
 def _release(store: RunStore, lease_id: str) -> None:

@@ -1957,7 +1957,10 @@ class ObservabilityConfig:
 #: ran and stored nothing" — the same absent-versus-empty hole the
 #: population law closes on the other side.
 #:
-#: * ``disabled``       the rollout flag is off; no store file was opened.
+#: * ``disabled``       no store file was opened: the rollout flag is off,
+#:   or the surface that started the publication may not write the store the
+#:   flag names (the MCP surface writes only inside CodeClone's service
+#:   directories; the surface says so in its own line).
 #: * ``published``      the snapshot was stored and it advanced its head.
 #: * ``head_withheld``  the snapshot was stored, and its own profile head
 #:   was NOT the canonical complete head: a partial / clones-only /

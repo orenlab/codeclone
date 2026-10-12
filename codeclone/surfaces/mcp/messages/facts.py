@@ -20,4 +20,10 @@ CACHE_OUTSIDE_SERVICE_DIRECTORIES: Final = (
     "keep it warm."
 )
 
+RUN_STORE_OUTSIDE_SERVICE_DIRECTORIES: Final = (
+    "Run store {store_path} is outside CodeClone's service directories; MCP "
+    "reads it and will not write it. Move it under .codeclone/ for MCP to "
+    "publish runs into it."
+)
+
 CACHE_SAVE_FAILED: Final = "Analysis cache was not written: {error}"

@@ -64,6 +64,7 @@ from ._types import (
 )
 from .canonical_snapshot import (
     bridge_run_snapshot,
+    confine_run_store_config,
     persist_run_snapshot_link,
     publish_run_snapshot,
     release_publication_lease,
@@ -443,7 +444,8 @@ def _publish_canonical_snapshot(
     report_meta: Mapping[str, object],
     comparison: ComparisonInputsFactory | None = None,
     evaluation: EvaluationInputsFactory | None = None,
-) -> tuple[RunStoreConfig, RunSnapshotPublication]:
+    write_boundary: Path | None = None,
+) -> tuple[RunStoreConfig, str, RunSnapshotPublication]:
     """Resolve the rollout flag and publish, at the point that publishes.
 
     The resolution site is the publication site on purpose: a flag read
@@ -456,17 +458,29 @@ def _publish_canonical_snapshot(
     reason: the bridge is written into the same store this call published
     into, and a second resolution later in ``report`` would be a second
     reading of one flag inside one run.
+
+    ``write_boundary`` is the caller's write law, applied here, at the one
+    resolution: a store outside it is withheld -- the config that travels on
+    is the disabled one, so neither the publication nor the bridge after it
+    opens that store -- and the withheld path travels out beside it for the
+    caller to say so.
     """
 
-    config = resolve_run_store_config(root=boot.root)
-    return config, publish_run_snapshot(
-        config=config,
-        discovery=discovery,
-        processing=processing,
-        analysis=analysis,
-        report_meta=report_meta,
-        comparison=comparison,
-        evaluation=evaluation,
+    config, withheld = confine_run_store_config(
+        resolve_run_store_config(root=boot.root), boundary=write_boundary
+    )
+    return (
+        config,
+        withheld,
+        publish_run_snapshot(
+            config=config,
+            discovery=discovery,
+            processing=processing,
+            analysis=analysis,
+            report_meta=report_meta,
+            comparison=comparison,
+            evaluation=evaluation,
+        ),
     )
 
 
@@ -623,6 +637,11 @@ def report(
     baseline_scope_id: str | None = None,
     gate_config: MetricGateConfig | None = None,
     gate_result: GateResult | None = None,
+    #: The analysed root whose CodeClone service directories bound every run
+    #: store write of this report, or ``None``.  Passed by the MCP surface,
+    #: whose stated law it is; the CLI passes nothing and writes where its
+    #: user pointed it.
+    run_store_write_boundary: Path | None = None,
 ) -> ReportArtifacts:
     contents: dict[str, bytes | None] = {
         "html": None,
@@ -685,7 +704,7 @@ def report(
     # is independent of it — a gate-only run publishes the same snapshot as
     # a rendering run, because the snapshot is the ANALYSIS, not the
     # report.
-    run_store_config, publication = _publish_canonical_snapshot(
+    run_store_config, run_store_withheld, publication = _publish_canonical_snapshot(
         boot=boot,
         discovery=discovery,
         processing=processing,
@@ -705,6 +724,7 @@ def report(
         evaluation=_evaluation_inputs_factory(
             analysis=analysis, body=body, gate=gate_pair
         ),
+        write_boundary=run_store_write_boundary,
     )
     lease = _InFlightLease(run_store_config, publication)
     try:
@@ -807,6 +827,7 @@ def report(
             text=contents["text"],
             report_document=report_document,
             run_snapshot_link=run_snapshot_link,
+            run_store_outside_boundary=run_store_withheld,
         )
     finally:
         # And on EVERY other way out of this block: a render, a seal or a

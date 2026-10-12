@@ -97,6 +97,7 @@ from ._session_state_mixin import _MCPSessionStateMixin
 from ._session_workflow_mixin import _MCPSessionWorkflowMixin
 from ._workspace_drift import build_run_content_manifest, build_run_manifest
 from ._workspace_hygiene import collect_dirty_snapshot
+from .messages.facts import RUN_STORE_OUTSIDE_SERVICE_DIRECTORIES
 
 
 class _RuntimeStateLock:
@@ -154,6 +155,14 @@ def _run_snapshot_link_warnings(link: _SurfaceWarnings | None) -> tuple[str, ...
     for every other state or for a report that stated no bridge.  The words
     are the witness's; the session only carries them."""
     return () if link is None else link.warnings()
+
+
+def _run_store_boundary_warnings(withheld: str) -> tuple[str, ...]:
+    """The surface's one line for a run store its write boundary withheld --
+    the cache's words for the cache's rule -- and none when nothing was."""
+    if not withheld:
+        return ()
+    return (RUN_STORE_OUTSIDE_SERVICE_DIRECTORIES.format(store_path=withheld),)
 
 
 __all__ = [
@@ -565,6 +574,10 @@ class MCPSession(
                 baseline_scope_id=(
                     None if baseline_scope_id is None else str(baseline_scope_id)
                 ),
+                # This surface's write law: the run store, like the analysis
+                # cache, is written only inside CodeClone's service
+                # directories of the analysed root.
+                run_store_write_boundary=root_path,
             )
             report_document = report_artifacts.report_document
             if report_document is None:
@@ -579,6 +592,7 @@ class MCPSession(
             # the proof frees nothing at all.
             served_report = build_served_projection(report_document)
             run_snapshot_link = report_artifacts.run_snapshot_link
+            run_store_withheld = report_artifacts.run_store_outside_boundary
             del report_document, report_artifacts
 
         warning_items = set(console.messages)
@@ -592,6 +606,7 @@ class MCPSession(
             warning_items.add(cache.load_warning)
         warning_items.update(discovery_result.skipped_warnings)
         warning_items.update(_run_snapshot_link_warnings(run_snapshot_link))
+        warning_items.update(_run_store_boundary_warnings(run_store_withheld))
         warnings = tuple(sorted(warning_items))
         failures = tuple(
             sorted(

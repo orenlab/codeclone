@@ -273,6 +273,11 @@ class ReportArtifacts:
     #: that stored nothing says so through the link's state, because an
     #: absent link and "there is no backend" would be the same silence.
     run_snapshot_link: RunSnapshotLink | None = None
+    #: The run store the caller's write boundary withheld from this report
+    #: (``report(run_store_write_boundary=...)``): the path the rollout named
+    #: and nothing opened, as the text the surface says it in.  Empty when
+    #: nothing was withheld.
+    run_store_outside_boundary: str = ""
 
 
 def _as_sorted_str_tuple(value: object) -> tuple[str, ...]:
