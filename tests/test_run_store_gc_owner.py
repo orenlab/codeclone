@@ -10,7 +10,7 @@ The substrate (``collect_garbage``, the §8 roots, the leases, the physical
 release) is pinned as a library in ``test_canonical_store_gc``; what those
 pins cannot see is whether anything in the product ever calls it.  Every run
 below goes through the real CLI waterfall (``run_store_cli``), and the sweep
-is counted on the ``RunStoreGcJob`` CLASS OBJECT, which the process holds
+is counted on the ``RunStoreRetentionJob`` CLASS OBJECT, which the process holds
 exactly one of: a count taken there sees the owner's call through every
 binding, so ``sweeps == 1`` is a statement about the edge from the
 publication to the substrate, not about a spelling of it.
@@ -43,6 +43,7 @@ from codeclone.canonical.store import (
     HeadState,
     RunStore,
     RunStoreGcJob,
+    RunStoreRetentionJob,
     acquire_run_lease,
     collect_garbage,
     retain_run,
@@ -178,15 +179,16 @@ def meters(monkeypatch: pytest.MonkeyPatch) -> _Meters:
     """Install the three meters on the CLASS OBJECTS the product uses.
 
     A class attribute is looked up on the type, so every binding that
-    reaches ``RunStoreGcJob.collect``, ``RunSnapshotPublication`` or
-    ``RunStore`` is counted -- a re-import, an alias, a future owner module.
+    reaches ``RunStoreRetentionJob.collect`` (the owner's job),
+    ``RunSnapshotPublication`` or ``RunStore`` is counted -- a re-import, an
+    alias, a future owner module.
     """
     recorded = _Meters()
-    real_collect = RunStoreGcJob.collect
+    real_collect = RunStoreRetentionJob.collect
     real_post_init = RunSnapshotPublication.__post_init__
     real_init = RunStore.__init__
 
-    def measured_collect(job: RunStoreGcJob) -> GcJobReport:
+    def measured_collect(job: RunStoreRetentionJob) -> GcJobReport:
         sweep = _Sweep(before=_read_state(job.store))
         recorded.sweeps.append(sweep)
         sweep.report = real_collect(job)
@@ -201,7 +203,7 @@ def meters(monkeypatch: pytest.MonkeyPatch) -> _Meters:
         recorded.store_opens += 1
         real_init(store, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(RunStoreGcJob, "collect", measured_collect)
+    monkeypatch.setattr(RunStoreRetentionJob, "collect", measured_collect)
     monkeypatch.setattr(RunSnapshotPublication, "__post_init__", recorded_post_init)
     monkeypatch.setattr(RunStore, "__init__", counted_init)
     return recorded
@@ -319,38 +321,34 @@ def test_every_stored_publication_is_swept_once_and_carries_the_receipt(
     assert publication.collection is sweep.report, (
         "the receipt the publication carries is not the one the substrate returned"
     )
-    assert publication.collection == _receipt(candidates=1, held={GC_HOLD_HEAD: 1})
+    assert publication.collection == _receipt(
+        candidates=1, held={GC_HOLD_HEAD: 1}, history_pruned=1
+    )
 
 
-def test_the_history_window_holds_exactly_one_superseded_generation(
+def test_an_unregistered_superseded_run_leaves_at_the_next_publication(
     corpus: _Corpus, meters: _Meters
 ) -> None:
-    """The window is the smallest one whose history root is not the head root.
-
-    With a window of one, the only history row a sweep keeps is the head's
-    own, so the retained-history class of W4 §8 would exist in production
-    and hold nothing; with two, the generation this publication superseded
-    stays readable through exactly one more publication.  Both edges are
-    pinned: the superseded run survives the next sweep as ``history``, and
-    the run superseded twice is collected.
-    """
-    for tag in ("a", "b", "c"):
+    """The publication's policy (``PUBLICATION_RETENTION``) holds REGISTERED
+    runs; a CLI run is linked by its bridge and registered by no execution,
+    so once a later publication moves the head off it, nothing promises it
+    and that publication's own sweep collects it -- with exactly its own
+    objects.  Head generations are no longer a hold: every history row is
+    pruned as it is swept (the head-generation window this replaces kept the
+    superseded generation through one more publication)."""
+    for tag in ("a", "b"):
         corpus.publish(tag)
-    first, second, third = meters.sweeps
+    first, second = meters.sweeps
     run_a = first.before.head_run_id
-
-    assert second.report == _receipt(
-        candidates=2, held={GC_HOLD_HEAD: 1, GC_HOLD_HISTORY: 1}
-    ), "the generation this publication superseded was not held as history"
-    exclusive_a = third.before.exclusive_objects[run_a]
+    exclusive_a = second.before.exclusive_objects[run_a]
     assert exclusive_a > 0, "the population carries no object only the victim owns"
-    assert third.report == _receipt(
-        candidates=3,
-        held={GC_HOLD_HEAD: 1, GC_HOLD_HISTORY: 1},
+    assert second.report == _receipt(
+        candidates=2,
+        held={GC_HOLD_HEAD: 1},
         collected=1,
         history_pruned=1,
         objects_collected=exclusive_a,
-    ), "a run superseded twice must leave, with exactly its own objects"
+    ), "a superseded unregistered run must leave, with exactly its own objects"
     with corpus.open() as store:
         assert run_a not in _run_ids(store)
 
@@ -369,7 +367,7 @@ def test_the_owners_sweep_hands_pages_back_and_leaves_rooted_bytes_alone(
         corpus.publish(tag)
     sweep = meters.sweeps[-1]
     assert sweep.after is not None
-    victim = meters.sweeps[0].before.head_run_id
+    victim = meters.sweeps[-2].before.head_run_id
     assert sweep.before.freelist_count == 0
     assert sweep.after.page_count < sweep.before.page_count, (
         f"the sweep kept every page: {sweep.after.page_count} of "
@@ -411,11 +409,11 @@ def test_every_root_class_survives_the_owners_sweep(
 ) -> None:
     """Explicit retention, the three lease kinds, staging -- and a control.
 
-    Each rooted run is published and rooted, then pushed out of the history
-    window by later publications, so only its own root can still hold it.
-    The unrooted ``e`` run is the positive control: the same sweep that holds
-    the other four collects it, so "nothing was collected" can never be the
-    reason the rooted runs survive.
+    Each rooted run is published and rooted, then superseded by later
+    publications, so only its own root can still hold it.  The unrooted
+    ``f`` run is the positive control: the same sweep that holds the other
+    four collects it, so "nothing was collected" can never be the reason the
+    rooted runs survive.
     """
     roots = {"a": "retained", "b": "session", "c": "export", "d": "active"}
     rooted: dict[str, str] = {}
@@ -432,12 +430,11 @@ def test_every_root_class_survives_the_owners_sweep(
     corpus.publish("g")
 
     final = meters.sweeps[-1]
-    control = final.before.exclusive_objects[meters.sweeps[4].before.head_run_id]
+    control = final.before.exclusive_objects[meters.sweeps[5].before.head_run_id]
     assert final.report == _receipt(
-        candidates=8,
+        candidates=7,
         held={
             GC_HOLD_HEAD: 1,
-            GC_HOLD_HISTORY: 1,
             GC_HOLD_RETAINED: 1,
             GC_HOLD_LEASE: 3,
             GC_HOLD_STAGING: 1,
@@ -501,6 +498,7 @@ def test_a_run_that_lost_the_head_race_is_held_until_its_bridge_is_written(
         candidates=2,
         held={GC_HOLD_HEAD: 1},
         collected=1,
+        history_pruned=1,
         objects_collected=meters.sweeps[-1].before.exclusive_objects[lost.run_id],
     )
 
@@ -654,7 +652,7 @@ def test_a_refused_substrate_is_a_typed_receipt_and_the_publication_stands(
     """
     corpus.publish("a")
     corpus.publish("b")
-    run_a = meters.sweeps[0].before.head_run_id
+    run_b = meters.sweeps[1].before.head_run_id
     sweeps_before = len(meters.sweeps)
     with monkeypatch.context() as patch:
         _lock_after(patch, _WriteLockHolder(corpus.store), RunStore, "write_full_run")
@@ -669,7 +667,7 @@ def test_a_refused_substrate_is_a_typed_receipt_and_the_publication_stands(
     assert refused.in_flight_lease
     assert [sweep.report for sweep in meters.sweeps[sweeps_before:]] == [None]
     with corpus.open() as store:
-        assert {run_a, refused.run_id} <= _run_ids(store)
+        assert {run_b, refused.run_id} <= _run_ids(store)
         assert _lease_rows(store) == []
 
 

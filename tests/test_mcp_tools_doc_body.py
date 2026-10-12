@@ -567,7 +567,7 @@ def measured_session(tmp_path_factory: pytest.TempPathFactory) -> MeasuredSessio
 
     def resolve_run_id(literal: str) -> str | None:
         try:
-            service.get_run_summary(literal, root=resolved)
+            answer = service.get_run_summary(literal, root=resolved)
         except (
             session_shared.MCPRunNotFoundError,
             session_shared.MCPRunRootMismatchError,
@@ -575,6 +575,10 @@ def measured_session(tmp_path_factory: pytest.TempPathFactory) -> MeasuredSessio
             session_shared.MCPServiceContractError,
         ) as exc:
             return str(exc)
+        # A run no reading answered is a typed answer, not an exception
+        # (recovery wave): its message is the store's refusal.
+        if answer.get("status") == "unavailable":
+            return str(answer["message"])
         return None
 
     return MeasuredSession(

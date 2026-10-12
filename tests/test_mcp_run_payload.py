@@ -32,6 +32,7 @@ import pytest
 
 from codeclone.api.execution_event import ExecutionEvent
 from codeclone.api.run_residence import ResidentRun, RunSummaryResidue
+from codeclone.api.run_restoration import PUBLICATION_RETENTION
 from codeclone.api.run_store_serving import prove_published_run
 from codeclone.api.served_projection import build_served_projection
 from codeclone.surfaces.mcp._run_residence import resident_identity
@@ -435,8 +436,14 @@ def test_an_analysis_drops_a_leased_before_run_to_its_identity(
 
 
 def test_an_unpinned_run_the_collector_took_is_forgotten_as_before(
-    session: _Session,
+    session: _Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A window of one registered run: the second registration collects the
+    # first run before the third analysis looks for room.
+    monkeypatch.setattr(
+        "codeclone.core.canonical_snapshot.PUBLICATION_RETENTION",
+        replace(PUBLICATION_RETENTION, max_runs=1),
+    )
     first = session.analyze(1)
     # Proven once: the process remembers the proof, never that the run is
     # still published.
@@ -447,7 +454,7 @@ def test_an_unpinned_run_the_collector_took_is_forgotten_as_before(
     second = session.analyze(2)
     third = session.analyze(3)
 
-    # The third publication collected the first run from the store: nothing
+    # The second registration collected the first run from the store: nothing
     # can stand in for its payload, so the history bound forgets it, and the
     # newer payloads stay.
     with pytest.raises(MCPRunNotFoundError):

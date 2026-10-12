@@ -55,8 +55,8 @@ from typing import Any
 import pytest
 
 import codeclone.api.run_store_serving as door_mod
+import codeclone.surfaces.mcp._run_residence as residence_mod
 import codeclone.surfaces.mcp._run_store_serving as run_store_serving_mod
-import codeclone.surfaces.mcp._session_finding_mixin as finding_mixin_mod
 from codeclone.api.run_store_serving import RunStoreServingOutcome
 from codeclone.surfaces.mcp._authority_candidates import authority_candidate_items
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
@@ -502,7 +502,7 @@ def test_the_page_is_cut_from_the_served_value_not_the_record(
             run_id="storerun", items=rows
         ), outcome
 
-    monkeypatch.setattr(finding_mixin_mod, "served_authority_candidates", threaded)
+    monkeypatch.setattr(residence_mod, "served_authority_candidates", threaded)
     answer = service.check_authority(
         run_id="threadedcandidates01", section="candidates"
     )

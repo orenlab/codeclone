@@ -33,8 +33,17 @@ import os
 import subprocess
 import sys
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from codeclone.surfaces.mcp._run_residence import resident_identity
+from codeclone.surfaces.mcp._run_restoration import (
+    OverlayRefusal,
+    decode_resident_run,
+    encode_resident_run,
+)
 from codeclone.surfaces.mcp._session_shared import (
     MCPAnalysisRequest,
     MCPRunRecord,
@@ -405,8 +414,12 @@ def test_every_production_execution_carries_a_content_witness(tmp_path: Path) ->
     name-addressed behaviour, which would be a hole if production could
     produce such an execution.  It cannot: ``build_run_content_manifest``
     returns a mapping, never ``None``, and ``session.py`` is the only place in
-    the package that builds an :class:`ExecutionEvent`.  Both halves are
-    asserted here, so a second producer or a nullable manifest reds this.
+    the package that builds an :class:`ExecutionEvent` from an analysis.  The
+    one other builder is the run store's execution overlay decoder
+    (``_run_restoration``), which rebuilds an execution ``session.py`` built
+    and refuses one that records no content witness.  All three are asserted
+    here, so a third builder, a nullable manifest or a decoder that admits a
+    witness-less execution reds this.
     """
 
     sources = Path("codeclone/surfaces/mcp").rglob("*.py")
@@ -417,12 +430,17 @@ def test_every_production_execution_carries_a_content_witness(tmp_path: Path) ->
         and path.name != "execution_event.py"
     ]
     assert {path.as_posix() for path in producers} == {
-        "codeclone/surfaces/mcp/session.py"
+        "codeclone/surfaces/mcp/_run_restoration.py",
+        "codeclone/surfaces/mcp/session.py",
     }
 
     _service, _intent_id, record_a = _declared(tmp_path, "content witness always")
     assert record_a.execution.content_manifest is not None
     assert record_a.execution.source_state_digest is not None
+    blind = resident_identity(record_a)
+    blind = replace(blind, execution=replace(blind.execution, content_manifest=None))
+    with pytest.raises(OverlayRefusal, match="content witness"):
+        decode_resident_run(encode_resident_run(blind))
 
 
 def test_a_witness_that_recorded_nothing_is_not_promoted_by_a_run_that_did(

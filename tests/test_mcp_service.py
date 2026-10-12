@@ -130,6 +130,16 @@ def _with_execution(record: MCPRunRecord, **changes: Any) -> MCPRunRecord:
     return replace(record, execution=replace(record.execution, **changes))
 
 
+def _run_not_found(answer: object, *, says: str = "") -> None:
+    """The typed answer a tool gives for a run no reading answered (never a
+    raw ``MCPRunNotFoundError`` since the recovery wave), saying ``says``."""
+    assert isinstance(answer, dict), answer
+    assert answer["status"] == "unavailable", answer
+    assert answer["reason"] == "run_not_found", answer
+    assert answer["retryable"] is False, answer
+    assert says in str(answer["message"]) + " " + str(answer["next_step"]), answer
+
+
 def _write_clone_fixture(root: Path, relative_dir: str = "pkg") -> None:
     fixture_dir = root.joinpath(relative_dir)
     fixture_dir.mkdir(parents=True, exist_ok=True)
@@ -4563,16 +4573,14 @@ def test_mcp_service_granular_checks_require_existing_run_by_default(
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
 
-    with pytest.raises(
-        MCPRunNotFoundError, match="analyze_repository\\(root='/path/to/repo'\\)"
-    ):
-        service.check_clones(detail_level="summary")
-
-    with pytest.raises(
-        MCPRunNotFoundError,
-        match=f"analyze_repository\\(root='{tmp_path}'\\)",
-    ):
-        service.check_dead_code(root=str(tmp_path), detail_level="summary")
+    _run_not_found(
+        service.check_clones(detail_level="summary"),
+        says="analyze_repository(root='/path/to/repo')",
+    )
+    _run_not_found(
+        service.check_dead_code(root=str(tmp_path), detail_level="summary"),
+        says=f"analyze_repository(root='{tmp_path}')",
+    )
 
 
 def test_mcp_service_granular_checks_reject_incompatible_run_modes(
@@ -5343,8 +5351,7 @@ def test_mcp_service_run_store_evicts_old_runs(tmp_path: Path) -> None:
 
     assert service.get_run_summary()["run_id"] == third["run_id"]
     assert service.get_run_summary(str(second["run_id"]))["run_id"] == second["run_id"]
-    with pytest.raises(MCPRunNotFoundError):
-        service.get_run_summary(str(first["run_id"]))
+    _run_not_found(service.get_run_summary(str(first["run_id"])))
 
 
 def test_mcp_service_reports_contract_errors_for_resources_and_findings(
@@ -9335,8 +9342,9 @@ def test_mcp_service_validate_review_claims_fix_verification_and_inputs(
         service.validate_review_claims(text="   ")
     with pytest.raises(MCPServiceContractError, match="maximum supported length"):
         service.validate_review_claims(text="x" * 50_001)
-    with pytest.raises(MCPRunNotFoundError):
+    _run_not_found(
         service.validate_review_claims(run_id="missing", text="security_surfaces")
+    )
 
 
 def test_mcp_review_receipt_helpers_are_bounded_and_contract_aware() -> None:
@@ -11137,8 +11145,7 @@ def test_mcp_service_clear_session_runs_clears_in_memory_state(tmp_path: Path) -
         "cleared_intents": 1,
         "workspace_cleared": True,
     }
-    with pytest.raises(MCPRunNotFoundError):
-        service.get_run_summary()
+    _run_not_found(service.get_run_summary())
 
 
 def test_mcp_service_metrics_diff_warning_and_projection_branches(

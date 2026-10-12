@@ -37,6 +37,7 @@ from pathlib import Path
 import pytest
 
 from codeclone.api.intent_run_lease import RUN_LEASE_HELD, RUN_LEASE_KIND, RunLeaseState
+from codeclone.api.run_restoration import PUBLICATION_RETENTION
 from codeclone.api.run_store_serving import (
     SERVING_REASON_INTEGRITY,
     SERVING_REASON_NOT_PUBLISHED,
@@ -183,24 +184,23 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Repo]:
 # ── the collector ─────────────────────────────────────────────────────────
 
 
-def _publish_three_more(repo: _Repo) -> tuple[str, str, str]:
-    """Three later publications of new content on the same root and target.
+def _publish_past_the_window(repo: _Repo) -> list[str]:
+    """One more publication of new content than the retention window holds
+    registered runs, on the same root and target.
 
-    Three, not two: the collector keeps the head and one previous
-    generation, so the second publication is the one that would first
-    collect the first run, and the third is the one that collects the
-    second -- the witness that the sweep ran and chose its victims, rather
-    than aborting.  (A leased run is also guarded by the store's foreign
-    keys; a sweep that ignored the lease would try to delete it, be refused,
-    and roll back without collecting anything.)
+    The window keeps the newest ``max_runs`` registered runs, so after
+    ``max_runs + 1`` later publications the first of them has left the window
+    -- the witness that the sweep ran and chose its victims, rather than
+    aborting -- and the newest ``max_runs`` are held.  (A leased run is also
+    guarded by the store's foreign keys; a sweep that ignored the lease would
+    try to delete it, be refused, and roll back without collecting anything.)
     """
     published = []
-    for functions in (2, 3, 4):
+    for functions in range(2, 2 + PUBLICATION_RETENTION.max_runs + 1):
         repo.write(functions)
         repo.analyze()
         published.append(repo.latest_store_run_id())
-    second, third, fourth = published
-    return second, third, fourth
+    return published
 
 
 def test_positive_control_without_the_lease_the_publications_collect_the_run(
@@ -212,14 +212,13 @@ def test_positive_control_without_the_lease_the_publications_collect_the_run(
     repo.service._release_intent_run_leases([intent_id])
     assert repo.lease_rows() == []
 
-    second, third, fourth = _publish_three_more(repo)
+    later = _publish_past_the_window(repo)
 
-    # Four publications, four runs: the population holds the case.
-    assert len({first, second, third, fourth}) == 4
+    # Every publication its own run: the population holds the case.
+    assert len({first, *later}) == len(later) + 1
     assert not repo.run_held(first)
-    assert not repo.run_held(second)
-    assert repo.run_held(third)
-    assert repo.run_held(fourth)
+    assert not repo.run_held(later[0])
+    assert all(repo.run_held(run) for run in later[1:])
 
 
 def test_a_leased_before_run_survives_the_publications_until_clear(
@@ -229,16 +228,15 @@ def test_a_leased_before_run_survives_the_publications_until_clear(
     assert repo.links_of(first) == 1
     intent_id = repo.start()
 
-    second, third, fourth = _publish_three_more(repo)
+    later = _publish_past_the_window(repo)
 
-    assert len({first, second, third, fourth}) == 4
-    # The sweep ran and chose: the unleased second run went, the leased
-    # first one and its report link stayed.
-    assert not repo.run_held(second)
+    assert len({first, *later}) == len(later) + 1
+    # The sweep ran and chose: the unleased run that left the window went,
+    # the leased first one and its report link stayed.
+    assert not repo.run_held(later[0])
     assert repo.run_held(first)
     assert repo.links_of(first) == 1
-    assert repo.run_held(third)
-    assert repo.run_held(fourth)
+    assert all(repo.run_held(run) for run in later[1:])
     lease = repo.lease(intent_id)
     assert lease is not None
     assert lease.held

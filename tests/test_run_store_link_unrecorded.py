@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -112,24 +113,33 @@ class _EdgeLock:
 @pytest.fixture
 def edge_lock(monkeypatch: pytest.MonkeyPatch) -> _EdgeLock:
     """The busy timeout is shortened so the bounded wait ends in a fraction
-    of a second; ``met`` counts the edge writes that met the lock."""
+    of a second; ``met`` counts the edge writes that met the lock -- the
+    CLI's bridge write and MCP's finalization, which writes the edge with
+    the execution record in one transaction."""
     monkeypatch.setattr(sqlite_store, "_SQLITE_BUSY_TIMEOUT_MS", 200)
-    real = store_module.link_run_report
     lock = _EdgeLock()
 
-    def maybe_locked(store: RunStore, **kwargs: str) -> object:
-        if not lock.armed:
-            return real(store, **kwargs)
-        holder = sqlite3.connect(store._path, isolation_level=None)
-        holder.execute("BEGIN IMMEDIATE")
-        lock.met += 1
-        try:
-            return real(store, **kwargs)
-        finally:
-            holder.execute("ROLLBACK")
-            holder.close()
+    def locked(real: Callable[..., object]) -> Callable[..., object]:
+        def maybe_locked(store: RunStore, *args: object, **kwargs: object) -> object:
+            if not lock.armed:
+                return real(store, *args, **kwargs)
+            holder = sqlite3.connect(store._path, isolation_level=None)
+            holder.execute("BEGIN IMMEDIATE")
+            lock.met += 1
+            try:
+                return real(store, *args, **kwargs)
+            finally:
+                holder.execute("ROLLBACK")
+                holder.close()
 
-    monkeypatch.setattr(store_module, "link_run_report", maybe_locked)
+        return maybe_locked
+
+    monkeypatch.setattr(
+        store_module, "link_run_report", locked(store_module.link_run_report)
+    )
+    monkeypatch.setattr(
+        store_module, "finalize_execution", locked(store_module.finalize_execution)
+    )
     return lock
 
 
@@ -255,8 +265,10 @@ def test_the_orphan_run_is_left_to_retention_and_the_next_analysis_links_its_own
     links: list[RunSnapshotLink],
 ) -> None:
     """Nothing repairs the orphan: the next analysis of a changed tree
-    publishes a fresh run and records that run's edge; the orphan keeps no
-    edge and is one more candidate of the next sweep."""
+    publishes a fresh run and records that run's edge; the orphan -- no
+    edge, no execution record, no longer the head -- is promised to nobody,
+    and that publication's own sweep collects it (the retention window holds
+    registered runs only)."""
     root, db = _corpus(tmp_path)
     run_store_cli(root, *_ARGS, "--json", str(root / "a.json"), store=db)
     orphan = links[-1]
@@ -276,8 +288,8 @@ def test_the_orphan_run_is_left_to_retention_and_the_next_analysis_links_its_own
             ).fetchall()
         )
         swept = collect_garbage(store, retain_history=2)
-    assert edges == {orphan.store_run_id: 0, fresh.store_run_id: 1}
-    assert swept.candidates == 2
+    assert edges == {fresh.store_run_id: 1}
+    assert swept.candidates == 1
 
 
 # -- every other failure at the edge stays loud --------------------------------
@@ -320,6 +332,12 @@ def test_any_other_failure_at_the_edge_write_stays_loud(
 # -- MCP: the same line, in the answer's own warnings --------------------------
 
 
+def _assert_not_restorable(warnings: list[str]) -> None:
+    """No execution record was written, and the answer says that no other
+    server can find this run."""
+    assert any("is held by this server only" in line for line in warnings), warnings
+
+
 def test_mcp_answers_with_the_unrecorded_warning_and_keeps_the_run(
     tmp_path: Path,
     run_store_mcp: RunStoreMcpRunner,
@@ -336,5 +354,6 @@ def test_mcp_answers_with_the_unrecorded_warning_and_keeps_the_run(
     assert link.state == _UNRECORDED
     warnings = [str(item) for item in answer["warnings"]]  # type: ignore[attr-defined]
     assert _WARNING_HEAD + link.refusal + _WARNING_TAIL in warnings
+    _assert_not_restorable(warnings)
     assert answer["run_id"]
     assert _store_rows(db)[1:] == (0, 0)

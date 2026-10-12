@@ -863,10 +863,20 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert cast(int, cleared["cleared_runs"]) >= 1
     assert cast(int, cleared["cleared_intents"]) >= 1
     assert run_id in cast("list[str]", cleared["cleared_run_ids"])
-    from mcp.server.fastmcp.exceptions import ResourceError
+    # No run is held any more: the latest summary is the typed answer about a
+    # run no reading answered (recovery wave), not a resource error.
+    _assert_unavailable(
+        list(asyncio.run(server.read_resource("codeclone://latest/summary"))),
+        reason="run_not_found",
+    )
 
-    with pytest.raises(ResourceError):
-        list(asyncio.run(server.read_resource("codeclone://latest/summary")))
+
+def _assert_unavailable(rendered: object, *, reason: str) -> None:
+    """The typed answer about a run no reading answered, rendered by the
+    transport: its status and its reason."""
+    text = str(rendered)
+    assert '"status": "unavailable"' in text, text
+    assert f'"reason": "{reason}"' in text, text
 
 
 def test_mcp_server_parser_defaults_and_main_success(
@@ -1175,13 +1185,19 @@ def test_mcp_server_artifact_retrieval_tools_fail_closed_without_runs(
             )
         )
 
-    with pytest.raises(Exception, match=r"[Nn]o (matching )?MCP analysis run"):
-        asyncio.run(
-            server.call_tool(
-                "check_authority",
-                {"root": abs_root, "run_id": "missing1"},
+    # A run no reading answered is a typed answer (recovery wave): the store
+    # is not enabled for this root, so it was not looked up.
+    _assert_unavailable(
+        str(
+            asyncio.run(
+                server.call_tool(
+                    "check_authority",
+                    {"root": abs_root, "run_id": "missing1"},
+                )
             )
-        )
+        ),
+        reason="store_disabled",
+    )
 
 
 def test_mcp_server_observability_wrapper_without_root_or_capture(

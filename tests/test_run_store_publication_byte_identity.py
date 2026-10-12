@@ -45,9 +45,11 @@ from codeclone.canonical import store as store_module
 from codeclone.canonical.model import CanonicalModel
 from codeclone.canonical.store import (
     RunStore,
+    RunStoreGcJob,
     collect_garbage,
     release_run_lease,
 )
+from codeclone.core import canonical_snapshot as canonical_snapshot_module
 from codeclone.core.canonical_snapshot import (
     RUN_SNAPSHOT_NAMESPACE,
     _publish_and_collect,
@@ -175,6 +177,29 @@ def _edited(model: CanonicalModel) -> CanonicalModel:
         coupled_sets=frozenset(
             {*(model.coupled_sets - {dropped}), frozenset({"EditedRun"})}
         ),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _the_recorded_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sweep the known answers were recorded under: the head-generation
+    window of two, the publication's policy on ``7448116c``.
+
+    What this module holds is the WRITE road -- the bytes a publication, a
+    republication and a collection leave behind -- and that road did not
+    change when the publication's retention became the registry's window
+    (recovery wave, 2026-10-12): the window holds REGISTERED runs, this
+    sequence registers none, and under it every superseded run would leave at
+    the next step, a different sequence altogether.  The window is pinned
+    where it is the subject (``test_run_store_retention``,
+    ``test_run_store_gc_owner``); here the sweep stays the one the digests
+    record, so a digest that moves still says the write road moved."""
+
+    def recorded_sweep(store: RunStore) -> object:
+        return RunStoreGcJob(store=store, retain_history=2).collect()
+
+    monkeypatch.setattr(
+        canonical_snapshot_module, "_collect_after_publication", recorded_sweep
     )
 
 

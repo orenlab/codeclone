@@ -610,15 +610,17 @@ def test_the_audit_events_are_written_once_and_ride_a_served_answer(
     )
 
 
-def test_an_evicted_before_run_stays_refused_with_the_store_on(
+def test_an_evicted_before_run_is_found_again_in_the_store(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
-    """Today's contract, held through this wave: a before-run evicted from
-    memory is ``no_before_run`` even though the store still holds it -- the
-    store is read only for runs the session holds (eviction recovery is a
-    later wave).  The positive control: before the eviction the same
-    question is served from the store.  The intent is cleared first: an
-    intent pins its before-run, which is never evicted while it holds."""
+    """The recovery wave's contract (ruling 2026-10-12): a before-run evicted
+    from memory is no longer ``no_before_run`` while the store still holds
+    it -- the session looks it up in the run store's execution registry, holds
+    it by its resident identity, and answers the before half from the store.
+    (Before this wave the store was read only for runs the session held.)
+    The positive control: before the eviction the same question is served
+    from the store.  The intent is cleared first: an intent pins its
+    before-run, which is never evicted while it holds."""
     cycles = PatchCycles(tmp_path_factory.mktemp("evicted").resolve())
     cycle = cycles["improved"]
     served = cycle.ask("no_intent:ci", serve_from="run_store")
@@ -639,14 +641,10 @@ def test_an_evicted_before_run_stays_refused_with_the_store_on(
     assert link is not None and link.store_run_id
     with serving_environment(cycle.store_path, serve_from="run_store"):
         evicted = service.check_patch_contract(**cycle.questions["no_intent:ci"])
-    assert evicted["status"] == "unverified"
-    assert evicted["reason"] == "no_before_run"
-    assert evicted["serving"] == {
-        "source": "memory",
-        "reason": "not_published",
-        "detail": "no_run_read",
-        "runs": {},
-    }
+    assert evicted["reason"] != "no_before_run", evicted
+    before = evicted["serving"]["runs"]["before"]  # type: ignore[index]
+    assert before["source"] == "run_store", evicted
+    assert before["store_run_id"] == link.store_run_id
 
 
 # -- the store view reads every fact from the store ---------------------------

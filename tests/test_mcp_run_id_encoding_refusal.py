@@ -66,11 +66,21 @@ def _refusal(server: FastMCP, tool: str, arguments: dict[str, Any]) -> str:
     """Call one tool and return the refusal text the caller receives."""
 
     try:
-        asyncio.run(server.call_tool(tool, arguments))
+        result = asyncio.run(server.call_tool(tool, arguments))
     except Exception as exc:  # the refusal text is exactly the subject here
         return str(exc)
-    msg = f"{tool} accepted {arguments!r}; expected a refusal"
-    raise AssertionError(msg)
+    return _typed_refusal(result, tool, arguments)
+
+
+def _typed_refusal(result: object, tool: str, arguments: dict[str, Any]) -> str:
+    """A run no reading answered is a typed answer since the recovery wave,
+    not an exception: its rendered text is the refusal the caller reads.
+    Anything else was an acceptance."""
+    rendered = str(result)
+    assert '"status": "unavailable"' in rendered, (
+        f"{tool} accepted {arguments!r}; expected a refusal"
+    )
+    return rendered
 
 
 def _corrections(message: str) -> dict[str, str]:
