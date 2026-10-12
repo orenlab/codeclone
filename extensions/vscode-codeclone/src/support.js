@@ -101,7 +101,18 @@ const BLOCKED_MCP_ARGS = new Set([
     "--stateless-http",
 ]);
 const STDIO_TRANSPORT_ARGS = Object.freeze(["--transport", "stdio"]);
+// The CI markers CodeClone reads to choose behaviour (codeclone/utils/ci.py).
+// A copy, held equal to the owner by tests/test_launcher_ci_signal.py. Each
+// value travels as the parent set it, and the extension never adds one.
+const SPAWN_ENV_CI_KEYS = Object.freeze([
+    "CI",
+    "GITHUB_ACTIONS",
+    "BUILDKITE",
+    "TF_BUILD",
+    "TEAMCITY_VERSION",
+]);
 const SPAWN_ENV_EXACT_KEYS = new Set([
+    ...SPAWN_ENV_CI_KEYS,
     "PATH",
     "HOME",
     "USERPROFILE",
