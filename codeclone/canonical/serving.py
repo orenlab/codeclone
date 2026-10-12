@@ -82,6 +82,7 @@ from codeclone.canonical.comparison_projection import (
     SUMMARY_HEALTH_BLOCK,
     answered_if_compared,
     baseline_state,
+    group_novelty,
     metric_deltas,
     metrics_baseline_state,
     new_by_source_kind,
@@ -97,10 +98,14 @@ from codeclone.canonical.comparison_rows import (
 from codeclone.canonical.errors import CanonicalModelError
 from codeclone.canonical.evaluation_projection import (
     CLONES_ONLY_MODE,
+    PRODUCTION_HOTSPOT,
     diff_health_delta,
     health_payload,
     health_score,
+    selection,
+    suggestion_total,
 )
+from codeclone.canonical.evaluation_rows import FindingEvaluationRow, finding_effort
 from codeclone.canonical.finding_projection import (
     PROJECTED_FAMILIES,
     projected_finding_groups,
@@ -151,6 +156,7 @@ from codeclone.canonical.store import (
     FAMILY_GRAPH_NODE,
     FAMILY_HEALTH_DELTA,
     FAMILY_HEALTH_RESULT,
+    FAMILY_HOTLIST_SELECTION,
     FAMILY_IMPORT_OBSERVATION,
     FAMILY_LANE_TRUST,
     FAMILY_METRICS_BASELINE_WITNESS,
@@ -177,13 +183,16 @@ from codeclone.canonical.summary_projection import (
     coverage_join,
     dead_code,
     design_maxima,
+    dominant_source_kind,
     finding_counts,
     inventory,
     security_surfaces,
+    source_kind_breakdown,
 )
 from codeclone.contracts import FAMILY_CLONES, ObservedPopulation
 from codeclone.contracts.report_identity import PRODUCER_STATE_COMPLETE
 from codeclone.domain.findings import FAMILY_CLONE
+from codeclone.domain.source_scope import SOURCE_KIND_PRODUCTION
 from codeclone.metrics.coverage_join import permille
 from codeclone.models import (
     DependencyBinding,
@@ -586,25 +595,27 @@ def run_summary_from_model(model: CanonicalModel, *, run_id: str) -> ServedRunSu
     blocks are counted over are projected once for the whole arrangement
     (``finding_projection.projected_once``)."""
     with projected_once():
-        mode = analysis_mode(model)
-        facts = model.facts.comparison
-        state = stored_comparison_state(model)
-        return ServedRunSummary(
-            run_id=run_id,
-            mode=mode,
-            baseline=baseline_state(facts),
-            metrics_baseline=metrics_baseline_state(facts),
-            inventory=inventory(model),
-            health=answered_if_compared(
-                SUMMARY_HEALTH_BLOCK, health_payload(model), state
-            ),
-            findings=_findings_block(model),
-            diff=answered_if_compared(SUMMARY_DIFF_BLOCK, _diff_block(model), state),
-            analysis_profile=analysis_profile(model),
-            dead_code=dead_code(model),
-            coverage_join=coverage_join(model),
-            security_surfaces=_security_block(model, mode),
-        )
+        return _run_summary(model, run_id=run_id)
+
+
+def _run_summary(model: CanonicalModel, *, run_id: str) -> ServedRunSummary:
+    mode = analysis_mode(model)
+    facts = model.facts.comparison
+    state = stored_comparison_state(model)
+    return ServedRunSummary(
+        run_id=run_id,
+        mode=mode,
+        baseline=baseline_state(facts),
+        metrics_baseline=metrics_baseline_state(facts),
+        inventory=inventory(model),
+        health=answered_if_compared(SUMMARY_HEALTH_BLOCK, health_payload(model), state),
+        findings=_findings_block(model),
+        diff=answered_if_compared(SUMMARY_DIFF_BLOCK, _diff_block(model), state),
+        analysis_profile=analysis_profile(model),
+        dead_code=dead_code(model),
+        coverage_join=coverage_join(model),
+        security_surfaces=_security_block(model, mode),
+    )
 
 
 #: The authority graph settles the conclusions of the violation rows and of
@@ -1046,4 +1057,258 @@ __all__ += [
     "ServedPatchRun",
     "patch_run_from_model",
     "read_served_patch_run",
+]
+
+
+# -- the production triage (consumer migration C2) ---------------------------
+#
+# ``get_production_triage`` states, beside the blocks it shares with the run
+# summary (baseline, health, analysis profile, coverage join, security
+# surfaces -- read here as the summary's own arrangement), the run's finding
+# universe broken down by source kind, the document's production-hotspot
+# selection and its suggestion selection.  The cards and the short ids the
+# surface shows them under are its own presentation (``_session_finding_
+# mixin``), so this reading hands it the analysis skeleton of every published
+# finding, and each selected one the way the surface reads a finding -- the
+# skeleton with its verdict and novelty word beside it -- and never a card.
+#
+# A suggestion the store states twice, and never as a row of its own: its
+# source kind is the dominant kind of its finding's sites, and its effort is
+# its finding's price read backwards (``evaluation_rows.finding_effort``).
+# Its TEXT -- title, summary, steps -- no store row carries (the evaluation
+# tier leaves remediation out by design), so it stays the memory's, and a run
+# held without its payload is not answered from here.
+
+
+#: The selection whose order is the document's ``derived.suggestions``.
+TRIAGE_SUGGESTIONS: Final = "suggestions"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ServedTriageSuggestion:
+    """One suggestion of the run's selection, as the triage states it: the
+    finding it names (canonical id), that finding's dominant source kind and
+    the effort the finding was priced under."""
+
+    finding_id: str
+    source_kind: str
+    effort: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ServedTriage:
+    """The store-carried facts of one run's ``get_production_triage``.
+
+    ``summary`` is the run summary's arrangement, read for the blocks the two
+    answers share; ``findings`` and ``suggestions`` are the triage's two
+    count blocks in the surface's key order.  ``universe`` is every published
+    finding's analysis skeleton (the short ids and the spread every card is
+    weighed against are taken over all of them); ``hotspots`` is the
+    production-hotspot selection, ranked, each finding as the surface reads
+    one -- the skeleton, the verdict's ``severity`` / ``confidence`` /
+    ``priority`` / ``clone_type`` and the ``novelty`` word;
+    ``production_suggestions`` is the suggestion selection's production
+    part, ranked; ``efforts`` states the effort of every suggested finding
+    and of nothing else -- a finding without a suggestion has none.
+
+    No limit is applied here: the facts are a function of the run alone,
+    kept by the door across questions, and the caller's limit cuts them.
+    """
+
+    run_id: str
+    summary: ServedRunSummary
+    findings: Mapping[str, object]
+    suggestions: Mapping[str, object]
+    universe: tuple[Mapping[str, object], ...]
+    hotspots: tuple[Mapping[str, object], ...]
+    production_suggestions: tuple[ServedTriageSuggestion, ...]
+    efforts: Mapping[str, str]
+
+
+def _selected(
+    by_id: Mapping[str, Mapping[str, object]],
+    verdicts: Mapping[str, FindingEvaluationRow],
+    finding_id: str,
+    selection_name: str,
+) -> tuple[Mapping[str, object], FindingEvaluationRow]:
+    """One finding a selection names, with the verdict on it -- or the
+    refusal: a selection naming a finding the run publishes no group or no
+    verdict for cannot be shown, and is never shown short of it."""
+    group = by_id.get(finding_id)
+    verdict = verdicts.get(finding_id)
+    if group is None or verdict is None:
+        raise CanonicalModelError(
+            f"the {selection_name} selection names {finding_id!r}, a finding "
+            "the run publishes no evaluated group for"
+        )
+    return group, verdict
+
+
+def _shown_finding(
+    group: Mapping[str, object], verdict: FindingEvaluationRow, novelty: str
+) -> dict[str, object]:
+    """One selected finding as the surface reads one: the skeleton, the
+    run's verdict on it and its novelty word."""
+    finding = {
+        **group,
+        "severity": verdict.severity,
+        "confidence": verdict.confidence,
+        "priority": verdict.priority,
+    }
+    if verdict.clone_type is not None:
+        finding["clone_type"] = verdict.clone_type
+    finding["novelty"] = novelty
+    return finding
+
+
+def _triage_suggestion(
+    by_id: Mapping[str, Mapping[str, object]],
+    verdicts: Mapping[str, FindingEvaluationRow],
+    finding_id: str,
+) -> ServedTriageSuggestion:
+    finding, verdict = _selected(by_id, verdicts, finding_id, TRIAGE_SUGGESTIONS)
+    return ServedTriageSuggestion(
+        finding_id=finding_id,
+        source_kind=dominant_source_kind(finding),
+        effort=finding_effort(verdict.severity, verdict.priority),
+    )
+
+
+def _triage_findings_block(
+    counts: Mapping[str, object], summary: ServedRunSummary
+) -> dict[str, object]:
+    """``findings``: the universe's total and source-kind breakdown, the new
+    findings by source kind (the summary's), and the findings outside the
+    production focus."""
+    by_source_kind = cast("Mapping[str, int]", counts["by_source_kind"])
+    total = cast("int", counts["total"])
+    return {
+        "total": total,
+        "by_source_kind": dict(by_source_kind),
+        "new_by_source_kind": summary.findings["new_by_source_kind"],
+        "outside_focus": total - by_source_kind[SOURCE_KIND_PRODUCTION],
+    }
+
+
+def _triage_suggestions_block(
+    total: int, suggested: tuple[ServedTriageSuggestion, ...]
+) -> dict[str, object]:
+    """``suggestions``: how many the run selected, by source kind, and how
+    many fall outside the production focus."""
+    by_source_kind = source_kind_breakdown(item.source_kind for item in suggested)
+    return {
+        "total": total,
+        "by_source_kind": by_source_kind,
+        "outside_focus": total - by_source_kind[SOURCE_KIND_PRODUCTION],
+    }
+
+
+def triage_from_model(model: CanonicalModel, *, run_id: str) -> ServedTriage:
+    """Arrange one stored run's facts into what the production triage states;
+    the finding groups are projected once for the whole arrangement."""
+    with projected_once():
+        return _triage(model, run_id=run_id)
+
+
+def _triage(model: CanonicalModel, *, run_id: str) -> ServedTriage:
+    groups = projected_finding_groups(model)
+    evaluation = model.facts.evaluation
+    verdicts = {row.finding_id: row for row in evaluation.finding_evaluation}
+    universe = tuple(
+        dict(group) for family in PROJECTED_FAMILIES for group in groups[family]
+    )
+    by_id = {str(group["id"]): group for group in universe}
+    novelty = group_novelty(model)
+    hotspots = tuple(
+        _shown_finding(
+            *_selected(by_id, verdicts, finding_id, PRODUCTION_HOTSPOT),
+            novelty[finding_id],
+        )
+        for finding_id in selection(evaluation, PRODUCTION_HOTSPOT)
+    )
+    suggested = tuple(
+        _triage_suggestion(by_id, verdicts, finding_id)
+        for finding_id in selection(evaluation, TRIAGE_SUGGESTIONS)
+    )
+    summary = _run_summary(model, run_id=run_id)
+    return ServedTriage(
+        run_id=run_id,
+        summary=summary,
+        findings=_triage_findings_block(finding_counts(model), summary),
+        suggestions=_triage_suggestions_block(suggestion_total(evaluation), suggested),
+        universe=universe,
+        hotspots=hotspots,
+        production_suggestions=tuple(
+            item for item in suggested if item.source_kind == SOURCE_KIND_PRODUCTION
+        ),
+        efforts={item.finding_id: item.effort for item in suggested},
+    )
+
+
+#: The families :func:`read_served_triage` reads on every run -- the run
+#: summary's (:data:`RUN_SUMMARY_FAMILIES`), whose arrangement the triage
+#: reads for the blocks the two share, and the two evaluation families its
+#: verdicts and selections are rows of (``finding_evaluation``,
+#: ``hotlist_selection``) -- and the summary's conditions
+#: (``tests/test_production_triage_declared_families.py`` holds the
+#: composition and each family, per branch).  Measured 2026-10-06 on the
+#: twenty served populations: this read equals the whole read on every one.
+TRIAGE_FAMILIES: Final = (
+    FAMILY_ADOPTION_DELTA,
+    FAMILY_ANALYSIS_POPULATION,
+    FAMILY_API_SURFACE_DELTA,
+    FAMILY_BASELINE_WITNESS,
+    FAMILY_CLONE_GROUP,
+    FAMILY_CLONE_NOVELTY,
+    FAMILY_COHESION_HOTSPOT,
+    FAMILY_COMPARISON_AVAILABILITY,
+    FAMILY_COMPLEXITY_HOTSPOT,
+    FAMILY_COMPLEXITY_NOVELTY,
+    FAMILY_COUPLING_HOTSPOT,
+    FAMILY_COUPLING_NOVELTY,
+    FAMILY_COVERAGE_JOIN,
+    FAMILY_COVERAGE_UNIT,
+    FAMILY_DEAD_CODE_SUMMARY,
+    FAMILY_DEAD_SYMBOL_GROUP,
+    FAMILY_DEAD_SYMBOL_NOVELTY,
+    FAMILY_DEPENDENCY_CYCLE,
+    FAMILY_DEPENDENCY_CYCLE_NOVELTY,
+    FAMILY_DISABLED_CAPABILITY,
+    FAMILY_FILE_MODULE,
+    FAMILY_FINDING_EVALUATION,
+    FAMILY_HEALTH_DELTA,
+    FAMILY_HEALTH_RESULT,
+    FAMILY_HOTLIST_SELECTION,
+    FAMILY_LANE_TRUST,
+    FAMILY_METRICS_BASELINE_WITNESS,
+    FAMILY_RUN_SCALAR,
+    FAMILY_SECURITY_SURFACE,
+    FAMILY_STRUCTURAL_GROUP,
+    FAMILY_SUPPRESSED_CLONE_GROUP,
+    FAMILY_UNREACHABLE_STATEMENT_GROUP,
+    FAMILY_VIOLATION,
+)
+#: The production triage's read conditions: the run summary's.
+TRIAGE_READ_WHEN: Final = RUN_SUMMARY_READ_WHEN
+
+
+def read_served_triage(store: RunStore, run_id: str) -> ServedTriage:
+    """Read the declared families of one published run and arrange what
+    the production triage states of it (consumer migration C2).  Bounded,
+    as every reading here is: :data:`TRIAGE_FAMILIES`, and the families of
+    each of :data:`TRIAGE_READ_WHEN` whose condition the run meets."""
+    model = read_named_families(
+        store, run_id, TRIAGE_FAMILIES, read_when=TRIAGE_READ_WHEN
+    )
+    return triage_from_model(model, run_id=run_id)
+
+
+__all__ += [
+    "TRIAGE_FAMILIES",
+    "TRIAGE_READ_WHEN",
+    "TRIAGE_SUGGESTIONS",
+    "ServedTriage",
+    "ServedTriageSuggestion",
+    "read_served_triage",
+    "triage_from_model",
 ]

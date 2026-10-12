@@ -60,7 +60,7 @@ says WHICH fields, not merely that one exists.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import fields, replace
 from typing import Final, TypeVar
 
@@ -79,6 +79,8 @@ from ...api.run_store_serving import (
     ServedPatchRun,
     ServedRunSlices,
     ServedRunSummary,
+    ServedTriage,
+    ServedTriageSuggestion,
     ServedUnitLocation,
     answered_if_compared,
     document_comparison_state,
@@ -87,9 +89,10 @@ from ...api.run_store_serving import (
     read_run_store_patch_run,
     read_run_store_slices,
     read_run_store_summary,
+    read_run_store_triage,
 )
 from ...observability import record_counter
-from ...utils.coerce import as_mapping
+from ...utils.coerce import as_mapping, as_sequence
 from ._authority_candidates import authority_candidate_items
 from ._blast_radius import BlastRadiusResult
 from ._session_shared import MCPRunRecord, MCPServiceContractError
@@ -566,4 +569,167 @@ __all__ += [
     "PATCH_BUDGET_RUN",
     "PATCH_NO_RUN_DETAIL",
     "served_patch_contract",
+]
+
+
+# -- the production triage (consumer migration C2) ---------------------------
+#
+# ``get_production_triage`` agrees on the wire over the WHOLE answer, the run
+# summary's rule: the store's blocks and cards are placed into the answer the
+# surface built, every field the store does not carry stays the surface's --
+# identity, focus and scope, cache, hygiene tips, the interpreter keys of
+# ``baseline``, the presentation keys of ``security_surfaces``, the literal
+# ``top_hotspots.kind`` and the TEXT of a shown suggestion (title, summary,
+# steps), which no store row carries -- and the store's answer is served only
+# when the two answers are the same bytes.  The caller's limits arrive
+# clamped (the surface clamps once, for both answers) and cut the store's
+# ranked facts here.
+
+#: The keys of a shown suggestion that stay the memory's -- its text -- on
+#: either side of its effort, in the memory's key order.
+_TEXT_BEFORE_EFFORT: Final[tuple[str, ...]] = ("title", "summary")
+_TEXT_AFTER_EFFORT: Final[tuple[str, ...]] = ("steps",)
+SUGGESTION_TEXT_KEYS: Final[tuple[str, ...]] = (
+    *_TEXT_BEFORE_EFFORT,
+    *_TEXT_AFTER_EFFORT,
+)
+#: The surface's id of a shown suggestion, over its finding's short id --
+#: spelled as the memory answer spells it
+#: (``_session_finding_mixin._triage_suggestion_rows``).
+_SUGGESTION_ID_PREFIX: Final = "suggestion:"
+
+#: How the surface presents the store's findings: handed the store's triage
+#: and the hotspot findings a limit shows, the short id of every published
+#: finding and the summary card of each shown hotspot -- the surface's own
+#: card machine (``_session_finding_mixin``), never a second spelling of it.
+TriagePresenter = Callable[
+    [ServedTriage, Sequence[Mapping[str, object]]],
+    tuple[Mapping[str, str], list[dict[str, object]]],
+]
+
+
+def _shown_suggestion(
+    suggestion: ServedTriageSuggestion,
+    short_ids: Mapping[str, str],
+    texts: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    """One shown suggestion in the memory's key order: its ids, source kind
+    and effort off the store, its text off the memory's item of the same
+    finding (absent when memory shows no such item, which the agreement
+    then names)."""
+    short_id = short_ids[suggestion.finding_id]
+    text = texts.get(short_id, {})
+    return {
+        "id": f"{_SUGGESTION_ID_PREFIX}{short_id}",
+        "finding_id": short_id,
+        **_kept(text, _TEXT_BEFORE_EFFORT),
+        "effort": suggestion.effort,
+        **_kept(text, _TEXT_AFTER_EFFORT),
+        "source_kind": suggestion.source_kind,
+    }
+
+
+def _top_suggestions(
+    memory_block: object,
+    stored: ServedTriage,
+    short_ids: Mapping[str, str],
+    limit: int,
+) -> dict[str, object]:
+    texts = {
+        str(as_mapping(item).get("finding_id", "")): as_mapping(item)
+        for item in as_sequence(as_mapping(memory_block).get("items"))
+    }
+    items = [
+        _shown_suggestion(suggestion, short_ids, texts)
+        for suggestion in stored.production_suggestions[:limit]
+    ]
+    return {
+        "available": len(stored.production_suggestions),
+        "returned": len(items),
+        "items": items,
+    }
+
+
+def store_triage_payload(
+    memory: Mapping[str, object],
+    stored: ServedTriage,
+    *,
+    present: TriagePresenter,
+    hotspot_limit: int,
+    suggestion_limit: int,
+) -> dict[str, object]:
+    """The production triage built from the store's facts.
+
+    Every field the store does not carry is the surface's own answer, so
+    the two payloads can differ only where the store and the memory do.
+    """
+    short_ids, cards = present(stored, stored.hotspots[:hotspot_limit])
+    summary = stored.summary
+    payload = dict(memory)
+    payload["baseline"] = {
+        **summary.baseline,
+        **_kept(memory.get("baseline"), EXECUTION_BASELINE_KEYS),
+    }
+    payload["health"] = dict(summary.health)
+    payload["findings"] = dict(stored.findings)
+    payload["top_hotspots"] = {
+        **as_mapping(memory.get("top_hotspots")),
+        "available": len(stored.hotspots),
+        "returned": len(cards),
+        "items": cards,
+    }
+    payload["suggestions"] = dict(stored.suggestions)
+    payload["top_suggestions"] = _top_suggestions(
+        memory.get("top_suggestions"), stored, short_ids, suggestion_limit
+    )
+    _place(payload, "analysis_profile", summary.analysis_profile)
+    _place(payload, "coverage_join", summary.coverage_join)
+    _place(
+        payload,
+        "security_surfaces",
+        _security_block(memory.get("security_surfaces"), summary.security_surfaces),
+    )
+    return payload
+
+
+def served_production_triage(
+    record: MCPRunRecord,
+    memory: Mapping[str, object],
+    *,
+    present: TriagePresenter,
+    hotspot_limit: int,
+    suggestion_limit: int,
+) -> tuple[dict[str, object], RunStoreServingOutcome]:
+    """The production triage to answer for one record, and where it came
+    from (consumer migration C2).
+
+    ``memory`` is the answer the surface built from the record under the
+    same clamped limits; the store's is built from it, the store's facts
+    and ``present``, and served only when the two are the same bytes.
+    """
+    stored, outcome = read_run_store_triage(
+        root=record.root, link=record.execution.run_snapshot_link
+    )
+    candidate = (
+        None
+        if stored is None
+        else store_triage_payload(
+            memory,
+            stored,
+            present=present,
+            hotspot_limit=hotspot_limit,
+            suggestion_limit=suggestion_limit,
+        )
+    )
+    payload, served = _shadow_read(
+        dict(memory), (candidate, outcome), agrees=_summary_agrees
+    )
+    return payload, _named_divergence(served, candidate, memory)
+
+
+__all__ += [
+    "SUGGESTION_TEXT_KEYS",
+    "TriagePresenter",
+    "served_production_triage",
+    "store_triage_payload",
 ]

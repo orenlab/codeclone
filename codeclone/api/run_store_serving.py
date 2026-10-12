@@ -125,12 +125,15 @@ from ..canonical.serving import (
     ServedPatchRun,
     ServedRunSlices,
     ServedRunSummary,
+    ServedTriage,
+    ServedTriageSuggestion,
     ServedUnitLocation,
     read_served_authority_candidates,
     read_served_blast_radius_facts,
     read_served_patch_run,
     read_served_run_slices,
     read_served_run_summary,
+    read_served_triage,
 )
 from ..canonical.store import RunStore, StoreFileIdentity, prove_run_membership
 from ..core.canonical_snapshot import resolve_run_store_config, verified_linked_run
@@ -662,4 +665,44 @@ def read_run_store_patch_run(
 __all__ += [
     "ServedPatchRun",
     "read_run_store_patch_run",
+]
+
+
+#: The facts the production triage is answered from (consumer migration C2),
+#: kept beside the other readings' kinds.
+SERVED_FACTS_TRIAGE: Final = "triage"
+
+
+def read_run_store_triage(
+    *, root: Path, link: RunSnapshotLink | None
+) -> tuple[ServedTriage | None, RunStoreServingOutcome]:
+    """The facts one execution's production triage is answered from, out of
+    the store, or a typed reason for none (consumer migration C2).
+
+    The same gates, the same two roads, the same one store open and the same
+    serving switch as :func:`read_run_store_summary`: a record that stated a
+    bridge is answered from memory without a store read while the switch
+    names memory, and the answer names the switch.  A suggestion or hotspot
+    the run ranks over a finding it does not state is refused
+    ``unexpressible``.
+    """
+    source = serving_source()
+    if link is not None and source == SERVE_FROM_MEMORY:
+        return _memory(
+            SERVING_REASON_STORE_DISABLED,
+            store_run_id=link.store_run_id,
+            detail=f"{ENV_SERVE_FROM}={source}",
+        )
+    return _read_published(
+        root=root,
+        link=link,
+        read=_kept_facts(SERVED_FACTS_TRIAGE, read_served_triage),
+    )
+
+
+__all__ += [
+    "SERVED_FACTS_TRIAGE",
+    "ServedTriage",
+    "ServedTriageSuggestion",
+    "read_run_store_triage",
 ]

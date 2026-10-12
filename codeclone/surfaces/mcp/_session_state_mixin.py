@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
+from ...api.run_store_serving import ServedTriage
 from . import _session_helpers as _helpers
 from ._code_provenance import code_provenance_payload
 from ._implementation_context_pages import ContextProjectionArtifact
@@ -34,8 +35,10 @@ from ._report_section import (
 from ._run_residence import payload_evicted_run_summary
 from ._run_store_serving import (
     PATCH_BUDGET_RUN,
+    TriagePresenter,
     memory_run_summary,
     served_patch_contract,
+    served_production_triage,
     served_run_summary,
 )
 from ._session_baseline import (
@@ -462,6 +465,50 @@ def held_gate_answer(
     if isinstance(record, MCPRunRecord):
         return whole(record)
     return payload_evicted_gate_answer(session, record=record, request=request)
+
+
+def _effort_remediation(effort: str | None) -> dict[str, object] | None:
+    """What a summary card and its score read of a remediation: the effort
+    alone, and no remediation for a finding without a suggestion."""
+    return None if effort is None else {"effort": effort}
+
+
+def triage_findings_presenter(
+    session: _MCPSessionFindingMixin, record: MCPRunRecord
+) -> TriagePresenter:
+    """How this session presents the store's findings of ``record``'s run
+    (consumer migration C2): the short id of every published finding, mapped
+    over the store's whole universe, and the summary card of each shown
+    hotspot -- the very card machine the memory answer decorates its
+    hotspots with, handed the effort the store states."""
+
+    def present(
+        stored: ServedTriage, shown: Sequence[Mapping[str, object]]
+    ) -> tuple[Mapping[str, str], list[dict[str, object]]]:
+        canonical_to_short, _short_to_canonical = session._finding_id_maps_for_findings(
+            stored.universe
+        )
+        max_spread_value = max(
+            (session._spread_value(finding) for finding in stored.universe),
+            default=0,
+        )
+        cards = [
+            session._decorate_finding(
+                record,
+                finding,
+                detail_level="summary",
+                remediation=_effort_remediation(
+                    stored.efforts.get(str(finding.get("id", "")))
+                ),
+                remediation_computed=True,
+                max_spread_value=max_spread_value,
+                canonical_to_short=canonical_to_short,
+            )
+            for finding in shown
+        ]
+        return canonical_to_short, cards
+
+    return present
 
 
 def _compare_records(
@@ -1529,6 +1576,10 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         max_hotspots: int = 3,
         max_suggestions: int = 3,
     ) -> dict[str, object]:
+        """The production triage of one run: the store's answer when it is
+        the memory's byte for byte, the memory's otherwise -- and the answer
+        says which, and why, in ``serving`` (consumer migration C2,
+        ``_run_store_serving.served_production_triage``)."""
         record = _helpers._resolve_run_for_optional_root(self._runs, run_id, root)
         summary = self._summary_payload(record.summary, record=record)
         findings = self._base_findings(record)
@@ -1539,6 +1590,8 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         suggestion_breakdown = _helpers._source_kind_breakdown(
             row.get("source_kind") for row in suggestion_rows
         )
+        # One clamp for both answers: the store's selection, cut by an
+        # unclamped limit of zero, would show nothing where memory shows one.
         hotspot_limit = max(1, min(max_hotspots, 10))
         suggestion_limit = max(1, min(max_suggestions, 10))
         production_hotspot_selection = self._hotspot_selection(
@@ -1608,7 +1661,15 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         if security_surfaces:
             payload["security_surfaces"] = security_surfaces
         _helpers.attach_workspace_hygiene_tips(payload, root=record.root)
-        return payload
+        served, serving = served_production_triage(
+            record,
+            payload,
+            present=triage_findings_presenter(self, record),
+            hotspot_limit=hotspot_limit,
+            suggestion_limit=suggestion_limit,
+        )
+        served["serving"] = serving.as_payload()
+        return served
 
     def get_help(
         self,
