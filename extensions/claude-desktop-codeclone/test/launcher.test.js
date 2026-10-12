@@ -10,6 +10,7 @@ const test = require("node:test");
 const {
     BLOCKED_ARGS,
     buildSetupMessage,
+    buildSpawnEnv,
     exitProxy,
     normalizeConfiguredValue,
     parseLauncherArgsJson,
@@ -255,6 +256,65 @@ test("resolvePoetryLauncher finds the launcher inside the active Poetry env", as
     assert.deepEqual(resolved, {command: launcherPath, root: workspaceRoot});
 });
 
+test("buildSpawnEnv keeps launcher-relevant env keys only", () => {
+    const env = buildSpawnEnv("/workspace/repo", {
+        PATH: "/bin",
+        HOME: "/home/user",
+        SECRET_TOKEN: "hidden",
+        CODECLONE_MCP_SHUTDOWN_GRACE_MS: "1000",
+        PYTHONPATH: "/tmp",
+    });
+    assert.equal(env.PATH, "/bin");
+    assert.equal(env.HOME, "/home/user");
+    assert.equal(env.CODECLONE_MCP_SHUTDOWN_GRACE_MS, "1000");
+    assert.equal(env.PYTHONPATH, "/tmp");
+    assert.equal(env.CODECLONE_WORKSPACE_ROOT, "/workspace/repo");
+    assert.equal(env.SECRET_TOKEN, undefined);
+});
+
+// The CI markers CodeClone reads (codeclone/utils/ci.py) with the value each
+// CI system really sets, spelled out here on purpose: a test that iterated the
+// launcher's own list would shrink with it, and a normalised value would pass.
+const CI_MARKERS = Object.freeze({
+    CI: "true",
+    GITHUB_ACTIONS: "true",
+    BUILDKITE: "true",
+    TF_BUILD: "True",
+    TEAMCITY_VERSION: "2026.1",
+});
+
+for (const [key, value] of Object.entries(CI_MARKERS)) {
+    test(`buildSpawnEnv carries the CI marker ${key} to the MCP process`, () => {
+        const env = buildSpawnEnv("", {PATH: "/bin", [key]: value});
+        assert.deepEqual(env, {PATH: "/bin", [key]: value});
+    });
+}
+
+for (const value of ["false", "", " 1 "]) {
+    test(`buildSpawnEnv passes CI=${JSON.stringify(value)} through unchanged`, () => {
+        assert.deepEqual(buildSpawnEnv("", {CI: value}), {CI: value});
+    });
+}
+
+test("buildSpawnEnv never invents a CI marker the parent lacks", () => {
+    const env = buildSpawnEnv("/workspace/repo", {PATH: "/bin", HOME: "/home/user"});
+    assert.deepEqual(env, {
+        PATH: "/bin",
+        HOME: "/home/user",
+        CODECLONE_WORKSPACE_ROOT: "/workspace/repo",
+    });
+});
+
+test("buildSpawnEnv still strips variables outside the allowlist", () => {
+    const env = buildSpawnEnv("", {
+        CI: "true",
+        GITLAB_CI: "true",
+        JENKINS_URL: "https://ci.example",
+        SECRET_TOKEN: "hidden",
+    });
+    assert.deepEqual(env, {CI: "true"});
+});
+
 test("buildSetupMessage stays actionable and bounded", () => {
     const text = buildSetupMessage();
     assert.match(text, /workspace, Poetry environment, or PATH/);
@@ -318,6 +378,64 @@ test("server proxy launches the configured stdio child", async () => {
     assert.equal(exitCode, 0);
     assert.equal(stdoutChunks.join(""), '{"jsonrpc":"2.0","id":1,"method":"ping"}\n');
     assert.match(stderrChunks.join(""), /\[codeclone\] launcher source=configured/);
+});
+
+// Stands in for codeclone-mcp: reports which CI markers and which variable
+// names the proxy actually handed the process it spawned. The trailing "--"
+// keeps node from reading the "--transport stdio" the launcher appends.
+const ENV_PROBE_SCRIPT = `
+const markers = ${JSON.stringify(Object.keys(CI_MARKERS))};
+process.stdout.write(JSON.stringify({
+    markers: Object.fromEntries(
+        markers.filter((key) => key in process.env).map((key) => [key, process.env[key]]),
+    ),
+    names: Object.keys(process.env).sort(),
+}));
+`;
+
+async function runProxyWithParentEnv(parentEnv) {
+    const base = {...process.env};
+    for (const key of [...Object.keys(CI_MARKERS), "GITLAB_CI", "JENKINS_URL"]) {
+        delete base[key];
+    }
+    const child = spawn(process.execPath, [serverEntry], {
+        cwd: rootDir,
+        env: {
+            ...base,
+            ...parentEnv,
+            CODECLONE_MCP_COMMAND: process.execPath,
+            CODECLONE_MCP_ARGS_JSON: JSON.stringify(["-e", ENV_PROBE_SCRIPT, "--"]),
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+    });
+    const stdoutChunks = [];
+    const stderrChunks = [];
+    child.stdout.on("data", (chunk) => stdoutChunks.push(String(chunk)));
+    child.stderr.on("data", (chunk) => stderrChunks.push(String(chunk)));
+    child.stdin.end();
+    const exitCode = await new Promise((resolve) => {
+        child.on("exit", resolve);
+    });
+    assert.equal(exitCode, 0, stderrChunks.join(""));
+    // The probe reached the mechanism: the proxy launched the configured child.
+    assert.match(stderrChunks.join(""), /\[codeclone\] launcher source=configured/);
+    return JSON.parse(stdoutChunks.join(""));
+}
+
+test("server proxy hands the spawned child the CI markers exactly as set", async () => {
+    const report = await runProxyWithParentEnv({
+        ...CI_MARKERS,
+        CI: "false",
+        SECRET_TOKEN: "hidden",
+    });
+    assert.deepEqual(report.markers, {...CI_MARKERS, CI: "false"});
+    assert.equal(report.names.includes("SECRET_TOKEN"), false);
+});
+
+test("server proxy hands the spawned child no CI marker the parent lacks", async () => {
+    const report = await runProxyWithParentEnv({GITLAB_CI: "true"});
+    assert.deepEqual(report.markers, {});
+    assert.equal(report.names.includes("GITLAB_CI"), false);
 });
 
 test("server proxy prints a setup hint when the launcher is missing", async () => {
