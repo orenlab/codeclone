@@ -35,19 +35,26 @@ own helpers beside the canonical store (the Phase 39S test-import law binds
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import dataclass
+import json
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from codeclone.api.run_store_serving import ServedTriage, read_run_store_triage
 from codeclone.surfaces.mcp import _session_helpers as surface_helpers
+from codeclone.surfaces.mcp._run_store_serving import store_triage_payload
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
+from codeclone.surfaces.mcp._session_state_mixin import triage_findings_presenter
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.utils.coerce import as_mapping, as_sequence
 from tests import conftest as corpora
 from tests._run_summary_serving import (
+    STORE_ROW_PERTURBATIONS,
     SUMMARY_POPULATIONS,
+    UNREAD_ROW_PERTURBATIONS,
     SummaryPopulation,
     SummaryPopulations,
     serving_environment,
@@ -423,3 +430,299 @@ def memory_triage(
 
 
 __all__ += ["memory_triage", "without_serving"]
+
+
+# -- the store's answer, built beside the memory's ---------------------------
+
+#: The limits the equivalence asks under: below the surface's floor, its
+#: floor, its default, its ceiling and past it.
+TRIAGE_LIMITS: tuple[int, ...] = (0, 1, 3, 10, 99)
+
+
+def _clamped(limit: int) -> int:
+    """The surface's limit (``get_production_triage``: one to ten), so a
+    candidate built here is cut as the tool cuts it; the tool's own clamp is
+    held through the tool (``test_a_limit_is_clamped_once_for_both_answers``)."""
+    return max(1, min(limit, 10))
+
+
+def stored_triage(population: SummaryPopulation) -> ServedTriage:
+    """The store's triage facts of one execution's run, read through the
+    door the surface reads through -- never a reading of the test's own."""
+    record = population.record
+    with serving_environment(population.store_path, serve_from="run_store"):
+        stored, outcome = read_run_store_triage(
+            root=record.root, link=record.execution.run_snapshot_link
+        )
+    assert stored is not None, outcome
+    return stored
+
+
+def triage_pair(
+    population: SummaryPopulation, *, limit: int
+) -> tuple[dict[str, object], dict[str, object]]:
+    """One population's memory answer under ``limit`` (both lists), beside
+    the answer the serving edge builds from the store's facts."""
+    memory = memory_triage(population, max_hotspots=limit, max_suggestions=limit)
+    candidate = store_triage_payload(
+        memory,
+        stored_triage(population),
+        present=triage_findings_presenter(population.service, population.record),
+        hotspot_limit=_clamped(limit),
+        suggestion_limit=_clamped(limit),
+    )
+    return memory, candidate
+
+
+#: The absence of an answer path, on the wire.
+ABSENT = "<absent>"
+
+
+def answer_at(payload: Mapping[str, object], path: str) -> str:
+    """The wire bytes of one answer path, or :data:`ABSENT`.
+
+    ``a.b`` walks mappings; ``items[].x`` maps the rest of the path over
+    every item of a list, so a card field is one value per shown card;
+    ``items[1].x`` takes one item."""
+    value: object = payload
+    parts = path.split(".")
+    for index, part in enumerate(parts):
+        name, _bracket, position = part.partition("[")
+        if not isinstance(value, Mapping) or name not in value:
+            return ABSENT
+        value = value[name]
+        if not _bracket:
+            continue
+        if not isinstance(value, list):
+            return ABSENT
+        rest = ".".join(parts[index + 1 :])
+        if position == "]":
+            return json.dumps(
+                [json.loads(_item_at(item, rest)) for item in value],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        offset = int(position.rstrip("]"))
+        if offset >= len(value):
+            return ABSENT
+        return _item_at(value[offset], rest)
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _item_at(item: object, rest: str) -> str:
+    if not rest:
+        return json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+    found = answer_at(item, rest) if isinstance(item, Mapping) else ABSENT
+    return found if found != ABSENT else json.dumps(ABSENT)
+
+
+# -- one store row replaced: the triage's carriers ---------------------------
+#
+# Each perturbation replaces rows of one run as the store decodes them (the
+# run summary's instrument, ``store_row_replaced``), within the laws of the
+# model: a selection keeps its ranks gapless and a verdict keeps a priority
+# some effort prices, so the store still EXPRESSES the run and the field the
+# rows carry has to move.  A grosser edit (a skipped rank, a priority no
+# effort prices) is refused by the model before any field is read
+# (``unexpressible``), which proves the law, not the carrier.
+
+_Rows = dict[str, list[Any]]
+_Perturb = Callable[[_Rows], None]
+
+
+def _ranked(rows: list[Any], hotlist: str) -> list[int]:
+    """The indexes of one selection's rows, in rank order."""
+    return sorted(
+        (index for index, row in enumerate(rows) if row.hotlist == hotlist),
+        key=lambda index: rows[index].rank,
+    )
+
+
+def _swapped(hotlist: str, first_rank: int, second_rank: int) -> _Perturb:
+    """Two ranks of one selection exchanged: still gapless, another order."""
+
+    def perturb(collected: _Rows) -> None:
+        rows = collected.get("hotlist_selection")
+        if rows is not None:
+            ranked = _ranked(rows, hotlist)
+            first, second = ranked[first_rank - 1], ranked[second_rank - 1]
+            rows[first], rows[second] = (
+                replace(rows[first], rank=rows[second].rank),
+                replace(rows[second], rank=rows[first].rank),
+            )
+
+    return perturb
+
+
+def _last_rank_dropped(hotlist: str) -> _Perturb:
+    def perturb(collected: _Rows) -> None:
+        rows = collected.get("hotlist_selection")
+        if rows is not None:
+            del rows[_ranked(rows, hotlist)[-1]]
+
+    return perturb
+
+
+def _verdict_of_rank(rank: int, **change: object) -> _Perturb:
+    """The verdict on the finding the production-hotspot selection ranks at
+    ``rank``, replaced by ``change`` (which must keep the price lawful)."""
+
+    def perturb(collected: _Rows) -> None:
+        selected = collected.get("hotlist_selection")
+        verdicts = collected.get("finding_evaluation")
+        if selected is None or verdicts is None:
+            return
+        target = selected[_ranked(selected, "production_hotspot")[rank - 1]].finding_id
+        index = next(
+            index for index, row in enumerate(verdicts) if row.finding_id == target
+        )
+        verdicts[index] = replace(verdicts[index], **change)
+
+    return perturb
+
+
+def _first_novelty(family: str, word: str, becomes: str) -> _Perturb:
+    def perturb(collected: _Rows) -> None:
+        rows = collected.get(family)
+        if rows is not None:
+            index = min(
+                (index for index, row in enumerate(rows) if row.novelty == word),
+                key=lambda index: repr(rows[index]),
+            )
+            rows[index] = replace(rows[index], novelty=becomes)
+
+    return perturb
+
+
+#: Each carrier: (population, rows replaced within the model's laws, the
+#: answer paths the replacement must move in the store's answer).  The paths
+#: are a floor -- one row may carry more -- never "something moved".
+TRIAGE_ROW_PERTURBATIONS: dict[str, tuple[str, _Perturb, tuple[str, ...]]] = {
+    "hotspot_ranks_swapped": (
+        "trusted",
+        _swapped("production_hotspot", 1, 2),
+        ("top_hotspots.items[0].canonical_id", "top_hotspots.items[1].canonical_id"),
+    ),
+    "hotspot_last_rank_dropped": (
+        "trusted",
+        _last_rank_dropped("production_hotspot"),
+        ("top_hotspots.available",),
+    ),
+    "hotspot_verdict_critical": (
+        "trusted",
+        _verdict_of_rank(1, severity="critical", priority=3.0),
+        (
+            "top_hotspots.items[0].severity",
+            "top_hotspots.items[0].priority",
+            "top_hotspots.items[0].priority_score",
+        ),
+    ),
+    "hotspot_verdict_repriced": (
+        "trusted",
+        _verdict_of_rank(2, priority=1.0),
+        (
+            "top_hotspots.items[1].effort",
+            "top_hotspots.items[1].priority",
+            "top_hotspots.items[1].priority_score",
+            "top_suggestions.items[0].effort",
+        ),
+    ),
+    "suggestion_last_rank_dropped": (
+        "trusted",
+        _last_rank_dropped("suggestions"),
+        ("suggestions.total", "suggestions.by_source_kind"),
+    ),
+    # Ranks 2 and 3: the two production suggestions the triage shows first
+    # (rank 1 is the population's one ``mixed`` suggestion, which the
+    # production list does not show -- exchanging it moves nothing shown).
+    "suggestion_ranks_swapped": (
+        "trusted",
+        _swapped("suggestions", 2, 3),
+        (
+            "top_suggestions.items[0].finding_id",
+            "top_suggestions.items[1].finding_id",
+        ),
+    ),
+    "clone_novelty": (
+        "trusted",
+        _first_novelty("clone_novelty", "new", "known"),
+        ("findings.new_by_source_kind", "top_hotspots.items[0].novelty"),
+    ),
+}
+
+
+def _verdict_dropped(match: Callable[[_Rows, Any], bool]) -> _Perturb:
+    """The first verdict ``match`` picks, in a content-derived order, taken
+    away."""
+
+    def perturb(collected: _Rows) -> None:
+        verdicts = collected.get("finding_evaluation")
+        if verdicts is not None:
+            index = min(
+                (index for index, row in enumerate(verdicts) if match(collected, row)),
+                key=lambda index: repr(verdicts[index]),
+            )
+            del verdicts[index]
+
+    return perturb
+
+
+def _selected_by(hotlist: str, rank: int) -> Callable[[_Rows, Any], bool]:
+    def match(collected: _Rows, row: Any) -> bool:
+        selected = collected["hotlist_selection"]
+        target = str(selected[_ranked(selected, hotlist)[rank - 1]].finding_id)
+        return str(row.finding_id) == target
+
+    return match
+
+
+def _unselected(collected: _Rows, row: Any) -> bool:
+    """A finding neither selection names: nothing the triage shows."""
+    named = {item.finding_id for item in collected["hotlist_selection"]}
+    return row.finding_id not in named
+
+
+#: A finding a selection names left without its group or its verdict: the
+#: store can no longer express what the triage shows, and refuses typed --
+#: never a card or a suggestion silently dropped.  (population, rows
+#: replaced, a fragment of the refusal's detail.)
+TRIAGE_REFUSING_PERTURBATIONS: dict[str, tuple[str, _Perturb, str]] = {
+    "hotspot_verdict_dropped": (
+        "trusted",
+        _verdict_dropped(_selected_by("production_hotspot", 1)),
+        "the production_hotspot selection names 'clone:",
+    ),
+    "suggestion_verdict_dropped": (
+        "trusted",
+        _verdict_dropped(_selected_by("suggestions", 1)),
+        "selection names",
+    ),
+    "suggestion_group_dropped": (
+        "trusted",
+        STORE_ROW_PERTURBATIONS["dead_symbol_group"][1],
+        "names 'dead_code:",
+    ),
+}
+
+#: Rows the triage reads but shows nothing of, replaced the same way: the
+#: answer must not move and must stay served.  A verdict on a finding no
+#: selection names is read (the family is declared) and never shown.
+TRIAGE_UNMOVED_PERTURBATIONS: dict[str, tuple[str, _Perturb]] = {
+    "unselected_verdict_dropped": ("trusted", _verdict_dropped(_unselected)),
+    **{
+        family: (name, perturb)
+        for family, (name, perturb) in UNREAD_ROW_PERTURBATIONS.items()
+    },
+}
+
+
+__all__ += [
+    "ABSENT",
+    "TRIAGE_LIMITS",
+    "TRIAGE_REFUSING_PERTURBATIONS",
+    "TRIAGE_ROW_PERTURBATIONS",
+    "TRIAGE_UNMOVED_PERTURBATIONS",
+    "answer_at",
+    "stored_triage",
+    "triage_pair",
+]
