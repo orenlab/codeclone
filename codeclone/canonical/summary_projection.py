@@ -33,7 +33,7 @@ block the document nests under each site is a registry identity fact
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Final
 
 from codeclone.canonical.finding_projection import (
@@ -46,12 +46,12 @@ from codeclone.contracts import FAMILY_CLONES
 from codeclone.domain.findings import FAMILY_CLONE
 from codeclone.domain.quality import CONFIDENCE_HIGH
 from codeclone.domain.source_scope import (
-    SOURCE_KIND_BREAKDOWN_KEYS,
+    SOURCE_KIND_ORDER,
+    SOURCE_KIND_OTHER,
     SOURCE_KIND_PRODUCTION,
     SOURCE_KIND_TESTS,
 )
 from codeclone.metrics.coverage_join import permille
-from codeclone.report.derived import normalized_source_kind
 from codeclone.utils.coerce import as_mapping
 
 #: The analysis-profile keys the surface answers, in its order.
@@ -109,10 +109,33 @@ def inventory(model: CanonicalModel) -> dict[str, object]:
     }
 
 
-def _dominant_kind(group: Mapping[str, object]) -> str:
-    return normalized_source_kind(
-        as_mapping(group.get("source_scope")).get("dominant_kind")
-    )
+#: The surface's source-kind breakdown order: the domain's own (production,
+#: tests, fixtures, mixed, other).
+_SOURCE_KIND_BREAKDOWN_ORDER: Final[tuple[str, ...]] = tuple(
+    sorted(SOURCE_KIND_ORDER, key=SOURCE_KIND_ORDER.__getitem__)
+)
+
+
+def dominant_source_kind(group: Mapping[str, object]) -> str:
+    """The dominant source kind of one projected group, in the surface's
+    vocabulary: a kind of the domain's five, ``mixed`` included, and
+    ``other`` for anything else.
+
+    Not the report layer's ``normalized_source_kind``, which has no
+    ``mixed`` word: a group whose sites span production and tests is
+    ``mixed`` on the surface, and the triage breakdown that folded it into
+    ``other`` disagreed with the surface on 13 of the 20 run-summary
+    populations (measured 2026-10-12)."""
+    kind = str(as_mapping(group.get("source_scope")).get("dominant_kind"))
+    normalized = kind.strip().lower()
+    return normalized if normalized in SOURCE_KIND_ORDER else SOURCE_KIND_OTHER
+
+
+def source_kind_breakdown(kinds: Iterable[str]) -> dict[str, int]:
+    """A count per source kind -- every kind stated, zero included -- in the
+    surface's order and spelling."""
+    counted = Counter(kinds)
+    return {kind: counted[kind] for kind in _SOURCE_KIND_BREAKDOWN_ORDER}
 
 
 def finding_counts(model: CanonicalModel) -> dict[str, object]:
@@ -121,26 +144,18 @@ def finding_counts(model: CanonicalModel) -> dict[str, object]:
     families — the same universe the surface flattens."""
     groups = projected_finding_groups(model)
     by_family: dict[str, int] = {}
-    kinds: Counter[str] = Counter()
-    total = 0
+    kinds: list[str] = []
     for family in PROJECTED_FAMILIES:
         family_key = FAMILY_CLONES if family == FAMILY_CLONE else family
         by_family[family_key] = len(groups[family])
-        total += len(groups[family])
-        kinds.update(_dominant_kind(group) for group in groups[family])
+        kinds.extend(dominant_source_kind(group) for group in groups[family])
+    by_source_kind = source_kind_breakdown(kinds)
     return {
-        "total": total,
+        "total": len(kinds),
         "by_family": dict(sorted(by_family.items())),
-        "production": kinds[SOURCE_KIND_PRODUCTION],
-        "by_source_kind": {kind: kinds[kind] for kind in _SOURCE_KIND_BREAKDOWN_ORDER},
+        "production": by_source_kind[SOURCE_KIND_PRODUCTION],
+        "by_source_kind": by_source_kind,
     }
-
-
-#: The surface's breakdown order: the four source kinds, then ``mixed``.
-_SOURCE_KIND_BREAKDOWN_ORDER: Final[tuple[str, ...]] = (
-    *SOURCE_KIND_BREAKDOWN_KEYS,
-    "mixed",
-)
 
 
 def dead_code(model: CanonicalModel) -> dict[str, object]:
@@ -297,9 +312,11 @@ __all__ = [
     "coverage_join",
     "dead_code",
     "design_maxima",
+    "dominant_source_kind",
     "dynamic_boundaries",
     "finding_counts",
     "inventory",
     "security_surface_modules",
     "security_surfaces",
+    "source_kind_breakdown",
 ]
