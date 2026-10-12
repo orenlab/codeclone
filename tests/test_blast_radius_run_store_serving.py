@@ -57,6 +57,7 @@ from tests._blast_radius_serving import (
     forget_answers,
     shared_blast_populations,
 )
+from tests._run_store_paths import run_store_service_path
 from tests._run_summary_serving import SummaryPopulation, serving_environment
 
 _GENERATION_1 = Path(__file__).parent / "fixtures" / "run_store_generation_1"
@@ -385,7 +386,9 @@ def test_start_reads_the_same_blast_radius_under_both_switches(
     root.mkdir()
     corpora.materialize_projection_corpus(root)
     corpora._write_tree(root, FANOUT_TREE)
-    store_path = tmp_path / "fanout.sqlite3"
+    # The root's own store: MCP writes a run store only inside the root's
+    # ``.codeclone/`` (its write boundary).
+    store_path = run_store_service_path(root)
     service = CodeCloneMCPService(history_limit=4)
     with serving_environment(store_path, serve_from=None):
         service.analyze_repository(MCPAnalysisRequest(root=str(root)))

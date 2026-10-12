@@ -45,6 +45,7 @@ from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.utils.coerce import as_mapping, as_sequence
 from tests import conftest as corpora
+from tests._run_store_paths import run_store_service_path
 from tests._run_summary_serving import (
     SUMMARY_POPULATIONS,
     SummaryPopulation,
@@ -236,7 +237,7 @@ def _serve_fanout(base: Path) -> SummaryPopulation:
     root.mkdir()
     corpora.materialize_projection_corpus(root)
     corpora._write_tree(root, FANOUT_TREE)
-    store_path = base / "fanout.sqlite3"
+    store_path = run_store_service_path(root)
     service = CodeCloneMCPService(history_limit=4)
     with serving_environment(store_path, serve_from=None):
         service.analyze_repository(MCPAnalysisRequest(root=str(root)))

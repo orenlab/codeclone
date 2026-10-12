@@ -38,6 +38,7 @@ from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRec
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests import conftest as corpora
 from tests._patch_contract_serving import CYCLE_BUILDERS, _twin, shared_cycles
+from tests._run_store_paths import run_store_service_path
 from tests._run_summary_serving import serving_environment
 
 #: Every focus ``compare_runs`` takes.
@@ -110,13 +111,16 @@ def _corpus_tree(root: Path) -> Path:
     return root
 
 
-def _session(base: Path, name: str) -> tuple[CodeCloneMCPService, Path]:
-    return CodeCloneMCPService(history_limit=10), base / f"{name}.sqlite3"
+def _session(root: Path) -> tuple[CodeCloneMCPService, Path]:
+    """A session and the store it publishes ``root`` into: the root's own,
+    at the default path -- so a session over two roots reads each run in
+    the store that root published it into (``conftest.name_run_store``)."""
+    return CodeCloneMCPService(history_limit=10), run_store_service_path(root)
 
 
 def _clones_only_pairs(base: Path) -> Iterator[ComparePair]:
     root = _corpus_tree(base / "clones_only")
-    service, store = _session(base, "clones_only")
+    service, store = _session(root)
     before = _analyse(service, store, root, analysis_mode="clones_only")
     corpora._write_tree(root, _TWIN_PAIR)
     after = _analyse(service, store, root, analysis_mode="clones_only")
@@ -130,7 +134,7 @@ def _population_pair(base: Path, name: str, *, unparsable: bool) -> ComparePair:
     (root / "pkg").mkdir(parents=True)
     if unparsable:
         corpora._write_unparsable(root)
-    service, store = _session(base, name)
+    service, store = _session(root)
     before = _analyse(service, store, root, analysis_mode="full")
     corpora._write_tree(root, _TWIN_PAIR)
     after = _analyse(service, store, root, analysis_mode="full")
@@ -141,7 +145,7 @@ def _different_root_pair(base: Path) -> ComparePair:
     first = _corpus_tree(base / "root_one")
     second = _corpus_tree(base / "root_two")
     corpora._write_tree(second, {"pkg/c3_twin_a.py": _twin("c3_twin_a")})
-    service, store = _session(base, "different_root")
+    service, store = _session(first)
     before = _analyse(service, store, first, analysis_mode="full")
     after = _analyse(service, store, second, analysis_mode="full")
     return ComparePair("different_root", service, store, before, after, None)

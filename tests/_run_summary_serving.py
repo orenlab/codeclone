@@ -76,6 +76,7 @@ from codeclone.surfaces.mcp._run_store_serving import memory_run_summary
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests import conftest as corpora
+from tests._run_store_paths import name_run_store, run_store_service_path
 from tests.test_baseline_lane_degradation import (
     downgrade_lane_payload_schema,
     retag_lane_descriptor,
@@ -188,7 +189,7 @@ def serving_environment(store_path: Path, *, serve_from: str | None) -> Iterator
     try:
         patch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
         patch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
-        patch.setenv("CODECLONE_RUN_STORE_PATH", str(store_path))
+        name_run_store(patch, store_path)
         if serve_from is None:
             patch.delenv(ENV_SERVE_FROM, raising=False)
         else:
@@ -416,7 +417,7 @@ class SummaryPopulations:
     def _serve(self, name: str) -> SummaryPopulation:
         assert name in SUMMARY_POPULATIONS, name
         root, request, analyses = self._tree(name)
-        store_path = self._base / f"{name}.sqlite3"
+        store_path = run_store_service_path(root)
         service = CodeCloneMCPService(history_limit=4)
         with serving_environment(store_path, serve_from=None):
             _analysed(service, request, analyses=analyses, store_path=store_path)

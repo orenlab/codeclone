@@ -41,6 +41,7 @@ from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRec
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.utils.coerce import as_mapping, as_sequence
 from tests._compare_runs_serving import COMPARE_FOCUSES, ComparePair, shared_pairs
+from tests._run_store_paths import run_store_service_path
 from tests._run_summary_serving import (
     _bumped,
     _edited,
@@ -314,7 +315,9 @@ def receipt_change(
     its receipt: (service, store, after-run id, intent id)."""
     base = tmp_path_factory.mktemp("compare_runs_receipt")
     root = _tree(base / "repo")
-    store = base / "store.sqlite3"
+    # The root's own store: MCP writes a run store only inside the root's
+    # ``.codeclone/`` (its write boundary).
+    store = run_store_service_path(root)
     service = CodeCloneMCPService(history_limit=4)
     with serving_environment(store, serve_from="memory"):
         service.analyze_repository(MCPAnalysisRequest(root=str(root)))

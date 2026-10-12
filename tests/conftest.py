@@ -30,6 +30,7 @@ from tests._live_state import (
     LiveStateGuard,
     live_state_guard,
 )
+from tests._run_store_paths import name_run_store, run_store_service_path
 from tests._served_run import (
     ServedComparisonRun,
     ServedEvaluationRun,
@@ -335,7 +336,7 @@ def _run_store_rollout(store_path: Path) -> Iterator[None]:
     try:
         monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
         monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
-        monkeypatch.setenv("CODECLONE_RUN_STORE_PATH", str(store_path))
+        name_run_store(monkeypatch, store_path)
         yield
     finally:
         monkeypatch.undo()
@@ -407,7 +408,7 @@ def served_run_store_projection(
 ) -> ServedRunStoreProjection:
     """One MCP analysis of the serving corpus (the fixture tree above)."""
     root = tmp_path_factory.mktemp("run_store_serving").resolve()
-    store_path = root.parent / "run_store_serving.sqlite3"
+    store_path = run_store_service_path(root)
     _materialize_corpus_tree(_RUN_STORE_SERVING_CORPUS, root)
     return _serve_run_store_corpus(root, store_path)
 
@@ -561,7 +562,7 @@ def served_projection_corpus(
     """One MCP analysis of the projection corpus, with the run store
     enabled — the second served population of the shadow pins."""
     root = tmp_path_factory.mktemp("run_store_projection").resolve()
-    store_path = root.parent / "run_store_projection.sqlite3"
+    store_path = run_store_service_path(root)
     materialize_projection_corpus(root)
     return _serve_run_store_corpus(root, store_path)
 
@@ -1081,7 +1082,7 @@ def _serve_comparison_corpus(
 
     api_surface, _foreign, partial = SERVED_COMPARISON_POPULATIONS[name]
     root = _served_comparison_tree(base, name, baseline)
-    store_path = base / f"served_{name}.sqlite3"
+    store_path = run_store_service_path(root)
     with _run_store_rollout(store_path):
         service = CodeCloneMCPService(history_limit=4)
         service.analyze_repository(
@@ -1169,7 +1170,7 @@ def _serve_gated_corpus(base: Path, baseline: Path) -> ServedEvaluationRun:
     from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
     root = _served_gated_tree(base, baseline)
-    store_path = base / "served_gated.sqlite3"
+    store_path = run_store_service_path(root)
     request = MCPAnalysisRequest(root=str(root), analysis_mode="full", api_surface=True)
     with _run_store_rollout(store_path):
         service = CodeCloneMCPService(history_limit=4)
@@ -1225,7 +1226,7 @@ def _serve_clones_only_corpus(base: Path, baseline: Path) -> ServedEvaluationRun
         pyproject.read_text("utf-8").replace("semantic_authority = true\n", ""),
         "utf-8",
     )
-    store_path = base / "served_clones_only.sqlite3"
+    store_path = run_store_service_path(root)
     with _run_store_rollout(store_path):
         service = CodeCloneMCPService(history_limit=4)
         service.analyze_repository(
@@ -1292,7 +1293,7 @@ def _serve_withheld_corpus(base: Path, population: str) -> ServedEvaluationRun:
     (root / "pkg").mkdir(parents=True)
     if population == "unmeasured":
         _write_unparsable(root)
-    store_path = base / f"{population}.sqlite3"
+    store_path = run_store_service_path(root)
     with _run_store_rollout(store_path):
         service = CodeCloneMCPService(history_limit=4)
         service.analyze_repository(
@@ -1410,7 +1411,7 @@ def served_run_comparison(
     base = tmp_path_factory.mktemp("served_run_comparison").resolve()
     root = _served_comparison_tree(base, "trusted", _comparison_baseline(base))
     _write_tree(root, EVALUATION_CARRIER)
-    store_path = base / "served_run_comparison.sqlite3"
+    store_path = run_store_service_path(root)
     request = MCPAnalysisRequest(root=str(root), analysis_mode="full", api_surface=True)
     with _run_store_rollout(store_path):
         service = CodeCloneMCPService(history_limit=4)

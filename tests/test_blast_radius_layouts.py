@@ -254,7 +254,7 @@ def test_a_file_outside_every_mount_has_no_module_and_borrows_no_radius(
     assert cli_quiet_line(root, "pkg/core.py") == (
         "blast-radius: low | dependents=0 cohorts=0 cycles=0 do-not-touch=3"
     )
-    analysed = analyse(root, tmp_path / "shadow.sqlite3")
+    analysed = analyse(root)
     for serve_from in SWITCHES:
         answer = blast(analysed, "pkg/core.py", "transitive", serve_from=serve_from)
         assert answer["direct_dependents"] == []
@@ -307,7 +307,7 @@ def test_a_namespace_directory_has_no_file_and_no_module(tmp_path: Path) -> None
         root = write_repository(
             tmp_path / name, {prefix + path: text for path, text in tree.items()}
         )
-        analysed = analyse(root, tmp_path / f"{name}.sqlite3")
+        analysed = analyse(root)
         for serve_from in SWITCHES:
             answer = blast(analysed, prefix + "pkg", "direct", serve_from=serve_from)
             assert answer["direct_dependents"] == [], (name, serve_from)

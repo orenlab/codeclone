@@ -54,6 +54,7 @@ from codeclone.surfaces.mcp._workspace_intents import (
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import MCPAnalysisRequest
+from tests._run_store_paths import run_store_service_path
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
 
@@ -163,7 +164,9 @@ def _new_repo(tmp_path: Path, name: str = "repo") -> tuple[Path, Path]:
     root.joinpath("pkg").mkdir(parents=True)
     root.joinpath("pkg", "__init__.py").write_text("", "utf-8")
     root.joinpath("README.md").write_text("stable\n", "utf-8")
-    return root, tmp_path / f"{name}-runs.sqlite3"
+    # The root's own store: MCP writes a run store, and takes a lease in one,
+    # only inside the root's ``.codeclone/`` (its write boundary).
+    return root, run_store_service_path(root)
 
 
 @pytest.fixture

@@ -38,6 +38,7 @@ from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRec
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.utils.coerce import as_mapping, as_sequence
 from tests import conftest as corpora
+from tests._run_store_paths import run_store_service_path
 from tests._run_summary_serving import (
     _bumped,
     _dropped,
@@ -166,8 +167,14 @@ class PatchCycles:
     ) -> PatchCycle:
         """One session over ``root``; with ``coverage`` every analysis of it
         joins a Cobertura report, so the strict profile's coverage gate has
-        an input (without one it refuses, which one cycle keeps)."""
-        store_path = self._base / f"{name}.sqlite3"
+        an input (without one it refuses, which one cycle keeps).
+
+        The session publishes into the root's own store (MCP writes a run
+        store only inside the root's ``.codeclone/``), and that root is one of
+        this population's trees: the store is named from the population's
+        temporary base, so a root anywhere else -- where a live store could
+        be -- is refused by ``relative_to`` before anything is analysed."""
+        store_path = run_store_service_path(self._base / root.relative_to(self._base))
         service = CodeCloneMCPService(history_limit=4)
         if coverage:
             (root / "coverage.xml").write_text(_quarter_covered_report(root), "utf-8")

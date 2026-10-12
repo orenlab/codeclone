@@ -97,6 +97,7 @@ from tests._blast_radius_layouts import registry_source_facts
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 from tests._report_access import _dict_at
 from tests._report_fixtures import served_projection_over
+from tests._run_store_paths import run_store_service_path
 from tests.memory_fixtures import cli_memory_repo, tool_calls_named_in
 from tests.test_cli_inprocess import _write_native_baseline
 
@@ -21314,7 +21315,9 @@ def test_mcp_service_query_is_served_from_the_run_store_when_this_execution_publ
     enabled the execution publishes, the query is answered OUT OF THE STORE
     and the response says so — including the external import the report's
     dependency family never carried, which is what the second lane is for."""
-    _enable_run_store(monkeypatch, tmp_path.parent / f"{tmp_path.name}-runs.sqlite3")
+    # The analysed root's own store: MCP writes a run store only inside the
+    # root's ``.codeclone/`` (its write boundary).
+    _enable_run_store(monkeypatch, run_store_service_path(tmp_path))
     service, summary = _analyze_context_run(
         tmp_path, relative_path="pkg/logwrap.py", source=_serving_corpus_source()
     )
@@ -21382,7 +21385,8 @@ def test_mcp_service_store_backed_and_memory_answers_are_the_same_answer(
     memory_service, memory_summary = _analyze_context_run(
         tmp_path / "memory", relative_path="pkg/logwrap.py", source=source
     )
-    _enable_run_store(monkeypatch, tmp_path / "runs.sqlite3")
+    store_db = run_store_service_path(tmp_path / "store")
+    _enable_run_store(monkeypatch, store_db)
     store_service, store_summary = _analyze_context_run(
         tmp_path / "store", relative_path="pkg/logwrap.py", source=source
     )
@@ -21397,7 +21401,7 @@ def test_mcp_service_store_backed_and_memory_answers_are_the_same_answer(
             run_id=str(memory_summary["run_id"]),
             query=query,
         )
-        _enable_run_store(monkeypatch, tmp_path / "runs.sqlite3")
+        _enable_run_store(monkeypatch, store_db)
         stored = store_service.get_implementation_context(
             root=str(tmp_path / "store"),
             run_id=str(store_summary["run_id"]),

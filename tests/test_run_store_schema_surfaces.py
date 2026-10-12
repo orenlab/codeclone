@@ -43,7 +43,10 @@ from tests._run_store_schema_evidence import (
     empty_file,
     foreign_schema,
 )
-from tests.test_check_authority_candidates_run_store_serving import _served
+from tests.test_check_authority_candidates_run_store_serving import (
+    _served,
+    _served_store,
+)
 from tests.test_check_authority_candidates_run_store_serving import (
     _served_block as _candidates_served_block,
 )
@@ -51,6 +54,7 @@ from tests.test_implementation_context_run_store_serving import (
     _published_store_run_id,
     _served_block,
     _served_run,
+    _served_run_store,
 )
 
 _WITNESS_REFUSAL: Final = "store witness is not this process's declared generation"
@@ -121,7 +125,7 @@ def test_implementation_context_answers_an_incomplete_store_with_its_command(
 ) -> None:
     service, root, record, _summary, _slices = _served_run(tmp_path, monkeypatch)
     store_run_id = _published_store_run_id(record)
-    store = tmp_path / "runs.sqlite3"
+    store = _served_run_store(tmp_path)
     drop_the_index(store)
     before = byte_state(store)
     request = {"paths": ["pkg/callee.py"], "include": ["callers"]}
@@ -149,7 +153,7 @@ def test_check_authority_answers_an_incomplete_store_with_its_command(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     service, root, _record, store_run_id = _served(tmp_path, monkeypatch)
-    store = tmp_path / "runs.sqlite3"
+    store = _served_store(tmp_path)
     drop_the_index(store)
     before = byte_state(store)
 

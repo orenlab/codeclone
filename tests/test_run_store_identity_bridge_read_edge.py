@@ -68,6 +68,7 @@ from codeclone.surfaces.mcp._session_shared import (
     MCPRunRecord,
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
+from tests._run_store_paths import run_store_service_path
 from tests.test_implementation_context_run_store_serving import (
     _enable_store,
     _MechanismMeter,
@@ -143,13 +144,16 @@ class _Publisher:
     foreign: _Publication
 
 
-def _publish_in_a_child(root: Path, store: Path) -> _Publication:
+def _publish_in_a_child(root: Path, store: Path, *, home: Path) -> _Publication:
     env = {k: v for k, v in os.environ.items() if k not in _ROLLOUT_KEYS}
     env.update(
         {
             "CODECLONE_RUN_STORE_ENABLED": "1",
             "CODECLONE_RUN_STORE_FORCE": "1",
             "CODECLONE_RUN_STORE_PATH": str(store),
+            # The child's own home, so its per-user CodeClone cache directory
+            # -- where the shared store lives -- is a temporary one.
+            "HOME": str(home),
         }
     )
     completed = subprocess.run(
@@ -179,9 +183,16 @@ def _publish_in_a_child(root: Path, store: Path) -> _Publication:
 
 @pytest.fixture(scope="module")
 def publisher(tmp_path_factory: pytest.TempPathFactory) -> _Publisher:
-    """Process A: two publications by child interpreters, one store."""
+    """Process A: two publications by child interpreters, one store.
+
+    Two roots, one store: the store lives in the per-user CodeClone cache
+    directory of the children's temporary home -- the one service directory
+    every root shares, so both publish inside MCP's write boundary (a store
+    beside the roots would be written by neither).
+    """
     base = tmp_path_factory.mktemp("bridge-read-edge")
-    store = base / "published.sqlite3"
+    home = base / "home"
+    store = home / ".cache" / "codeclone" / "published.sqlite3"
     root = base / "src"
     _write_two_file_corpus(root)
     foreign_root = base / "foreign"
@@ -189,8 +200,8 @@ def publisher(tmp_path_factory: pytest.TempPathFactory) -> _Publisher:
     (foreign_root / "pkg" / "second.py").write_text(
         "def second() -> int:\n    return 22\n", "utf-8"
     )
-    main = _publish_in_a_child(root, store)
-    foreign = _publish_in_a_child(foreign_root, store)
+    main = _publish_in_a_child(root, store, home=home)
+    foreign = _publish_in_a_child(foreign_root, store, home=home)
     assert main.run_id != foreign.run_id
     assert main.analysis_scope_digest != foreign.analysis_scope_digest
     assert store.exists()
@@ -200,7 +211,14 @@ def publisher(tmp_path_factory: pytest.TempPathFactory) -> _Publisher:
 
 def _store_copy(publisher: _Publisher, tmp_path: Path) -> Path:
     """One test, one private copy of what process A published."""
-    copy = tmp_path / "runs.sqlite3"
+    return _store_copy_at(publisher, tmp_path / "runs.sqlite3")
+
+
+def _store_copy_at(publisher: _Publisher, copy: Path) -> Path:
+    """A private copy of what process A published, at ``copy`` -- inside the
+    analysed root's ``.codeclone/`` when the test publishes into it (MCP
+    writes a run store only inside the root's service directories)."""
+    copy.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(publisher.store, copy)
     return copy
 
@@ -456,18 +474,22 @@ def test_a_record_that_published_takes_the_publication_lane_not_the_bridge(
     ``detail`` -- so the index is never consulted for a relation the
     process already holds.
     """
-    store = _store_copy(publisher, tmp_path)
+    # A private twin of A's tree, publishing into a private copy of A's store
+    # inside the twin's own ``.codeclone/`` -- the one place MCP publishes.
+    root = tmp_path / "src"
+    shutil.copytree(publisher.root, root, ignore=shutil.ignore_patterns(".codeclone"))
+    store = _store_copy_at(publisher, run_store_service_path(root))
     _enable_store(monkeypatch, store=store)
     service = CodeCloneMCPService(history_limit=2)
     service.analyze_repository(
         MCPAnalysisRequest(
-            root=str(publisher.root), respect_pyproject=False, min_loc=1, min_stmt=1
+            root=str(root), respect_pyproject=False, min_loc=1, min_stmt=1
         )
     )
     record = service._runs.resolve_any_root()
     link = record.execution.run_snapshot_link
     assert link is not None and link.store_run_id, link
-    answer = service.get_implementation_context(root=str(publisher.root), **_REQUEST)
+    answer = service.get_implementation_context(root=str(root), **_REQUEST)
     assert answer["serving"] == {
         "source": SERVING_SOURCE_RUN_STORE,
         "reason": SERVING_REASON_SERVED,

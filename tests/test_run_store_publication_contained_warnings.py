@@ -52,6 +52,7 @@ from codeclone.models import (
     RunSnapshotPublication,
     RunStoreConfig,
 )
+from tests._run_store_paths import run_store_service_path
 from tests.conftest import RunStoreCorpusRunner, RunStoreMcpRunner
 from tests.test_canonical_roundtrip import fixture_model
 
@@ -272,6 +273,9 @@ def test_mcp_answers_the_same_two_lines_in_its_warnings(
     tmp_path: Path, run_store_mcp: RunStoreMcpRunner, held_lock: _HeldLock
 ) -> None:
     root = _corpus(tmp_path)
+    # Inside the root's own ``.codeclone/``: MCP writes a run store nowhere
+    # else, and a store it never opens meets no lock.
+    held_lock.path = run_store_service_path(root)
     answer = run_store_mcp(root, held_lock.path)
     warnings = [str(item) for item in answer["warnings"]]  # type: ignore[attr-defined]
     assert held_lock.met == ["sweep", "release"], "the lock met no step"
@@ -279,7 +283,7 @@ def test_mcp_answers_the_same_two_lines_in_its_warnings(
     assert sum(item.startswith(_LEASE) for item in warnings) == 1, warnings
     held_lock.release()
 
-    quiet = run_store_mcp(root, tmp_path / "control.sqlite3")
+    quiet = run_store_mcp(root, held_lock.path.with_name("control.sqlite3"))
     quiet_warnings = [str(item) for item in quiet["warnings"]]  # type: ignore[attr-defined]
     assert not any(item.startswith((_SWEEP, _LEASE)) for item in quiet_warnings), (
         quiet_warnings

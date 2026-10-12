@@ -48,6 +48,7 @@ from codeclone.surfaces.mcp._session_shared import (
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.utils.coerce import as_mapping
+from tests._run_store_paths import run_store_service_path
 
 
 def _record(root: Path, run_id: str) -> MCPRunRecord:
@@ -272,7 +273,9 @@ def session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Sessio
     root = tmp_path / "repo"
     root.joinpath("pkg").mkdir(parents=True)
     root.joinpath("pkg", "__init__.py").write_text("", "utf-8")
-    store = tmp_path / "runs.sqlite3"
+    # The root's own store: MCP writes a run store only inside the root's
+    # ``.codeclone/`` (its write boundary).
+    store = run_store_service_path(root)
     monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
     monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
     monkeypatch.setenv("CODECLONE_RUN_STORE_PATH", str(store))

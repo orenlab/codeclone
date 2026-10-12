@@ -40,6 +40,7 @@ from codeclone.surfaces.mcp._session_shared import (
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import MCPAnalysisRequest
+from tests._run_store_paths import run_store_service_path
 
 
 def _git(root: Path, *args: str) -> None:
@@ -86,7 +87,9 @@ def evicted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Evicte
     root.joinpath("README.md").write_text("stable\n", "utf-8")
     for args in (("init", "-q"), ("add", "."), ("commit", "-qm", "init")):
         _git(root, *args)
-    store = tmp_path / "runs.sqlite3"
+    # The root's own store: MCP writes a run store only inside the root's
+    # ``.codeclone/`` (its write boundary).
+    store = run_store_service_path(root)
     monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
     monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
     monkeypatch.setenv("CODECLONE_RUN_STORE_PATH", str(store))

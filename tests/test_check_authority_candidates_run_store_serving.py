@@ -62,6 +62,7 @@ from codeclone.surfaces.mcp._authority_candidates import authority_candidate_ite
 from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRecord
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests._projection_equivalence import write_probe_tree
+from tests._run_store_paths import run_store_service_path
 from tests.test_implementation_context_run_store_serving import (
     _bare_record,
     _enable_store,
@@ -152,13 +153,20 @@ def _assert_distinguishing(items: Sequence[Mapping[str, object]]) -> None:
     assert scores_with_two_kinds, "no score carries two source kinds"
 
 
+def _served_store(tmp_path: Path) -> Path:
+    """The store :func:`_served` publishes into: its analysed root's own,
+    inside the root's ``.codeclone/`` -- the one place MCP writes a run
+    store (its write boundary)."""
+    return run_store_service_path(tmp_path / "src")
+
+
 def _served(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, lane: bool = True
 ) -> tuple[CodeCloneMCPService, Path, MCPRunRecord, str]:
     """A published execution with the rollout on; the store run it names."""
     root = tmp_path / "src"
     _write_corpus(root, lane=lane)
-    _enable_store(monkeypatch, store=tmp_path / "runs.sqlite3")
+    _enable_store(monkeypatch, store=_served_store(tmp_path))
     service, record = _analyze(root)
     link = record.execution.run_snapshot_link
     assert link is not None and link.store_run_id, link
@@ -294,7 +302,7 @@ def test_a_new_record_is_served_over_the_identity_bridge(
     assert link is not None and link.store_run_id == "", link
     assert link.report_run_identity == published.run_id
 
-    _enable_store(monkeypatch, store=tmp_path / "runs.sqlite3")
+    _enable_store(monkeypatch, store=_served_store(tmp_path))
     meter = _MechanismMeter(monkeypatch)
     answer = reader.check_authority(root=str(root), section="candidates", page_size=50)
     assert answer["serving"] == _served_block(store_run_id, detail="identity_bridge")

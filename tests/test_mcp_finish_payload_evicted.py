@@ -39,6 +39,7 @@ from codeclone.surfaces.mcp._session_shared import MCPRunRecord
 from codeclone.surfaces.mcp._workspace_intents import find_workspace_intent
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import MCPAnalysisRequest
+from tests._run_store_paths import run_store_service_path
 
 
 def _git(root: Path, *args: str) -> None:
@@ -126,11 +127,14 @@ class _Cycle:
 
 @pytest.fixture
 def store_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The rollout on at the default path: every analysed root publishes into
+    its own store, inside its ``.codeclone/`` -- the one place MCP writes a
+    run store.  Returns the store of the cycle's ``repo`` root."""
     monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
     monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
-    monkeypatch.setenv("CODECLONE_RUN_STORE_PATH", str(tmp_path / "runs.sqlite3"))
+    monkeypatch.delenv("CODECLONE_RUN_STORE_PATH", raising=False)
     monkeypatch.setenv("CODECLONE_SERVE_FROM", "run_store")
-    return tmp_path / "runs.sqlite3"
+    return run_store_service_path(tmp_path / "repo")
 
 
 def _cycle(base: Path, name: str = "repo", path: str = "pkg/m.py") -> _Cycle:
@@ -173,7 +177,7 @@ def control(
     base = tmp_path_factory.mktemp("control")
     monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
     monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
-    monkeypatch.setenv("CODECLONE_RUN_STORE_PATH", str(base / "runs.sqlite3"))
+    monkeypatch.delenv("CODECLONE_RUN_STORE_PATH", raising=False)
     monkeypatch.setenv("CODECLONE_SERVE_FROM", "run_store")
     cycle = _cycle(base)
     cycle.edit_and_analyze()

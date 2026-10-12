@@ -48,6 +48,7 @@ from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest, MCPRunRec
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.utils.coerce import as_mapping, as_sequence
 from tests import conftest as corpora
+from tests._run_store_paths import run_store_service_path
 from tests._run_summary_serving import serving_environment
 
 _FOLD = '''
@@ -285,7 +286,9 @@ class Analysed:
         return self.service._runs.get_for_root(None, root=self.root)
 
 
-def analyse(root: Path, store_path: Path) -> Analysed:
+def analyse(root: Path) -> Analysed:
+    """One MCP analysis of ``root``, published into the root's own store."""
+    store_path = run_store_service_path(root)
     service = CodeCloneMCPService(history_limit=4)
     with serving_environment(store_path, serve_from=None):
         service.analyze_repository(MCPAnalysisRequest(root=str(root)))
@@ -322,8 +325,8 @@ class LayoutPopulations:
             )
             self._built[name] = Twins(
                 layout,
-                analyse(flat, base / "flat.sqlite3"),
-                analyse(mounted, base / "mounted.sqlite3"),
+                analyse(flat),
+                analyse(mounted),
             )
         return self._built[name]
 

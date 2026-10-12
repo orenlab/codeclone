@@ -62,7 +62,11 @@ _BUSY_TIMEOUT = "codeclone.utils.sqlite_store._SQLITE_BUSY_TIMEOUT_MS"
 
 @pytest.fixture
 def published(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
-    path = tmp_path / "runs.sqlite3"
+    # Inside the root's own ``.codeclone/``: every test below takes its lease
+    # with ``root=tmp_path``, and a lease is written only inside the root's
+    # service directories (the boundary cases are pinned further down).
+    path = tmp_path / ".codeclone" / "db" / "runs.sqlite3"
+    path.parent.mkdir(parents=True)
     with RunStore(path) as store:
         run_id = store.write_full_run(
             fixture_model(),
@@ -293,6 +297,60 @@ def test_a_locked_store_is_typed_unavailable_on_grant_and_release(
     assert released.reason == SERVING_REASON_STORE_UNAVAILABLE
     # Left to its deadline: the grant the release could not reach is intact.
     assert [row[0] for row in _lease_rows(path)] == [held.lease_id]
+
+
+# ── the write boundary: a lease is a write ────────────────────────────────
+
+
+def _publish_into(path: Path) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with RunStore(path) as store:
+        return store.write_full_run(
+            fixture_model(),
+            namespace="lease-door",
+            target="worktree",
+            expected_generation=0,
+        ).run_id
+
+
+#: Where the store lies, relative to ``tmp_path`` whose ``repo`` is the root.
+#: The prefix neighbour is the one a string-prefix test would admit.
+_STORE_PLACES = (
+    ("inside-codeclone", "repo/.codeclone/db/runs.sqlite3", True),
+    ("outside-the-root", "outside/runs.sqlite3", False),
+    ("prefix-sibling", "repo/.codeclone-x/runs.sqlite3", False),
+    ("root-not-service", "repo/runs.sqlite3", False),
+)
+
+
+@pytest.mark.parametrize(
+    ("place", "held"),
+    [(place, held) for _id, place, held in _STORE_PLACES],
+    ids=[case_id for case_id, _place, _held in _STORE_PLACES],
+)
+def test_a_lease_is_written_only_inside_the_service_directories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, place: str, held: bool
+) -> None:
+    """The same published run, the same link; only where the store lies
+    differs.  Inside the root's ``.codeclone/`` the grant is written (the
+    positive control); anywhere else nothing is, and the answer says why."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    store = tmp_path / place
+    run_id = _publish_into(store)
+    _enable(monkeypatch, store)
+
+    state = _acquire(root, run_id)
+
+    assert state.held is held, state
+    if held:
+        assert _lease_rows(store) == [
+            (state.lease_id, RUN_LEASE_KIND, state.expires_at)
+        ]
+        return
+    assert state.reason == SERVING_REASON_STORE_DISABLED, state
+    assert "outside CodeClone's service directories" in state.detail, state
+    assert _lease_rows(store) == []
 
 
 # ── the vocabulary and the id ─────────────────────────────────────────────

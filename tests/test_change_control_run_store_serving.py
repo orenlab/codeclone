@@ -49,6 +49,7 @@ from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.utils.coerce import as_mapping
 from tests import conftest as corpora
 from tests._blast_radius_serving import FANOUT_TREE
+from tests._run_store_paths import run_store_service_path
 from tests._run_summary_serving import serving_environment
 
 #: The edit the change makes: one new function in the high-radius module.
@@ -108,11 +109,12 @@ class _Decisions:
         monkeypatch.setattr(patch_runs_mod, "served_patch_contract", patch)
 
 
-def _change(
-    root: Path, store_path: Path, serve_from: str
-) -> tuple[dict[str, object], dict[str, object]]:
-    """Analyse, start, edit, re-analyse, finish -- one controlled change."""
+def _change(root: Path, serve_from: str) -> tuple[dict[str, object], dict[str, object]]:
+    """Analyse, start, edit, re-analyse, finish -- one controlled change,
+    published into the root's own store (MCP writes a run store only inside
+    the root's ``.codeclone/``)."""
     service = CodeCloneMCPService(history_limit=4)
+    store_path = run_store_service_path(root)
     with serving_environment(store_path, serve_from=serve_from):
         service.analyze_repository(MCPAnalysisRequest(root=str(root)))
         started = service.start_controlled_change(
@@ -152,9 +154,7 @@ def test_a_controlled_change_reads_both_edges_from_the_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     decisions = _Decisions(monkeypatch)
-    started, finished = _change(
-        _tree(tmp_path / "store"), tmp_path / "store.sqlite3", SERVE_FROM_RUN_STORE
-    )
+    started, finished = _change(_tree(tmp_path / "store"), SERVE_FROM_RUN_STORE)
     assert started["edit_allowed"] is True, started
     assert finished["status"] == "accepted", finished
     # The start declares against a high radius: the direct radius and the
@@ -170,13 +170,9 @@ def test_the_same_change_under_the_memory_switch_is_the_control(
     """The wrappers sit on the causal path (they record the memory switch at
     both edges), and the change reaches the same verdicts either way."""
     decisions = _Decisions(monkeypatch)
-    memory = _change(
-        _tree(tmp_path / "memory"), tmp_path / "memory.sqlite3", SERVE_FROM_MEMORY
-    )
+    memory = _change(_tree(tmp_path / "memory"), SERVE_FROM_MEMORY)
     assert decisions.blast and set(decisions.blast) == {"store_disabled"}
     assert ("store_disabled", ("after", "before")) in decisions.patch
     assert {reason for reason, _sides in decisions.patch} == {"store_disabled"}
-    stored = _change(
-        _tree(tmp_path / "store"), tmp_path / "store.sqlite3", SERVE_FROM_RUN_STORE
-    )
+    stored = _change(_tree(tmp_path / "store"), SERVE_FROM_RUN_STORE)
     assert _verdict(*stored) == _verdict(*memory)

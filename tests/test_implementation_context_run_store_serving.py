@@ -93,6 +93,7 @@ from codeclone.surfaces.mcp._session_shared import (
 )
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import MCPAnalysisRequest, MCPRunRecord
+from tests._run_store_paths import run_store_service_path
 
 
 def _write_two_file_corpus(root: Path) -> None:
@@ -262,6 +263,13 @@ def test_unit_location_index_reads_the_threaded_slices(
 # -- one request, one resolution -------------------------------------------
 
 
+def _served_run_store(tmp_path: Path) -> Path:
+    """The store :func:`_served_run` publishes into: its analysed root's own,
+    inside the root's ``.codeclone/`` -- the one place MCP writes a run
+    store (its write boundary)."""
+    return run_store_service_path(tmp_path / "store")
+
+
 def _enable_store(monkeypatch: pytest.MonkeyPatch, *, store: Path) -> None:
     monkeypatch.setenv("CODECLONE_RUN_STORE_ENABLED", "1")
     monkeypatch.setenv("CODECLONE_RUN_STORE_FORCE", "1")
@@ -318,7 +326,7 @@ def _served_run(
     """
     root = tmp_path / "store"
     _write_two_file_corpus(root)
-    _enable_store(monkeypatch, store=tmp_path / "runs.sqlite3")
+    _enable_store(monkeypatch, store=_served_run_store(tmp_path))
     service = CodeCloneMCPService(history_limit=2)
     summary = service.analyze_repository(
         MCPAnalysisRequest(
@@ -553,7 +561,7 @@ def test_paths_shape_is_served_from_the_run_store_and_matches_memory(
     memory_answer = memory_service.get_implementation_context(
         root=str(tmp_path / "memory"), paths=["pkg/callee.py"], include=["callers"]
     )
-    _enable_store(monkeypatch, store=tmp_path / "runs.sqlite3")
+    _enable_store(monkeypatch, store=_served_run_store(tmp_path))
     store_answer = store_service.get_implementation_context(
         root=str(store_root), paths=["pkg/callee.py"], include=["callers"]
     )
@@ -661,7 +669,7 @@ def test_explicit_shapes_name_the_fallback_when_the_store_is_gone(
     """
     service, root, record, _summary, _slices = _served_run(tmp_path, monkeypatch)
     store_run_id = _published_store_run_id(record)
-    (tmp_path / "runs.sqlite3").unlink()
+    _served_run_store(tmp_path).unlink()
     for label, kwargs in _EXPLICIT_SHAPES.items():
         answer = service.get_implementation_context(root=str(root), **kwargs)
         assert answer["status"] == "ok", label

@@ -54,6 +54,7 @@ from codeclone.models import (
     RUN_SNAPSHOT_PUBLICATION_PUBLISHED,
     RunSnapshotLink,
 )
+from tests._run_store_paths import run_store_service_path
 from tests.conftest import RunStoreCorpusRunner, RunStoreMcpRunner
 
 _UNRECORDED = "unrecorded"
@@ -325,7 +326,10 @@ def test_mcp_answers_with_the_unrecorded_warning_and_keeps_the_run(
     edge_lock: _EdgeLock,
     links: list[RunSnapshotLink],
 ) -> None:
-    root, db = _corpus(tmp_path)
+    root, _beside = _corpus(tmp_path)
+    # Inside the root's own ``.codeclone/``: MCP writes a run store nowhere
+    # else, so a store beside the root would never meet the edge lock.
+    db = run_store_service_path(root)
     answer = run_store_mcp(root, db)
     assert edge_lock.met == 1
     link = links[-1]
