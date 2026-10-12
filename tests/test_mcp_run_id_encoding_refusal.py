@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Mapping
     from pathlib import Path
 
     from mcp.server.fastmcp import FastMCP
@@ -72,7 +73,7 @@ def _refusal(server: FastMCP, tool: str, arguments: dict[str, Any]) -> str:
     return _typed_refusal(result, tool, arguments)
 
 
-def _typed_refusal(result: object, tool: str, arguments: dict[str, Any]) -> str:
+def _typed_refusal(result: object, tool: str, arguments: Mapping[str, object]) -> str:
     """A run no reading answered is a typed answer since the recovery wave,
     not an exception: its rendered text is the refusal the caller reads.
     Anything else was an acceptance."""
