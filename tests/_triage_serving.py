@@ -594,6 +594,23 @@ def _first_novelty(family: str, word: str, becomes: str) -> _Perturb:
     return perturb
 
 
+def _first_dropped(family: str) -> _Perturb:
+    """The first row of one family, in a content-derived order, taken away."""
+
+    def perturb(collected: _Rows) -> None:
+        rows = collected.get(family)
+        if rows is not None:
+            del rows[min(range(len(rows)), key=lambda index: repr(rows[index]))]
+
+    return perturb
+
+
+def _summary_carrier(carrier: str) -> tuple[str, _Perturb]:
+    """One of the run summary's carriers: the triage shares that block."""
+    name, perturb, _fields = STORE_ROW_PERTURBATIONS[carrier]
+    return name, perturb
+
+
 #: Each carrier: (population, rows replaced within the model's laws, the
 #: answer paths the replacement must move in the store's answer).  The paths
 #: are a floor -- one row may carry more -- never "something moved".
@@ -647,6 +664,31 @@ TRIAGE_ROW_PERTURBATIONS: dict[str, tuple[str, _Perturb, tuple[str, ...]]] = {
         "trusted",
         _first_novelty("clone_novelty", "new", "known"),
         ("findings.new_by_source_kind", "top_hotspots.items[0].novelty"),
+    ),
+    # An authority violation: a finding group no selection names, so the
+    # universe's counts move and nothing shown does.
+    "unselected_group_dropped": (
+        "trusted",
+        _first_dropped("violation"),
+        ("findings.total", "findings.by_source_kind", "findings.outside_focus"),
+    ),
+    # The blocks the triage shares with the run summary, each by its own row.
+    "baseline_witness": (
+        *_summary_carrier("baseline_witness"),
+        ("baseline.baseline_python_tag",),
+    ),
+    "health_result": (*_summary_carrier("health_result"), ("health.score",)),
+    "analysis_profile": (
+        *_summary_carrier("analysis_profile"),
+        ("analysis_profile.min_loc",),
+    ),
+    "coverage_join": (
+        *_summary_carrier("coverage_join"),
+        ("coverage_join.hotspot_threshold_percent",),
+    ),
+    "security_surface": (
+        *_summary_carrier("security_surface"),
+        ("security_surfaces.items",),
     ),
 }
 
