@@ -18,7 +18,14 @@ PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PLUGIN_ROOT.parents[1]
 TRANSPORT_ARGS = ("--transport", "stdio")
 MAX_STDIN_BYTES = 65536
-_SPAWN_ENV_EXACT_KEYS = frozenset(
+# The CI markers CodeClone reads to choose behaviour (codeclone/utils/ci.py).
+# This launcher runs before the package is importable, so it holds a copy;
+# tests/test_launcher_ci_signal.py holds the copy equal to the owner. Each
+# value travels as the parent set it, and the launcher never adds one.
+_SPAWN_ENV_CI_KEYS = frozenset(
+    {"CI", "GITHUB_ACTIONS", "BUILDKITE", "TF_BUILD", "TEAMCITY_VERSION"}
+)
+_SPAWN_ENV_EXACT_KEYS = _SPAWN_ENV_CI_KEYS | frozenset(
     {
         "PATH",
         "HOME",
