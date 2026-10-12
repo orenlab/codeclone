@@ -612,6 +612,22 @@ class MCPRunNotFoundError(MCPServiceError):
     """Raised when a requested MCP run is not available in the in-memory registry."""
 
 
+class MCPRunUnavailableError(MCPRunNotFoundError):
+    """A run this server does not hold, looked up in the run store and not
+    answered there: ``answer`` is the typed answer every tool gives for it
+    (``_run_restoration.unavailable_answer``) -- the reason, whether the same
+    call can succeed later, the step that changes the answer.
+
+    A kind of :class:`MCPRunNotFoundError` on purpose: every caller that
+    treats "no such run" as an answer of its own keeps doing so, and only the
+    service's last line turns it into the typed answer instead of an error.
+    """
+
+    def __init__(self, answer: Mapping[str, object]) -> None:
+        self.answer: dict[str, object] = dict(answer)
+        super().__init__(str(self.answer.get("message", "")))
+
+
 class MCPRunPayloadEvictedError(MCPServiceError):
     """The run is held by its resident identity only: its payload was dropped.
 
@@ -859,6 +875,11 @@ class CodeCloneMCPRunStore:
 
     def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
         self._history_limit = _validated_history_limit(history_limit)
+        # Executions found again in the run store rather than registered by
+        # an analysis of this process.  They are held by their resident
+        # identity, answer by their id, and are never this session's
+        # "latest": a run asked for by name is not the newest analysis.
+        self._restored: set[str] = set()
         self._lock = RLock()
         # Registration order, oldest first.
         self._executions: OrderedDict[str, MCPHeldRun] = OrderedDict()
@@ -966,7 +987,7 @@ class CodeCloneMCPRunStore:
             if execution_event_id not in self._executions:
                 return False
             newest: str | None = None
-            for event_id, key in self._key_of.items():
+            for event_id, key in self._session_keys_locked():
                 if key[0] == resolved_root:
                     newest = event_id
             return newest == execution_event_id
@@ -1038,10 +1059,39 @@ class CodeCloneMCPRunStore:
                     f"analyze_repository(root='{resolved_root}') and use the "
                     f"run_id it returns."
                 )
-            raise MCPRunNotFoundError(
-                f"No MCP analysis run is available for {resolved_root}. Call "
-                f"analyze_repository(root='{resolved_root}') first."
-            )
+        return self._restored_for_root(run_id, root=resolved_root)
+
+    def _restored_for_root(self, run_id: str | None, *, root: Path) -> MCPHeldRun:
+        """The registry's miss under ``root``: here, nowhere to look.  A
+        registry that looks in the run store overrides it
+        (``_run_restoration.RestoringRunStore``)."""
+        del run_id
+        raise MCPRunNotFoundError(
+            f"No MCP analysis run is available for {root}. Call "
+            f"analyze_repository(root='{root}') first."
+        )
+
+    def restore(self, identity: MCPRunIdentity) -> MCPHeldRun:
+        """Hold an execution found again in the run store, by its resident
+        identity -- the shape a run takes here once its payload is dropped;
+        nothing makes it a record.  It takes a registration ordinal of this
+        session (it was found now), is indexed under its report when no
+        execution of this session already is, and never becomes "latest".
+        An execution already held is answered as it is held."""
+        event_id = identity.execution.execution_event_id
+        key = run_store_key(identity.root, identity.run_id)
+        with self._lock:
+            held = self._executions.get(event_id)
+            if held is not None:
+                return held
+            self._executions[event_id] = identity
+            self._key_of[event_id] = key
+            self._registration_seq += 1
+            self._registrations[event_id] = self._registration_seq
+            self._latest_by_key.setdefault(key, event_id)
+            self._restored.add(event_id)
+            self._prune_unpinned_locked()
+        return identity
 
     def resolve_any_root(self, run_id: str | None = None) -> MCPRunRecord:
         """Resolve a run whose root the caller genuinely does not constrain.
@@ -1109,7 +1159,7 @@ class CodeCloneMCPRunStore:
     ) -> MCPRunKey | None:
         if run_id is None:
             latest: MCPRunKey | None = None
-            for key in self._key_of.values():
+            for _event_id, key in self._session_keys_locked():
                 if key[0] == root:
                     latest = key
             return latest
@@ -1237,6 +1287,7 @@ class CodeCloneMCPRunStore:
             self._latest_by_key.clear()
             self._pinned.clear()
             self._registrations.clear()
+            self._restored.clear()
             self._latest_execution_id = None
             return removed_run_ids
 
@@ -1253,8 +1304,22 @@ class CodeCloneMCPRunStore:
                 self._latest_by_key[key] = remaining[-1]
             else:
                 self._latest_by_key.pop(key, None)
+        self._restored.discard(execution_event_id)
         if self._latest_execution_id == execution_event_id:
-            self._latest_execution_id = next(reversed(self._executions), None)
+            self._latest_execution_id = self._newest_session_execution_locked()
+
+    def _session_keys_locked(self) -> tuple[tuple[str, MCPRunKey], ...]:
+        """``(execution, key)`` of every execution an analysis of this session
+        registered, oldest first -- the restored ones left out."""
+        return tuple(
+            (event_id, key)
+            for event_id, key in self._key_of.items()
+            if event_id not in self._restored
+        )
+
+    def _newest_session_execution_locked(self) -> str | None:
+        keys = self._session_keys_locked()
+        return keys[-1][0] if keys else None
 
     def _prune_unpinned_locked(self) -> None:
         # An unpinned execution that is no longer the newest of its report is

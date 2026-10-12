@@ -18,12 +18,8 @@ from ...utils.finding_groups import (
 from ...utils.mapping_paths import section
 from ...utils.repo_paths import RepoPathError, RepoPathPolicy, resolve_under_repo_root
 from . import _session_helpers as _helpers
-from ._authority_candidates import (
-    DEFAULT_AUTHORITY_CANDIDATE_PAGE_SIZE,
-    AuthorityCandidateCursorError,
-    authority_candidate_page,
-)
-from ._run_store_serving import served_authority_candidates
+from ._authority_candidates import DEFAULT_AUTHORITY_CANDIDATE_PAGE_SIZE
+from ._run_residence import authority_candidates_answer, held_or_identity
 from ._session_shared import (
     _CHECK_TO_DIMENSION,
     _CONFIDENCE_WEIGHT,
@@ -2079,32 +2075,23 @@ class _MCPSessionFindingMixin:
             section,
             _VALID_AUTHORITY_SECTIONS,
         )
+        if validated_section == "candidates":
+            # Discovery is unbounded by nature, so it is never returned whole:
+            # the population is reachable only through digest-bound pages.
+            return authority_candidates_answer(
+                held_or_identity(
+                    lambda: self._resolve_granular_record(
+                        run_id=run_id, root=root, analysis_mode="full"
+                    )
+                ),
+                cursor=cursor,
+                page_size=page_size,
+            )
         record = self._resolve_granular_record(
             run_id=run_id,
             root=root,
             analysis_mode="full",
         )
-        if validated_section == "candidates":
-            # Discovery is unbounded by nature, so it is never returned whole:
-            # the population is reachable only through digest-bound pages.
-            # ONE run-store resolution per request: the rows the page is cut
-            # from and the ``serving`` it states are that one answer.
-            candidates, serving = served_authority_candidates(record)
-            try:
-                page = authority_candidate_page(
-                    items=candidates.items,
-                    run_id=record.run_id,
-                    cursor=cursor,
-                    page_size=page_size,
-                )
-            except AuthorityCandidateCursorError as exc:
-                raise MCPServiceContractError(str(exc)) from exc
-            return {
-                "check": "authority",
-                "run_id": record.run_id,
-                **page,
-                "serving": serving.as_payload(),
-            }
         findings = self._query_findings(
             record=record,
             family="authority",

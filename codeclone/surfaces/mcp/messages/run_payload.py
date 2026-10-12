@@ -14,12 +14,27 @@ from typing import Final
 #: that no store reading could stand in for.
 PAYLOAD_EVICTED: Final = "payload_evicted"
 
-#: The step that brings the payload back: run ids are content-addressed, so
-#: analysing the same tree again registers the same run, whole.
+#: The step that brings the payload back -- true only while the files the
+#: run read are unchanged: run ids are content-addressed, so analysing the
+#: same tree again registers the same run, whole.
 PAYLOAD_EVICTED_NEXT: Final = (
-    "Call analyze_repository(root='{root}'): run ids are content-addressed, "
-    "so analysing the same tree again brings run '{run_id}' back whole; "
-    "then repeat this call."
+    "Call analyze_repository(root='{root}'): the files run '{run_id}' read "
+    "are unchanged, so analysing again registers this same run whole; then "
+    "repeat this call."
+)
+
+#: The step when the tree moved since the run: no analysis can bring the run
+#: back, so saying "analyse again" would send the caller round a loop -- the
+#: new analysis is another run, and this answer is refused for this one
+#: again.  The tools that read the run store still answer for the run.
+PAYLOAD_EVICTED_DRIFTED_NEXT: Final = (
+    "Do not analyse to bring run '{run_id}' back: the tree under '{root}' "
+    "changed since it ({changed} files differ, or the run recorded no "
+    "manifest), so a new analysis is another run and this answer cannot be "
+    "produced for '{run_id}' again. Ask the tools that read the run store "
+    "about this run -- get_run_summary, get_blast_radius, compare_runs, "
+    "evaluate_gates, check_patch_contract, check_authority with "
+    "section='candidates' -- or analyse and use the run_id it returns."
 )
 
 PAYLOAD_EVICTED_MESSAGE: Final = (
@@ -44,6 +59,17 @@ def payload_evicted_next_step(*, root: str, run_id: str) -> str:
     return PAYLOAD_EVICTED_NEXT.format(root=root, run_id=run_id)
 
 
+def payload_evicted_step(*, root: str, run_id: str, changed: int | None) -> str:
+    """The step for a run whose payload went: analyse again only when the
+    files it read are unchanged (``changed == 0``); ``None`` means the run
+    recorded nothing to compare against, which promises nothing either."""
+    if changed == 0:
+        return payload_evicted_next_step(root=root, run_id=run_id)
+    return PAYLOAD_EVICTED_DRIFTED_NEXT.format(
+        root=root, run_id=run_id, changed="?" if changed is None else changed
+    )
+
+
 def payload_evicted_message(*, run_id: str) -> str:
     return PAYLOAD_EVICTED_MESSAGE.format(run_id=run_id)
 
@@ -52,8 +78,10 @@ __all__ = [
     "CLAIMS_NOT_VALIDATED",
     "CLAIMS_NOT_VALIDATED_MESSAGE",
     "PAYLOAD_EVICTED",
+    "PAYLOAD_EVICTED_DRIFTED_NEXT",
     "PAYLOAD_EVICTED_MESSAGE",
     "PAYLOAD_EVICTED_NEXT",
     "payload_evicted_message",
     "payload_evicted_next_step",
+    "payload_evicted_step",
 ]

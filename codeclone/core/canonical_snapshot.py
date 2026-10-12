@@ -42,6 +42,7 @@ import hmac
 import os
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, NamedTuple
@@ -73,9 +74,11 @@ from ..canonical.errors import (
     RunReportLinkError,
     SemanticGrammarError,
     StoreCompatibilityError,
+    StoreUnavailableError,
     UnknownRunError,
 )
 from ..canonical.evaluation_rows import UnitRiskRow
+from ..canonical.executions import RetentionWindow
 from ..canonical.identity import (
     UNRESOLVED_IMPORT_RESOLUTIONS,
     EffectRoot,
@@ -147,6 +150,7 @@ from ..models import (
     RUN_SNAPSHOT_LINK_LINKED,
     RUN_SNAPSHOT_LINK_UNEVALUATED,
     RUN_SNAPSHOT_LINK_UNPUBLISHED,
+    RUN_SNAPSHOT_LINK_UNRECORDED,
     RUN_SNAPSHOT_PUBLICATION_DISABLED,
     RUN_SNAPSHOT_PUBLICATION_FAILED,
     RUN_SNAPSHOT_PUBLICATION_HEAD_CONFLICT,
@@ -1913,17 +1917,35 @@ def _publish_enabled(
 # operator remembering a verb.  An explicit verb would leave an always-on
 # store unbounded for every user who never runs it.
 #
-# The two numbers below are the owner's operational policy, injected into the
-# job exactly as ``RunStoreGcJob`` asks for (the substrate stays policy-free).
+# The policy below and the lease deadline after it are the owner's operational
+# policy, injected into the job exactly as ``RunStoreRetentionJob`` asks for
+# (the substrate stays policy-free).  The store grows twice per surface that
+# registers its executions -- at the publication and at the finalization that
+# registers it -- and is swept at both.
 
-#: Generations of every head target kept as the retained-history root.  The
-#: smallest window in which that root is not the head root: with one, the
-#: only history row a sweep keeps is the head's own, and W4 §8's
-#: retained-history class would exist in production and hold nothing.  With
-#: two, the generation a publication superseded stays readable through one
-#: more publication -- a reader that resolved the head just before it moved
-#: is not racing the collector.
-_PUBLICATION_RETAIN_HISTORY: Final = 2
+#: The one retention policy of a published store (ruling 2026-10-12, recovery
+#: decision 5).  It replaces the head-generation window -- two generations per
+#: head target -- which counted the publications of every surface per target,
+#: so one surface's publications took a run another reader still addressed
+#: (measured by the run-restoration audit: a second server on one root
+#: collected a run before the first one's intent took its lease), and which
+#: held a superseded generation however old it was.  This window holds the
+#: newest ``max_runs`` REGISTERED runs of the store -- registered by the
+#: finalization that makes a run findable by its execution -- and none past
+#: ``max_age_seconds``, whichever bound a run reaches first; a head, an
+#: operator's retention, a live lease (an intent, a publisher, an export) and
+#: a staging row hold a run by their own roots, exactly as before.  Four is
+#: the number of whole runs one MCP server holds in memory
+#: (``DEFAULT_MCP_HISTORY_LIMIT``); the 32 records -- the identities one
+#: server keeps of runs whose payload it let go (``MCP_RESIDENT_HISTORY_LIMIT``)
+#: -- bound the registry and are the proof of expiry a collected run leaves.
+#: This ring may not import the surface; ``tests/test_mcp_run_restoration.py``
+#: holds the numbers equal.
+PUBLICATION_RETENTION: Final = RetentionWindow(
+    max_runs=4,
+    max_age_seconds=7 * 24 * 60 * 60,
+    max_execution_records=32,
+)
 
 #: The deadline of an in-flight lease nobody released.  The publisher releases
 #: it explicitly once its bridge is stated; the deadline is only the backstop
@@ -1978,8 +2000,8 @@ def _collect_after_publication(store: RunStore) -> GcJobReport:
 
     The publisher's own run is already rooted by the lease its publishing
     transaction wrote, so this sweep -- and any other collector -- holds it
-    whether or not it won the head.  ``RunStoreGcJob`` sweeps under the
-    owner's retention policy.
+    whether or not it won the head.  ``RunStoreRetentionJob`` sweeps under
+    the owner's retention policy (:data:`PUBLICATION_RETENTION`).
 
     Every failure of the sweep -- its ``BEGIN IMMEDIATE`` not obtained, the
     store generation moved, anything else the substrate raises -- becomes a
@@ -1989,9 +2011,9 @@ def _collect_after_publication(store: RunStore) -> GcJobReport:
     same reason the publication boundary does not contain it.
     """
 
-    from ..canonical.store import RunStoreGcJob
+    from ..canonical.store import RunStoreRetentionJob
 
-    job = RunStoreGcJob(store=store, retain_history=_PUBLICATION_RETAIN_HISTORY)
+    job = RunStoreRetentionJob(store=store, window=PUBLICATION_RETENTION)
     try:
         return job.collect()
     except Exception as failure:
@@ -2031,6 +2053,98 @@ def release_publication_lease(
     except Exception as refusal:
         return f"{type(refusal).__name__}: {refusal}"
     return ""
+
+
+# ---------------------------------------------------------------------------
+# Finalization: a publication made findable by the execution that made it
+# ---------------------------------------------------------------------------
+
+
+def abandon_run_finalization(*, store_path: Path, publisher_lease: str) -> str:
+    """End a publication left for finalization that will not be finalized:
+    release its publisher's lease.  The store's refusal,
+    ``"<Type>: <message>"``, or ``""``; contained, because the lease's own
+    deadline dissolves it anyway and an analysis that already failed may not
+    fail a second time here."""
+    from ..canonical.store import RunStore, release_run_lease
+
+    try:
+        with RunStore(store_path, create=False) as store:
+            release_run_lease(store, publisher_lease)
+    except Exception as refusal:
+        return f"{type(refusal).__name__}: {refusal}"
+    return ""
+
+
+def finalize_run_publication(
+    *,
+    store_path: Path,
+    link: RunSnapshotLink,
+    publisher_lease: str,
+    execution_event_id: str,
+    root: Path,
+    record_contract: str,
+    overlay: bytes,
+) -> RunSnapshotLink:
+    """Finalize the publication a report left with ``link`` and the
+    publisher's lease (``report(defer_run_finalization=True)``), then sweep
+    under the window.
+
+    One fenced transaction (``canonical.store.finalize_execution``): the
+    snapshot read under the write lock, the bridge edge, the execution record
+    and the end of the publisher's lease.  The sweep follows on the same
+    handle, so the run just registered is counted by the window and the store
+    holds no more than the window's runs once the publication ends.
+
+    The one outcome contained is the store's own ``StoreUnavailableError`` (a
+    lock still held after the bounded wait, a read-only medium, an I/O fault),
+    exactly as the bridge's own write contains it: the link says
+    ``unrecorded`` and why, and the run is findable by no other process.
+    Every other refusal escapes, as the bridge's does -- after the publisher's
+    lease is released, so a failed finalization roots nothing for a day.
+    """
+    from ..canonical.store import ExecutionRecord, RunStore, finalize_execution
+
+    record = ExecutionRecord(
+        execution_event_id=execution_event_id,
+        root=str(root.resolve()),
+        report_run_identity=link.report_run_identity,
+        store_run_id=link.store_run_id,
+        record_contract=record_contract,
+        overlay=overlay,
+    )
+    try:
+        with RunStore(store_path, create=False) as store:
+            finalize_execution(
+                store,
+                record,
+                expected_scope_digest=link.analysis_scope_digest,
+                publisher_lease=publisher_lease,
+            )
+            collection = _collect_after_publication(store)
+    except StoreUnavailableError as refusal:
+        return replace(
+            link,
+            state=RUN_SNAPSHOT_LINK_UNRECORDED,
+            refusal=f"{type(refusal).__name__}: {refusal}",
+            lease_refusal=abandon_run_finalization(
+                store_path=store_path, publisher_lease=publisher_lease
+            ),
+        )
+    except BaseException:
+        abandon_run_finalization(store_path=store_path, publisher_lease=publisher_lease)
+        raise
+    return _with_sweep_refusal(link, collection)
+
+
+def _with_sweep_refusal(
+    link: RunSnapshotLink, collection: GcJobReport
+) -> RunSnapshotLink:
+    """The link, carrying the finalization sweep's refusal when the
+    publication's own sweep carried none."""
+    if collection.refusal is None or link.sweep_refusal:
+        return link
+    return replace(link, sweep_refusal=collection.refusal)
 
 
 # ---------------------------------------------------------------------------
@@ -2344,12 +2458,15 @@ __all__ = [
     "ENV_RUN_STORE_ENABLED",
     "ENV_RUN_STORE_FORCE",
     "ENV_RUN_STORE_PATH",
+    "PUBLICATION_RETENTION",
     "RUN_SNAPSHOT_NAMESPACE",
     "ProducerSnapshotUnavailable",
     "RunSnapshotBridgeError",
+    "abandon_run_finalization",
     "bridge_run_snapshot",
     "canonical_snapshot_from_producers",
     "confine_run_store_config",
+    "finalize_run_publication",
     "persist_run_snapshot_link",
     "population_is_admissible",
     "producer_execution_population",

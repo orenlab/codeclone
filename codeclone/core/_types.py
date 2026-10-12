@@ -278,6 +278,12 @@ class ReportArtifacts:
     #: and nothing opened, as the text the surface says it in.  Empty when
     #: nothing was withheld.
     run_store_outside_boundary: str = ""
+    #: The publisher's lease of a stored, linked publication this report left
+    #: for its caller to finalize (``report(defer_run_finalization=True)``):
+    #: the bridge edge is not yet written and this lease still roots the run
+    #: in the store at ``finalization_store``.  ``""`` on every other road.
+    finalization_lease: str = ""
+    finalization_store: str = ""
 
 
 def _as_sorted_str_tuple(value: object) -> tuple[str, ...]:

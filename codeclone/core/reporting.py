@@ -31,6 +31,7 @@ from ..contracts.comparison_state import (
 )
 from ..contracts.report_identity import realized_health_params
 from ..models import (
+    RUN_SNAPSHOT_LINK_LINKED,
     RUN_SNAPSHOT_LINK_UNRECORDED,
     BaselineContainerV3,
     MetricsDiff,
@@ -642,6 +643,12 @@ def report(
     #: whose stated law it is; the CLI passes nothing and writes where its
     #: user pointed it.
     run_store_write_boundary: Path | None = None,
+    #: Leave a stored, linked publication for the caller to finalize instead
+    #: of writing its bridge edge and ending its lease here: the caller makes
+    #: the run findable by its execution, edge, record and lease in one atom
+    #: (``canonical_snapshot.finalize_run_publication``).  Passed by the MCP
+    #: surface, whose executions are recorded; the CLI records none.
+    defer_run_finalization: bool = False,
 ) -> ReportArtifacts:
     contents: dict[str, bytes | None] = {
         "html": None,
@@ -808,17 +815,12 @@ def report(
             publication=publication,
             report_document=report_document,
         )
-        # Persisted here and not inside the bridge: stating the relation is a
-        # pure reading of two artifacts, and writing it is a store mutation.
-        # A run with the rollout off has no store to write into, which is the
-        # false branch of this condition on every default run.
-        if run_store_config.path is not None:
-            run_snapshot_link = _recorded_run_snapshot_link(
-                run_store_config.path, run_snapshot_link
-            )
-        # The bridge was the publisher's last use of its run, so its in-flight
-        # lease ends here, and a release the store refused rides the link.
-        run_snapshot_link = lease.end(run_snapshot_link)
+        run_snapshot_link, finalization_lease, finalization_store = _settled_bridge(
+            run_snapshot_link,
+            config=run_store_config,
+            lease=lease,
+            defer=defer_run_finalization,
+        )
         return ReportArtifacts(
             html=contents["html"],
             json=contents["json"],
@@ -828,6 +830,8 @@ def report(
             report_document=report_document,
             run_snapshot_link=run_snapshot_link,
             run_store_outside_boundary=run_store_withheld,
+            finalization_lease=finalization_lease,
+            finalization_store=finalization_store,
         )
     finally:
         # And on EVERY other way out of this block: a render, a seal or a
@@ -870,6 +874,39 @@ class _InFlightLease:
     def end_if_open(self) -> None:
         if self._open:
             self._release()
+
+    def hand_over(self) -> str:
+        """Give the lease to the caller that finalizes the publication: from
+        here this report releases nothing on any way out.  The lease id."""
+        self._open = False
+        return self._publication.in_flight_lease
+
+
+def _settled_bridge(
+    link: RunSnapshotLink,
+    *,
+    config: RunStoreConfig,
+    lease: _InFlightLease,
+    defer: bool,
+) -> tuple[RunSnapshotLink, str, str]:
+    """The stated bridge, recorded and its lease ended -- or, on the deferred
+    road, left with its lease for the caller to finalize: the lease id and
+    the store path it roots the run in, or two ``""`` when nothing was
+    left.
+
+    Persisted here and not inside the bridge: stating the relation is a pure
+    reading of two artifacts, and writing it is a store mutation.  A run with
+    the rollout off has no store to write into, which is the road of every
+    default run.  Only a stored and linked relation can be deferred: nothing
+    else has an edge to write or a run to make findable.
+    """
+    if config.path is None:
+        return lease.end(link), "", ""
+    if defer and link.state == RUN_SNAPSHOT_LINK_LINKED:
+        return link, lease.hand_over(), str(config.path)
+    # The bridge was the publisher's last use of its run, so its in-flight
+    # lease ends here, and a release the store refused rides the link.
+    return lease.end(_recorded_run_snapshot_link(config.path, link)), "", ""
 
 
 def _recorded_run_snapshot_link(

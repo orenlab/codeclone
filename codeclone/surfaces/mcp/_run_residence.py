@@ -38,17 +38,24 @@ from ...api.run_residence import RunSummaryResidue
 from ...api.run_store_serving import (
     BlastRadiusFacts,
     RunStoreServingOutcome,
+    ServedAuthorityCandidates,
+    read_run_store_authority_candidates,
     read_run_store_blast_radius_facts,
     read_run_store_summary,
 )
 from ...utils.coerce import as_mapping
 from . import _session_helpers as _helpers
+from ._authority_candidates import (
+    AuthorityCandidateCursorError,
+    authority_candidate_page,
+)
 from ._blast_radius import BlastRadiusResult
 from ._run_store_serving import (
     ENTITY_COUNTS_KEY,
     EXECUTION_BASELINE_KEYS,
     PRESENTATION_SECURITY_KEYS,
     _kept,
+    served_authority_candidates,
     store_summary_payload,
 )
 from ._session_shared import (
@@ -58,6 +65,7 @@ from ._session_shared import (
     MCPRunIdentity,
     MCPRunPayloadEvictedError,
     MCPRunRecord,
+    MCPServiceContractError,
 )
 from ._workspace_drift import compute_drift
 from .messages.run_payload import (
@@ -65,7 +73,7 @@ from .messages.run_payload import (
     CLAIMS_NOT_VALIDATED_MESSAGE,
     PAYLOAD_EVICTED,
     payload_evicted_message,
-    payload_evicted_next_step,
+    payload_evicted_step,
 )
 
 #: ``serving.detail`` of a store answer served for a run without its payload.
@@ -147,12 +155,25 @@ def payload_evicted_answer(
         "root": str(identity.root),
         "status": PAYLOAD_EVICTED_STATUS,
         "reason": PAYLOAD_EVICTED,
-        "next_step": payload_evicted_next_step(root=str(identity.root), run_id=run_id),
+        # Repeating this call answers the same until the step is taken.
+        "retryable": False,
+        "next_step": payload_evicted_step(
+            root=str(identity.root), run_id=run_id, changed=_changed_files(identity)
+        ),
         "message": payload_evicted_message(run_id=run_id),
     }
     if serving is not None:
         answer["serving"] = dict(serving)
     return answer
+
+
+def _changed_files(identity: MCPRunIdentity) -> int | None:
+    """How many files differ from the ones the run read -- ``None`` when the
+    run recorded no manifest to compare with, which promises nothing."""
+    drift = compute_drift(identity)
+    if drift.status == "unknown":
+        return None
+    return len(drift.drifted_files) + len(drift.added_files) + len(drift.deleted_files)
 
 
 def _resident_summary_frame(
@@ -248,11 +269,80 @@ def payload_evicted_blast_radius(
     return compute(facts), payload_evicted_outcome(outcome)
 
 
+def payload_evicted_authority_candidates(
+    identity: MCPRunIdentity,
+) -> tuple[ServedAuthorityCandidates, RunStoreServingOutcome]:
+    """The authority candidate rows of a run without its payload, as the store
+    states them for the execution, on the strength of the door's membership
+    proof -- there is no memory answer to agree with -- or the typed refusal
+    when the store states none."""
+    candidates, outcome = read_run_store_authority_candidates(
+        root=identity.root, link=identity.execution.run_snapshot_link
+    )
+    if candidates is None:
+        raise MCPRunPayloadEvictedError(identity, serving=outcome.as_payload())
+    return candidates, payload_evicted_outcome(outcome)
+
+
+def full_mode_identity(identity: MCPRunIdentity) -> MCPRunIdentity:
+    """``identity``, when its run is a full analysis -- the record path's
+    compatibility refusal, word for word, when it is not."""
+    if identity.request.analysis_mode != "full":
+        raise MCPServiceContractError(
+            "Selected MCP run is not compatible with this check. "
+            f"Call analyze_repository(root='{identity.root}', "
+            "analysis_mode='full') first."
+        )
+    return identity
+
+
+def held_or_identity(resolve: Callable[[], MCPRunRecord]) -> MCPHeldRun:
+    """The run ``resolve`` finds for a full-analysis reading with a store
+    road: held whole, or -- held without its payload -- by its resident
+    identity rather than refused."""
+    try:
+        return resolve()
+    except MCPRunPayloadEvictedError as evicted:
+        return full_mode_identity(evicted.identity)
+
+
+def authority_candidates_answer(
+    held: MCPHeldRun, *, cursor: str | None, page_size: int
+) -> dict[str, object]:
+    """``check_authority(section="candidates")`` for one held run: the rows
+    out of the store beside the record's own when the run is held whole, out
+    of the store alone when its payload went -- one store answer per request,
+    and the page cut from it."""
+    if isinstance(held, MCPRunRecord):
+        candidates, serving = served_authority_candidates(held)
+    else:
+        candidates, serving = payload_evicted_authority_candidates(held)
+    try:
+        page = authority_candidate_page(
+            items=candidates.items,
+            run_id=held.run_id,
+            cursor=cursor,
+            page_size=page_size,
+        )
+    except AuthorityCandidateCursorError as exc:
+        raise MCPServiceContractError(str(exc)) from exc
+    return {
+        "check": "authority",
+        "run_id": held.run_id,
+        **page,
+        "serving": serving.as_payload(),
+    }
+
+
 __all__ = [
     "PAYLOAD_EVICTED",
     "SERVING_DETAIL_PAYLOAD_EVICTED",
+    "authority_candidates_answer",
+    "full_mode_identity",
     "held_claims",
+    "held_or_identity",
     "payload_evicted_answer",
+    "payload_evicted_authority_candidates",
     "payload_evicted_blast_radius",
     "payload_evicted_outcome",
     "payload_evicted_run_summary",

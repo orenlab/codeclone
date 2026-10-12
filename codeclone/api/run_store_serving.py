@@ -537,6 +537,28 @@ def _store_answer(
     )
 
 
+def restoration_store(*, root: Path) -> Path | RunStoreServingOutcome:
+    """The run store a run of ``root`` is looked for in by a process that does
+    not hold it (``api.run_restoration``), or the memory outcome saying why no
+    store is read.
+
+    The same two gates every reading passes, resolved here and nowhere else
+    on the read side: the rollout names a store for the root (the kill
+    switch), and the serving switch names the store as the source the
+    migrated readings serve from -- a run found again is answered only by
+    those readings, so with the switch on memory nothing could serve it.
+    """
+    config = resolve_run_store_config(root=root)
+    if not config.enabled or config.path is None:
+        return _memory(SERVING_REASON_STORE_DISABLED, detail="run store rollout off")[1]
+    source = serving_source()
+    if source != SERVE_FROM_RUN_STORE:
+        return _memory(
+            SERVING_REASON_STORE_DISABLED, detail=f"{ENV_SERVE_FROM}={source}"
+        )[1]
+    return config.path
+
+
 def prove_published_run(
     *, root: Path, link: RunSnapshotLink | None
 ) -> RunStoreServingOutcome:
@@ -632,6 +654,7 @@ __all__ = [
     "read_run_store_blast_radius_facts",
     "read_run_store_slices",
     "read_run_store_summary",
+    "restoration_store",
     "serving_source",
 ]
 

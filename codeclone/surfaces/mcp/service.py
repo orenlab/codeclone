@@ -11,7 +11,12 @@ from typing import Protocol, TypeVar
 
 from ...utils.payload_narrow import is_payload_dict
 from ._run_residence import payload_evicted_answer
-from ._session_shared import MCPRunPayloadEvictedError, _json_text_payload
+from ._run_restoration import not_found_answer
+from ._session_shared import (
+    MCPRunNotFoundError,
+    MCPRunPayloadEvictedError,
+    _json_text_payload,
+)
 from ._workspace_intents import safe_remove_own_intent
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
@@ -292,13 +297,24 @@ _AnswerT = TypeVar("_AnswerT")
 
 
 def _answered(call: Callable[[], _AnswerT]) -> _AnswerT | dict[str, object]:
-    """``call``'s answer -- or, for a run held without its payload that no
-    store reading stood in for, the one typed answer every tool gives: the
-    step that brings the run back, never a raw error, never an empty one."""
+    """``call``'s answer -- or, for a run no reading answered, the one typed
+    answer every tool gives, never a raw error and never an empty one: a run
+    held without its payload that no store reading stood in for, and a run
+    this server does not hold and its run store did not give back (or was
+    not asked about), each with the step that changes the answer."""
     try:
         return call()
-    except MCPRunPayloadEvictedError as evicted:
-        return payload_evicted_answer(evicted.identity, serving=evicted.serving)
+    except (MCPRunPayloadEvictedError, MCPRunNotFoundError) as unanswered:
+        return _typed_run_answer(unanswered)
+
+
+def _typed_run_answer(
+    unanswered: MCPRunPayloadEvictedError | MCPRunNotFoundError,
+) -> dict[str, object]:
+    """The typed answer of one run no reading answered, by why."""
+    if isinstance(unanswered, MCPRunPayloadEvictedError):
+        return payload_evicted_answer(unanswered.identity, serving=unanswered.serving)
+    return not_found_answer(unanswered)
 
 
 def _answered_text(call: Callable[[], str]) -> str:

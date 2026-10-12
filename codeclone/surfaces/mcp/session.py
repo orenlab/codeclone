@@ -32,6 +32,7 @@ from ._code_provenance import process_code_provenance
 from ._implementation_context import build_unit_location_inventory
 from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
+from ._run_restoration import finalized_record, restoring_run_store
 from ._session_audit_artifact_mixin import _MCPSessionAuditArtifactMixin
 from ._session_baseline import (
     resolve_clone_baseline_state,
@@ -67,7 +68,6 @@ from ._session_shared import (
     MIN_MCP_HISTORY_LIMIT,
     AnalysisMode,
     CacheStatus,
-    CodeCloneMCPRunStore,
     DetailLevel,
     ExecutionEvent,
     MCPAnalysisRequest,
@@ -206,7 +206,9 @@ class MCPSession(
         audit_writer: AuditWriter | None = None,
         ide_governance_channel: bool = False,
     ) -> None:
-        self._runs = CodeCloneMCPRunStore(history_limit=history_limit)
+        # A run this server does not hold is looked for in its root's run
+        # store, by the execution that published it (``_run_restoration``).
+        self._runs = restoring_run_store(history_limit=history_limit)
         self._ide_governance = IdeGovernanceSessionState(
             channel_enabled=ide_governance_channel
         )
@@ -578,6 +580,9 @@ class MCPSession(
                 # cache, is written only inside CodeClone's service
                 # directories of the analysed root.
                 run_store_write_boundary=root_path,
+                # This surface records its executions: the publication is
+                # finalized below, with the run's resident identity.
+                defer_run_finalization=True,
             )
             report_document = report_artifacts.report_document
             if report_document is None:
@@ -593,6 +598,8 @@ class MCPSession(
             served_report = build_served_projection(report_document)
             run_snapshot_link = report_artifacts.run_snapshot_link
             run_store_withheld = report_artifacts.run_store_outside_boundary
+            finalization_lease = report_artifacts.finalization_lease
+            finalization_store = report_artifacts.finalization_store
             del report_document, report_artifacts
 
         warning_items = set(console.messages)
@@ -709,6 +716,11 @@ class MCPSession(
             unit_inventory=unit_inventory,
             relationship_facts=processing_result.function_relationship_facts,
             module_imports=processing_result.module_deps,
+        )
+        # The publication becomes findable by this execution -- or the
+        # record says why it is not -- before anything is registered.
+        record = finalized_record(
+            record, lease=finalization_lease, store=finalization_store
         )
         # Room for this run's payload first, so the drop never takes the run
         # this call registers: the oldest payloads the drop rule lets go are
