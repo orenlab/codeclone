@@ -246,6 +246,7 @@ def _receipt(
     history_pruned: int = 0,
     leases_expired: int = 0,
     objects_collected: int = 0,
+    records_collected: int = 0,
 ) -> GcJobReport:
     """The expected receipt of one sweep, every lane spelled."""
     return GcJobReport.build(
@@ -261,6 +262,7 @@ def _receipt(
         },
         collected={GC_COLLECT_UNREACHABLE: collected},
         detail={
+            "execution_records_collected": records_collected,
             "history_rows_pruned": history_pruned,
             "leases_expired": leases_expired,
             "objects_collected": objects_collected,

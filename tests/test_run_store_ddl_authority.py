@@ -111,7 +111,8 @@ def _objects(path: Path) -> set[tuple[str, str]]:
             (str(kind), str(name))
             for kind, name in connection.execute(
                 "SELECT type, name FROM sqlite_master "
-                "WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite%'"
+                "WHERE type IN ('table', 'index', 'trigger') "
+                "AND name NOT LIKE 'sqlite%'"
             )
         }
 
