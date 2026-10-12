@@ -51,6 +51,7 @@ from codeclone.surfaces.mcp._session_state_mixin import triage_findings_presente
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.utils.coerce import as_mapping, as_sequence
 from tests import conftest as corpora
+from tests._run_store_paths import run_store_service_path
 from tests._run_summary_serving import (
     STORE_ROW_PERTURBATIONS,
     SUMMARY_POPULATIONS,
@@ -177,11 +178,15 @@ class TriagePopulations:
         return self._built[name]
 
     def _serve(self, name: str) -> SummaryPopulation:
+        """One live MCP execution of the population's tree, published into
+        the root's own store: MCP writes a run store only inside the root's
+        ``.codeclone/``, so a store beside the root would be withheld and
+        the population would state no published run."""
         assert name in TRIAGE_ONLY_POPULATIONS, name
         root = self._base / name
         root.mkdir()
         corpora._write_tree(root, TRIAGE_KINDS_TREE)
-        store_path = self._base / f"{name}.sqlite3"
+        store_path = run_store_service_path(root)
         service = CodeCloneMCPService(history_limit=4)
         with serving_environment(store_path, serve_from=None):
             service.analyze_repository(
