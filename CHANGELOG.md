@@ -102,6 +102,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - The CLI summary, the HTML report, the PR summary and review receipt markdown and the CLI `--patch-verify` health line print `not compared` (compact `n/a (not compared)`) instead of a count for a comparison that did not run, and a measured zero prints `0`, never `+0`.
 - Run store: a sweep or a lease release the store refuses after publication is one warning line on the CLI and in MCP `warnings[]` instead of silence.
 - The Codex, Claude Code and Cursor plugin launchers and the VS Code extension pass `CI`, `GITHUB_ACTIONS`, `BUILDKITE`, `TF_BUILD` and `TEAMCITY_VERSION` to `codeclone-mcp` exactly as set (they were stripped), so the MCP server applies its CI rules: projection rebuild jobs are skipped and an enabled run store needs `CODECLONE_RUN_STORE_FORCE=1`; any non-empty value, `CI=false` included, counts as CI.
+- `analysis complete, publication failed (<type>)` now carries the refusal's `next_step` (move or delete the store file; `codeclone run-store migrate --path …`), on the CLI and in MCP `warnings[]`.
 
 ### Security
 
@@ -111,6 +112,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - CodeClone no longer opens its databases through a symbolic link, so a link committed in place of the cache or the run store cannot modify a file outside the repository.
 - Repository text (file and directory names, qualnames, module names, pyproject keys and patterns) and memory statements can no longer inject markup or terminal control sequences into CodeClone output: the Markdown report, pull-request summary, review receipt and text report render them through one display-boundary owner as inert code spans or visible control pictures; every CLI console, the CONTRACT ERROR echo, the banner and the `codeclone memory` screens print them as text; `module_role` memory records built from file names pass the same Markdown validator as `record_candidate`.
 - Every git command CodeClone runs against an analysed repository goes through one hardened call form: programs named by that repository's git state (filesystem monitor, hooks, repository-defined filter drivers, external diff, textconv, signature program, promisor-remote fetch) no longer run, read-only calls no longer rewrite `.git/index` (a private index copy lives in CodeClone's per-user cache directory), and git no longer inherits repository-redirecting `GIT_*` variables or the MCP HTTP token.
+- MCP no longer writes the run store outside CodeClone's service directories: a `CODECLONE_RUN_STORE_PATH` outside `.codeclone/` of the analysed root (or the per-user CodeClone cache directory) is read, not written; the publication answers `disabled`, `warnings[]` says so in one line, and no intent lease is written there. The CLI still writes where the variable points.
 
 ### Performance
 
@@ -119,6 +121,7 @@ Upgrading requires action: see "Upgrading from 2.1.0a1 to 2.1.0a2" (`docs/guides
 - Engineering Memory staleness checks batch subject lookups.
 - MCP answers from the run store (`CODECLONE_SERVE_FROM=run_store`) read a stored run's authority graph only when the run holds violations and its risk observations only when it joined coverage, keep each run's served facts for the life of the server process (bounded to 10 runs, re-checked as published on every answer) and prove the run's membership by its object ids once per process; a repeated store answer reads no family of the run, and every answer is still served only when byte-equal to memory.
 - Run store: publishing an analysis is about 2 s cheaper on a large repository (one normalization, identity parses asked once, no cyclic GC pauses, no object lookup when republishing a stored run) with byte-identical stored tables and run ids.
+- Run store: a store of another generation, or of this generation with an incomplete schema, is refused before the canonical model is built (the look costs ~2 ms on a 222 MB store).
 
 ### Dependencies
 
