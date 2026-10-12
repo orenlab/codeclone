@@ -288,6 +288,18 @@ class RunReportLinkError(RunStoreError):
     """
 
 
+class ExecutionRecordError(RunStoreError):
+    """The execution registry refuses a record, or cannot name one.
+
+    Two refusals, both about the registry's own rows and never about the
+    facts of a run: an execution finalized a second time (a record is
+    immutable once finalized, so a second finalization is a contradiction,
+    not a renewal), and a run-id prefix that names the records of more than
+    one report under one root -- choosing the first would answer a question
+    nobody asked.
+    """
+
+
 class ExportIntegrityError(RunStoreError):
     """Exported artifact bytes disagree with their export envelope.
 

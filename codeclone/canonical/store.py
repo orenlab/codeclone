@@ -147,6 +147,17 @@ from codeclone.canonical.evaluation_rows import (
     HotlistRow,
     UnitRiskRow,
 )
+from codeclone.canonical.executions import (
+    EXECUTION_AVAILABLE,
+    ExecutionRecord,
+    RegisteredExecution,
+    RetentionWindow,
+    execution_by_id,
+    insert_execution_record,
+    newest_execution_for_report,
+    sweep_execution_records,
+    window_run_pks,
+)
 from codeclone.canonical.export import (
     ByteSink,
     ExportEnvelope,
@@ -360,6 +371,20 @@ _WITNESS_LAYERS: Final[tuple[tuple[str, str, str], ...]] = (
 # The representation reaches no content address, no membership digest and no
 # run id: those are computed from hex digests and family NAMES before any row
 # is written.
+#
+# ``run_executions`` is the execution registry (``canonical.executions``):
+# one immutable row per finalized execution, naming its run by CONTENT
+# ADDRESS and deliberately not by foreign key.  Measured 2026-10-12 (the
+# recovery wave's schema audit): a row holding ``REFERENCES runs(run_pk)``
+# makes the sweep of every build that predates the table fail on the
+# foreign key (``IntegrityError: FOREIGN KEY constraint failed``) -- such a
+# build opens this store, because an open refuses only what it LACKS -- and
+# a row by content address lets that sweep collect the run and leave the
+# record, which is exactly the proof of expiry the registry answers with.
+# The table is declared like an index (below): created with a new store or
+# added by the migration verb to a store that lacks it, holding no row when
+# added and answering no earlier read differently, so the storage revision
+# does not move for it.
 _SCHEMA: Final = """
 CREATE TABLE IF NOT EXISTS store_meta (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -430,6 +455,17 @@ CREATE TABLE IF NOT EXISTS run_report_links (
     run_pk INTEGER NOT NULL REFERENCES runs(run_pk),
     PRIMARY KEY (report_run_identity, run_pk)
 ) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS run_executions (
+    execution_pk INTEGER PRIMARY KEY,
+    execution_event_id TEXT NOT NULL UNIQUE,
+    root TEXT NOT NULL,
+    report_run_identity TEXT NOT NULL,
+    store_run_id TEXT NOT NULL,
+    record_contract TEXT NOT NULL,
+    finalized_at INTEGER NOT NULL,
+    overlay BLOB NOT NULL CHECK (typeof(overlay) = 'blob'),
+    record_digest TEXT NOT NULL
+);
 """
 
 # Secondary indexes, created after every table they cover.  Like the tables
@@ -462,6 +498,18 @@ _INDEXES: Final[tuple[str, ...]] = (
     # with it the family reads' SQL time fell 70.8-84.4 % on five
     # repositories at +1.6 % of file size.
     "CREATE INDEX IF NOT EXISTS idx_objects_family ON objects(family_pk)",
+)
+
+# Triggers, created after the tables they guard, by the same two places and
+# never by an open.  Each is one statement: a trigger body holds its own
+# ``;`` and is therefore not part of the ``_SCHEMA`` split.  The registry's
+# record is immutable by mechanism, not by discipline: SQLite itself refuses
+# an ``UPDATE`` of a finalized row, whoever issues it.
+_TRIGGERS: Final[tuple[str, ...]] = (
+    "CREATE TRIGGER IF NOT EXISTS run_executions_immutable "
+    "BEFORE UPDATE ON run_executions BEGIN "
+    "SELECT RAISE(ABORT, 'an execution record is immutable once finalized'); "
+    "END",
 )
 
 
@@ -3007,7 +3055,8 @@ def _verify_witness(
 
 
 def _schema_objects(cursor: sqlite3.Cursor) -> frozenset[tuple[str, str]]:
-    """The named tables and indexes a database holds, as ``(type, name)``.
+    """The named tables, indexes and triggers a database holds, as
+    ``(type, name)``.
 
     SQLite's own objects (``sqlite_sequence``, the automatic index behind a
     ``UNIQUE`` or composite ``PRIMARY KEY``) are declared by no DDL of this
@@ -3016,7 +3065,8 @@ def _schema_objects(cursor: sqlite3.Cursor) -> frozenset[tuple[str, str]]:
     return frozenset(
         (str(kind), str(name))
         for kind, name in cursor.execute(
-            "SELECT type, name FROM sqlite_master WHERE type IN ('table', 'index')"
+            "SELECT type, name FROM sqlite_master "
+            "WHERE type IN ('table', 'index', 'trigger')"
         )
         if not str(name).startswith("sqlite_")
     )
@@ -4446,7 +4496,7 @@ def _create_schema(cursor: sqlite3.Cursor) -> None:
     creator that lost the race to a concurrent one.  (``executescript``
     would commit an open transaction -- never used here.)
     """
-    for statement in (*_SCHEMA.split(";"), *_INDEXES):
+    for statement in (*_SCHEMA.split(";"), *_INDEXES, *_TRIGGERS):
         if statement.strip():
             cursor.execute(statement)
 
@@ -5259,25 +5309,42 @@ def link_run_report(
     writer, and it answers in the store's own words, never a raw ``sqlite3``
     error.
     """
+    with _typed_sqlite_faults(store._path), _fenced_transaction(store) as cursor:
+        _, edge = _link_in_transaction(
+            cursor,
+            run_id=run_id,
+            report_run_identity=report_run_identity,
+            expected_scope_digest=expected_scope_digest,
+        )
+    return edge
+
+
+def _link_in_transaction(
+    cursor: sqlite3.Cursor,
+    *,
+    run_id: str,
+    report_run_identity: str,
+    expected_scope_digest: str,
+) -> tuple[int, RunReportEdge]:
+    """State one edge inside the caller's fenced transaction; return the
+    run's key and the edge.  The one spelling of the edge write, shared by
+    :func:`link_run_report` and the registry's finalization."""
     if not report_run_identity:
         raise RunReportLinkError("an edge must name the report identity it answers")
-    with _typed_sqlite_faults(store._path), _fenced_transaction(store) as cursor:
-        run_pk, _namespace, scope_digest, _membership = _published_run_row(
-            cursor, run_id
+    run_pk, _namespace, scope_digest, _membership = _published_run_row(cursor, run_id)
+    if not hmac.compare_digest(scope_digest, expected_scope_digest):
+        raise RunReportLinkError(
+            f"refusing to link run {run_id[:12]} over scope "
+            f"{scope_digest[:12]} to a report that re-derives "
+            f"{expected_scope_digest[:12]}: the two halves do not "
+            "describe one analyzed scope"
         )
-        if not hmac.compare_digest(scope_digest, expected_scope_digest):
-            raise RunReportLinkError(
-                f"refusing to link run {run_id[:12]} over scope "
-                f"{scope_digest[:12]} to a report that re-derives "
-                f"{expected_scope_digest[:12]}: the two halves do not "
-                "describe one analyzed scope"
-            )
-        cursor.execute(
-            "INSERT OR IGNORE INTO run_report_links "
-            "(report_run_identity, run_pk) VALUES (?, ?)",
-            (report_run_identity, run_pk),
-        )
-    return RunReportEdge(
+    cursor.execute(
+        "INSERT OR IGNORE INTO run_report_links "
+        "(report_run_identity, run_pk) VALUES (?, ?)",
+        (report_run_identity, run_pk),
+    )
+    return run_pk, RunReportEdge(
         run_id=run_id,
         report_run_identity=report_run_identity,
         analysis_scope_digest=scope_digest,
@@ -5291,9 +5358,15 @@ def linked_run(store: RunStore, *, report_run_identity: str) -> RunReportEdge | 
     row is immutable and content-addressed, so a copy on the edge would be a
     second truth about a fact that cannot move.
 
-    Two edges for one identity is a corruption, not a choice — one
-    evaluation cannot descend from two analyses — and taking the first would
-    be the silent wrong-row answer this whole owner exists to prevent.
+    Two edges for one identity are refused, never chosen between.  They are
+    not a corruption: the relation is many-to-many in ordinary work
+    (measured 2026-10-12, run-restoration audit -- blank lines appended to a
+    file, or a clones-only run after two different edits, state one report
+    over two store runs), because the report does not cover every fact the
+    store run does.  A reader holding only the report's identity has nothing
+    to choose with, and taking the first would be the silent wrong-row
+    answer this owner exists to prevent; the execution registry
+    (``canonical.executions``) is what names the run of one EXECUTION.
     """
     with _typed_sqlite_faults(store._path):
         rows = store._connection.execute(
@@ -5308,8 +5381,8 @@ def linked_run(store: RunStore, *, report_run_identity: str) -> RunReportEdge | 
     if len(rows) > 1:
         raise RunReportLinkError(
             f"report identity {report_run_identity[:12]} is linked to "
-            f"{len(rows)} analysis runs; one evaluation descends from one "
-            "analysis, so the index is corrupt and answers nothing"
+            f"{len(rows)} analysis runs; the identity alone cannot choose "
+            "between them, so the index answers nothing for it"
         )
     return RunReportEdge(
         run_id=str(rows[0][0]),
@@ -5333,6 +5406,95 @@ def runs_over_scope(store: RunStore, *, scope_digest: str) -> tuple[str, ...]:
             (scope_digest,),
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# The execution registry (``canonical.executions``): finalization and reads.
+# ---------------------------------------------------------------------------
+
+
+def _before_finalize_commit(store: RunStore) -> None:
+    """Crash-injection seam of the registry's finalization; production no-op.
+
+    Every row the finalization writes is written by this point and none may
+    be visible to a reader if the transaction dies here.  Module-level, not a
+    method: the store's lifecycle owner gains nothing a seam would add.
+    """
+    del store
+
+
+def finalize_execution(
+    store: RunStore,
+    record: ExecutionRecord,
+    *,
+    expected_scope_digest: str,
+    publisher_lease: str | None = None,
+) -> RegisteredExecution:
+    """Make one published run findable by its execution, atomically.
+
+    ONE fenced transaction joins the four things that must agree (ruling
+    2026-10-12, recovery 2): the snapshot -- read under the write lock, and
+    published or the whole finalization is refused (``UnknownRunError``,
+    ``run_not_published``); the bridge edge for the record's report
+    identity, proven against the run's scope receipt exactly as
+    :func:`link_run_report` proves it; the immutable record; and the end of
+    the publisher's in-flight lease on that run, whose hold the registry's
+    retention window takes over in the same commit.  A process that dies
+    anywhere before the ``COMMIT`` leaves none of the four: no record says
+    "published" of a snapshot that is absent, and no snapshot is "current"
+    in the registry before its publication committed.
+    """
+    with _typed_sqlite_faults(store._path), _fenced_transaction(store) as cursor:
+        run_pk, _edge = _link_in_transaction(
+            cursor,
+            run_id=record.store_run_id,
+            report_run_identity=record.report_run_identity,
+            expected_scope_digest=expected_scope_digest,
+        )
+        finalized_at = _lease_now()
+        insert_execution_record(cursor, record, finalized_at=finalized_at)
+        # The publisher's in-flight hold ends here and nowhere later; a
+        # finalization that names no lease ends none (no id is empty).
+        cursor.execute(
+            "DELETE FROM run_leases WHERE lease_id = ? AND run_pk = ?",
+            (publisher_lease or "", run_pk),
+        )
+        _before_finalize_commit(store)
+    return RegisteredExecution(
+        record=record, finalized_at=finalized_at, availability=EXECUTION_AVAILABLE
+    )
+
+
+@contextmanager
+def _read_snapshot(store: RunStore) -> Iterator[sqlite3.Cursor]:
+    """One deferred read transaction: every row a registry answer joins is
+    read in one snapshot, and nothing is ever written or locked for it."""
+    with _typed_sqlite_faults(store._path):
+        cursor = store._connection.cursor()
+        cursor.execute("BEGIN")
+        try:
+            yield cursor
+        finally:
+            cursor.execute("ROLLBACK")
+
+
+def registered_execution(
+    store: RunStore, execution_event_id: str
+) -> RegisteredExecution | None:
+    """The registry's answer for one execution, or ``None`` when it holds
+    no record of it -- which proves nothing about whether one existed."""
+    with _read_snapshot(store) as cursor:
+        return execution_by_id(cursor, execution_event_id)
+
+
+def registered_report_execution(
+    store: RunStore, *, root: str, run_id: str
+) -> RegisteredExecution | None:
+    """The registry's answer for the newest execution of one report under one
+    root (``run_id`` the report identity or a unique hex prefix of it), or
+    ``None`` when it holds no record of that report under that root."""
+    with _read_snapshot(store) as cursor:
+        return newest_execution_for_report(cursor, root=root, run_id=run_id)
 
 
 def _release_freed_pages(store: RunStore) -> None:
@@ -5367,7 +5529,39 @@ def _release_freed_pages(store: RunStore) -> None:
     connection.executescript("PRAGMA incremental_vacuum;")
 
 
-def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
+def _require_retain_history(retain_history: int) -> None:
+    if (
+        isinstance(retain_history, bool)
+        or not isinstance(retain_history, int)
+        or retain_history < 0
+    ):
+        raise RunStoreError("retain_history must be a non-negative integer")
+
+
+def _collect_victims(cursor: sqlite3.Cursor, victims: Sequence[int]) -> int:
+    """Delete the victims with their membership, then every object no
+    surviving run references; return how many objects left."""
+    victim_rows = [(run_pk,) for run_pk in victims]
+    # The bridge index is swept WITH its runs and never among the roots:
+    # a derived index that held a run alive would have quietly become an
+    # authority, and one left behind would point into a deleted row —
+    # which the foreign key would refuse anyway, turning every sweep of a
+    # linked run into a failed collection.
+    cursor.executemany("DELETE FROM run_report_links WHERE run_pk = ?", victim_rows)
+    cursor.executemany("DELETE FROM run_members WHERE run_pk = ?", victim_rows)
+    cursor.executemany("DELETE FROM runs WHERE run_pk = ?", victim_rows)
+    cursor.execute(
+        "DELETE FROM objects WHERE object_pk NOT IN (SELECT object_pk FROM run_members)"
+    )
+    return cursor.rowcount
+
+
+def collect_garbage(
+    store: RunStore,
+    *,
+    retain_history: int,
+    window: RetentionWindow | None = None,
+) -> GcJobReport:
     """Sweep everything unreachable from the §8 roots, atomically.
 
     A module-level operation over a store, like :func:`export_run` — the
@@ -5384,15 +5578,19 @@ def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
     neighbour through shared immutable objects, and the foreign keys
     refuse even a defective sweep that tries.  The report's zeros are
     measured zeros: a sweep that collected nothing still answers.
+
+    ``window`` is the registry's retention (:class:`RetentionWindow`): the
+    newest registered runs it holds count as ``history`` -- the retained
+    history of the store, by registration rather than by head generation --
+    and the execution records it no longer keeps leave in the same atom,
+    after the runs, so a record whose run just left can stay behind as its
+    expiry witness.  Without a window no registered run is held by its
+    registration and no record is swept.
     """
-    if (
-        isinstance(retain_history, bool)
-        or not isinstance(retain_history, int)
-        or retain_history < 0
-    ):
-        raise RunStoreError("retain_history must be a non-negative integer")
+    _require_retain_history(retain_history)
     with _fenced_transaction(store) as cursor:
-        leases_expired, lease_run_pks = _sweep_expired_leases(cursor, _lease_now())
+        now = _lease_now()
+        leases_expired, lease_run_pks = _sweep_expired_leases(cursor, now)
         history_pruned, history_run_pks = _prune_head_history(cursor, retain_history)
         runs = [
             (int(row[0]), int(row[1]))
@@ -5403,24 +5601,12 @@ def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
         held, victims = _attribute_runs(
             runs,
             head_run_pks=_run_pk_column(cursor, "SELECT run_pk FROM heads"),
-            history_run_pks=history_run_pks,
+            history_run_pks=history_run_pks | window_run_pks(cursor, window, now=now),
             retained_run_pks=_run_pk_column(cursor, "SELECT run_pk FROM retained_runs"),
             lease_run_pks=lease_run_pks,
         )
-        victim_rows = [(run_pk,) for run_pk in victims]
-        # The bridge index is swept WITH its runs and never among the roots:
-        # a derived index that held a run alive would have quietly become an
-        # authority, and one left behind would point into a deleted row —
-        # which the foreign key would refuse anyway, turning every sweep of a
-        # linked run into a failed collection.
-        cursor.executemany("DELETE FROM run_report_links WHERE run_pk = ?", victim_rows)
-        cursor.executemany("DELETE FROM run_members WHERE run_pk = ?", victim_rows)
-        cursor.executemany("DELETE FROM runs WHERE run_pk = ?", victim_rows)
-        cursor.execute(
-            "DELETE FROM objects WHERE object_pk NOT IN "
-            "(SELECT object_pk FROM run_members)"
-        )
-        objects_collected = cursor.rowcount
+        objects_collected = _collect_victims(cursor, victims)
+        records_collected = sweep_execution_records(cursor, window)
     _release_freed_pages(store)
     return GcJobReport.build(
         job=_GC_JOB_NAME,
@@ -5428,6 +5614,7 @@ def collect_garbage(store: RunStore, *, retain_history: int) -> GcJobReport:
         held=held,
         collected={GC_COLLECT_UNREACHABLE: len(victims)},
         detail={
+            "execution_records_collected": records_collected,
             "history_rows_pruned": history_pruned,
             "leases_expired": leases_expired,
             "objects_collected": objects_collected,
@@ -5454,10 +5641,36 @@ class RunStoreGcJob:
         return _GC_JOB_NAME
 
     def collect(self) -> GcJobReport:
-        try:
-            return collect_garbage(self.store, retain_history=self.retain_history)
-        except StoreFenceError as error:
-            return GcJobReport.refused(job=_GC_JOB_NAME, refusal=str(error))
+        return _collected_or_refused(self.store, self.retain_history, None)
+
+
+@dataclass(frozen=True, slots=True)
+class RunStoreRetentionJob:
+    """The run store's job under a retention window (:class:`RetentionWindow`)
+    -- the registry's policy, which holds the newest registered runs and
+    bounds the records -- instead of a head-generation window.  The same job
+    name and the same one anticipated refusal as :class:`RunStoreGcJob`."""
+
+    store: RunStore
+    window: RetentionWindow
+
+    @property
+    def name(self) -> str:
+        return _GC_JOB_NAME
+
+    def collect(self) -> GcJobReport:
+        return _collected_or_refused(self.store, 0, self.window)
+
+
+def _collected_or_refused(
+    store: RunStore, retain_history: int, window: RetentionWindow | None
+) -> GcJobReport:
+    """One sweep, or the typed refusal of a store whose generation moved
+    under the handle -- the one anticipated concurrent outcome of a job."""
+    try:
+        return collect_garbage(store, retain_history=retain_history, window=window)
+    except StoreFenceError as error:
+        return GcJobReport.refused(job=_GC_JOB_NAME, refusal=str(error))
 
 
 def export_run(store: RunStore, run_id: str, sink: ByteSink) -> ExportEnvelope:
@@ -5578,13 +5791,17 @@ __all__ = [
     "FAMILY_UNIT_SPAN",
     "FAMILY_UNREACHABLE_STATEMENT_GROUP",
     "FAMILY_VIOLATION",
+    "ExecutionRecord",
     "HeadState",
     "LeaseGrant",
     "PublishReceipt",
     "ReadWhen",
+    "RegisteredExecution",
+    "RetentionWindow",
     "RunReportEdge",
     "RunStore",
     "RunStoreGcJob",
+    "RunStoreRetentionJob",
     "StoreFileIdentity",
     "StoredFamily",
     "UnreadFamilyError",
@@ -5593,6 +5810,7 @@ __all__ = [
     "collect_garbage",
     "export_head",
     "export_run",
+    "finalize_execution",
     "forget_proven_memberships",
     "link_run_report",
     "linked_run",
@@ -5600,6 +5818,8 @@ __all__ = [
     "migrate_store_schema",
     "prove_run_membership",
     "read_named_families",
+    "registered_execution",
+    "registered_report_execution",
     "release_retained_run",
     "release_run_lease",
     "retain_run",
