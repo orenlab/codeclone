@@ -18,6 +18,9 @@ rather than a slow one.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from codeclone.cache._wire_decode import (
@@ -28,6 +31,7 @@ from codeclone.cache._wire_decode import (
     _decode_binding_context_digest,
     _decode_optional_wire_class_bases,
     _decode_wire_dead_candidate,
+    _decode_wire_file_entry,
     _decode_wire_units_with_sequences,
 )
 from codeclone.cache._wire_helpers import (
@@ -366,3 +370,75 @@ def test_dead_candidate_accepts_a_known_live_root_reason() -> None:
     decoded = _decode_wire_dead_candidate(row, "a.py")
     assert decoded is not None
     assert decoded["live_root_reason"] == "export_root"
+
+
+# --------------------------------------------------------------------------
+# _wire_decode: the optional per-module sections
+# --------------------------------------------------------------------------
+
+#: A sound entry a real build wrote: both coverage sections present.
+_SOUND_ENTRY = (
+    Path(__file__).parent / "fixtures" / "cache_v3" / "pydantic_hook_entry_pre_fix.json"
+)
+
+
+def _sound_dependent_lane() -> tuple[dict[str, object], dict[str, object]]:
+    wire = json.loads(_SOUND_ENTRY.read_text("utf-8"))
+    assert isinstance(wire, dict)
+    dependent = wire["d"]
+    assert isinstance(dependent, dict)
+    return wire, dependent
+
+
+def test_a_sound_entry_keeps_its_optional_sections() -> None:
+    """Positive control: the base entry decodes, sections and all."""
+
+    wire, _dependent = _sound_dependent_lane()
+    entry = _decode_wire_file_entry(
+        wire, "pkg/schema.py", analysed_filepath="pkg/schema.py"
+    )
+    assert entry is not None
+    assert entry.module_dependent.typing_coverage is not None
+    assert entry.module_dependent.docstring_coverage is not None
+
+
+@pytest.mark.parametrize(
+    ("key", "malformed"),
+    [
+        ("tc", ["pkg.schema", 1]),
+        ("dg", ["pkg.schema", "two", 0]),
+        ("as", ["pkg.schema", [], "not-a-list"]),
+    ],
+)
+def test_a_present_but_malformed_optional_section_refuses_the_entry(
+    key: str, malformed: list[object]
+) -> None:
+    """Present and unreadable is not absent.
+
+    These three sections are optional, and the decoder read "malformed" with
+    the same ``None`` it reads "absent" with -- so a coverage row it could not
+    parse was served as a module that had no coverage, and an API surface it
+    could not parse as a module with no public symbols.
+    """
+
+    wire, dependent = _sound_dependent_lane()
+    dependent[key] = malformed
+    assert (
+        _decode_wire_file_entry(
+            wire, "pkg/schema.py", analysed_filepath="pkg/schema.py"
+        )
+        is None
+    )
+
+
+def test_an_absent_optional_section_is_still_absent() -> None:
+    """Absence stays the legal "not collected" it always was."""
+
+    wire, dependent = _sound_dependent_lane()
+    del dependent["tc"], dependent["dg"]
+    entry = _decode_wire_file_entry(
+        wire, "pkg/schema.py", analysed_filepath="pkg/schema.py"
+    )
+    assert entry is not None
+    assert entry.module_dependent.typing_coverage is None
+    assert entry.module_dependent.docstring_coverage is None

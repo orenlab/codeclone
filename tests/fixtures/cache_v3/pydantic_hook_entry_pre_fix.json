@@ -1,0 +1,219 @@
+{
+  "bc": [
+    "codeclone.cache.binding-context.v1",
+    "sha256",
+    "8fa167372ad56954aa350a8819cf259abacdd0e8c04354af33576c78222d3e14"
+  ],
+  "cb": "1",
+  "d": {
+    "amt": false,
+    "bs": [
+      [
+        "pkg.schema:BytesAsText",
+        [
+          "GenerateJsonSchema"
+        ],
+        true
+      ]
+    ],
+    "cm": [
+      [
+        "pkg.schema:BytesAsText",
+        6,
+        8,
+        0,
+        1,
+        1,
+        0,
+        "low",
+        "low"
+      ]
+    ],
+    "cn": [
+      "BytesAsText"
+    ],
+    "dc": [
+      [
+        "pkg.schema:BytesAsText",
+        "BytesAsText",
+        6,
+        8,
+        "class"
+      ],
+      [
+        "pkg.schema:BytesAsText.bytes_schema",
+        "bytes_schema",
+        7,
+        8,
+        "method"
+      ]
+    ],
+    "dg": [
+      "pkg.schema",
+      2,
+      0
+    ],
+    "in": [
+      "pydantic"
+    ],
+    "md": [
+      [
+        "pkg.schema",
+        "pydantic.json_schema",
+        "from_import",
+        3,
+        "external",
+        false,
+        0,
+        "pydantic.json_schema",
+        [
+          "GenerateJsonSchema"
+        ],
+        [
+          "pydantic.json_schema"
+        ],
+        "static",
+        "import_time",
+        false
+      ]
+    ],
+    "rn": [
+      "GenerateJsonSchema"
+    ],
+    "rq": [
+      "pydantic.json_schema:GenerateJsonSchema"
+    ],
+    "rr": [
+      [
+        "pkg.schema:BytesAsText.bytes_schema",
+        7,
+        8,
+        "method",
+        "pydantic",
+        "runtime_hook",
+        "medium",
+        "Pydantic GenerateJsonSchema hook",
+        "GenerateJsonSchema.bytes_schema",
+        "pkg.schema:BytesAsText"
+      ]
+    ],
+    "sb": [
+      "pkg.schema:BytesAsText"
+    ],
+    "sf": [],
+    "tc": [
+      "pkg.schema",
+      1,
+      1,
+      0,
+      1,
+      0,
+      0
+    ]
+  },
+  "dp": [
+    "codeclone.cache.profile.dependent.v1",
+    "sha256",
+    "e59014d56deea35830099735bce5c344ac46eb5eff4ce232ce2de2c3531d46a3"
+  ],
+  "gb": null,
+  "n": {
+    "fc": [
+      [
+        "cc-local:BytesAsText.bytes_schema",
+        [
+          [
+            "cc-local:BytesAsText.bytes_schema#000001",
+            "return_value",
+            "cc-local:BytesAsText.bytes_schema",
+            [
+              [
+                "unresolved",
+                "Dict"
+              ]
+            ],
+            null,
+            [],
+            8,
+            "unavailable"
+          ]
+        ],
+        [],
+        [
+          [
+            "unresolved",
+            "Dict"
+          ]
+        ],
+        true
+      ]
+    ],
+    "mt": [],
+    "se": [
+      [
+        "cc-local:BytesAsText.bytes_schema#000001",
+        "return_value",
+        "cc-local:BytesAsText.bytes_schema",
+        [
+          [
+            "unresolved",
+            "Dict"
+          ]
+        ],
+        null,
+        [],
+        8,
+        "resolved"
+      ]
+    ],
+    "ss": [
+      8,
+      0,
+      1,
+      1
+    ],
+    "u": [
+      [
+        "BytesAsText.bytes_schema",
+        7,
+        8,
+        2,
+        1,
+        "d7452b006173d7334b6c827004ec1ea9876f407e2e9e19b942c3382bf47b17e5",
+        "0-19",
+        1,
+        0,
+        "low",
+        "ae3c68e0501898ecc7a874200ca68e7a113def65e58f538ccb79aa0118776f3d",
+        0,
+        "none",
+        0,
+        "return_expr",
+        "none",
+        "effect_only",
+        1
+      ]
+    ],
+    "ur": [
+      [
+        "BytesAsText.bytes_schema",
+        7,
+        []
+      ]
+    ]
+  },
+  "np": [
+    "codeclone.cache.profile.neutral.v1",
+    "sha256",
+    "ab43422611530c7bff4ab160bb66d276589b25ce20cebea472d0233e895f944f"
+  ],
+  "sd": [
+    "codeclone.source-content.v1",
+    "sha256",
+    "5461c689e8fa8faabdea6fcadd0458cf69c8beb7010091f721ee1fdb7e3f4f32"
+  ],
+  "st": [
+    1791885333696188691,
+    261
+  ]
+}

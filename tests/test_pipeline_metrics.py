@@ -31,6 +31,7 @@ from codeclone.core.bootstrap import _resolve_optional_runtime_path
 from codeclone.core.comparison_state import _values as _comparison_values
 from codeclone.core.coverage_payload import _coverage_join_rows, _coverage_join_summary
 from codeclone.core.discovery_cache import (
+    CachedRowRefused,
     _api_param_kind,
     _api_param_spec_from_cache_dict,
     _api_surface_from_cache_dict,
@@ -66,6 +67,7 @@ from codeclone.core.pipeline import compute_project_metrics
 from codeclone.core.reporting import _metrics_for_report
 from codeclone.domain.source_scope import SURFACE_KIND_PRODUCT_PUBLIC
 from codeclone.metrics import overloaded_modules as overloaded_modules_mod
+from codeclone.metrics._risk import RiskLevel
 from codeclone.metrics.overloaded_modules import (
     _percentile_rank,
     _ranking_population,
@@ -75,9 +77,12 @@ from codeclone.metrics.overloaded_modules import (
 )
 from codeclone.models import (
     ApiBreakingChange,
+    ApiParameterKind,
     ApiParamSpec,
     ApiParamSpecDict,
     ApiSurfaceSnapshot,
+    ApiSymbolKind,
+    ApiVisibility,
     CacheDependentPayload,
     CacheEntryV3,
     CacheNeutralPayload,
@@ -105,10 +110,16 @@ from codeclone.models import (
     ProjectMetrics,
     PublicSymbol,
     PublicSymbolDict,
+    RuntimeReachabilityEdgeKind,
     RuntimeReachabilityFact,
     RuntimeReachabilityFactDict,
+    RuntimeReachabilityFramework,
     SecuritySurface,
+    SecuritySurfaceCategory,
+    SecuritySurfaceClassificationMode,
     SecuritySurfaceDict,
+    SecuritySurfaceEvidenceKind,
+    SecuritySurfaceLocationScope,
     SemanticFileFacts,
     StructuralFindingGroupDict,
     TrustVector,
@@ -1514,7 +1525,7 @@ def test_public_symbol_from_cache_dict_rejects_invalid_param_payload() -> None:
     )
 
 
-def test_security_surface_from_cache_row_rejects_invalid_literals_and_is_filtered() -> (
+def test_security_surface_from_cache_row_rejects_invalid_literals_and_is_refused() -> (
     None
 ):
     invalid_row: SecuritySurfaceDict = {
@@ -1535,18 +1546,20 @@ def test_security_surface_from_cache_row_rejects_invalid_literals_and_is_filtere
 
     entry = _cache_entry_v3(security_surfaces=(invalid_row,))
 
-    *_, security_surfaces = _load_cached_metrics_extended(entry, filepath="pkg/mod.py")
-
-    assert security_surfaces == ()
+    # Refused, never filtered: a filtered row is a surface the run reports
+    # as absent (ruling 2026-10-13, invariant 2).
+    with pytest.raises(CachedRowRefused) as refused:
+        _load_cached_metrics_extended(entry, filepath="pkg/mod.py")
+    assert refused.value.family == "security_surfaces"
 
 
 @pytest.mark.parametrize(
     ("helper", "accepted"),
     (
-        (_api_param_kind, ("pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg")),
-        (_public_symbol_kind, ("function", "class", "method", "constant")),
-        (_exported_via_kind, ("all", "name")),
-        (_risk_level, ("low", "medium", "high")),
+        (_api_param_kind, get_args(ApiParameterKind)),
+        (_public_symbol_kind, get_args(ApiSymbolKind)),
+        (_exported_via_kind, get_args(ApiVisibility)),
+        (_risk_level, get_args(RiskLevel)),
         (_dead_candidate_kind, get_args(DeadCodeCandidateKind)),
     ),
 )
@@ -1562,27 +1575,13 @@ def test_discovery_cache_literal_helpers_accept_known_values_and_reject_unknowns
 @pytest.mark.parametrize(
     ("helper", "accepted"),
     (
-        (
-            _security_surface_category,
-            (
-                "archive_extraction",
-                "crypto_transport",
-                "database_boundary",
-                "deserialization",
-                "dynamic_execution",
-                "dynamic_loading",
-                "filesystem_mutation",
-                "identity_token",
-                "network_boundary",
-                "process_boundary",
-            ),
-        ),
-        (_security_surface_location_scope, ("module", "class", "callable")),
+        (_security_surface_category, get_args(SecuritySurfaceCategory)),
+        (_security_surface_location_scope, get_args(SecuritySurfaceLocationScope)),
         (
             _security_surface_classification_mode,
-            ("exact_builtin", "exact_call", "exact_import"),
+            get_args(SecuritySurfaceClassificationMode),
         ),
-        (_security_surface_evidence_kind, ("builtin", "call", "import")),
+        (_security_surface_evidence_kind, get_args(SecuritySurfaceEvidenceKind)),
     ),
 )
 def test_discovery_cache_security_surface_helpers_accept_and_reject(
@@ -1597,33 +1596,10 @@ def test_discovery_cache_security_surface_helpers_accept_and_reject(
 @pytest.mark.parametrize(
     ("helper", "accepted"),
     (
-        (
-            _runtime_reachability_framework,
-            (
-                "aiogram",
-                "aiohttp",
-                "celery",
-                "click",
-                "dependency_injector",
-                "django",
-                "fastapi",
-                "flask",
-                "sqlalchemy",
-                "starlette",
-                "typer",
-            ),
-        ),
-        (
-            _runtime_reachability_edge_kind,
-            (
-                "declares_dependency",
-                "provides",
-                "registers_command",
-                "registers_handler",
-                "registers_task",
-                "runtime_hook",
-            ),
-        ),
+        # Taken from the aliases: a hand list here was one member short of
+        # the model exactly as the narrower it pinned was (pydantic).
+        (_runtime_reachability_framework, get_args(RuntimeReachabilityFramework)),
+        (_runtime_reachability_edge_kind, get_args(RuntimeReachabilityEdgeKind)),
     ),
 )
 def test_discovery_cache_runtime_reachability_helpers_accept_and_reject(
@@ -1670,7 +1646,7 @@ def test_discovery_cache_runtime_row_parser_rejects_invalid_enums() -> None:
     )
 
 
-def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() -> None:
+def test_discovery_cache_parsers_reject_invalid_rows_and_refuse_their_entries() -> None:
     assert _api_param_spec_from_cache_dict([]) is None
     assert (
         _public_symbol_from_cache_dict(
@@ -1804,34 +1780,41 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
         is None
     )
 
+    sound_metric: ClassMetricsDict = {
+        "qualname": "pkg.mod:Service",
+        "filepath": "pkg/mod.py",
+        "start_line": 1,
+        "end_line": 10,
+        "cbo": 3,
+        "lcom4": 2,
+        "method_count": 2,
+        "instance_var_count": 1,
+        "risk_coupling": "high",
+        "risk_cohesion": "medium",
+        "coupled_classes": ["pkg.dep"],
+    }
+    broken_metric: ClassMetricsDict = {
+        "qualname": "pkg.mod:Broken",
+        "filepath": "pkg/mod.py",
+        "start_line": 11,
+        "end_line": 20,
+        "cbo": 1,
+        "lcom4": 1,
+        "method_count": 1,
+        "instance_var_count": 0,
+        "risk_coupling": "broken",
+        "risk_cohesion": "low",
+    }
+    broken_candidate: DeadCandidateDict = {
+        "qualname": "pkg.mod:broken",
+        "local_name": "broken",
+        "filepath": "pkg/mod.py",
+        "start_line": 40,
+        "end_line": 42,
+        "kind": "broken",
+    }
     entry = _cache_entry_v3(
-        class_metrics=(
-            {
-                "qualname": "pkg.mod:Service",
-                "filepath": "pkg/mod.py",
-                "start_line": 1,
-                "end_line": 10,
-                "cbo": 3,
-                "lcom4": 2,
-                "method_count": 2,
-                "instance_var_count": 1,
-                "risk_coupling": "high",
-                "risk_cohesion": "medium",
-                "coupled_classes": ["pkg.dep"],
-            },
-            {
-                "qualname": "pkg.mod:Broken",
-                "filepath": "pkg/mod.py",
-                "start_line": 11,
-                "end_line": 20,
-                "cbo": 1,
-                "lcom4": 1,
-                "method_count": 1,
-                "instance_var_count": 0,
-                "risk_coupling": "broken",
-                "risk_cohesion": "low",
-            },
-        ),
+        class_metrics=(sound_metric,),
         module_deps=(
             {
                 "source": "pkg.mod",
@@ -1857,14 +1840,6 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
                 "kind": "function",
                 "suppressed_rules": ["dead-code"],
             },
-            {
-                "qualname": "pkg.mod:broken",
-                "local_name": "broken",
-                "filepath": "pkg/mod.py",
-                "start_line": 40,
-                "end_line": 42,
-                "kind": "broken",
-            },
         ),
         referenced_names=("run",),
         referenced_qualnames=("pkg.mod:run",),
@@ -1884,6 +1859,33 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
     assert len(dead_candidates) == 1
     assert referenced_names == frozenset()
     assert referenced_qualnames == frozenset()
+
+    # One unreadable row refuses the whole entry, naming its family; the sound
+    # rows beside it are not served without it (ruling 2026-10-13).
+    module_dependent = entry.module_dependent
+    with_broken_metric = replace(
+        entry,
+        module_dependent=replace(
+            module_dependent, class_metrics=(sound_metric, broken_metric)
+        ),
+    )
+    with_broken_candidate = replace(
+        entry,
+        module_dependent=replace(
+            module_dependent,
+            dead_candidates=(*module_dependent.dead_candidates, broken_candidate),
+        ),
+    )
+    with pytest.raises(CachedRowRefused) as metric_refusal:
+        _load_cached_metrics_extended(with_broken_metric, filepath="tests/test_mod.py")
+    with pytest.raises(CachedRowRefused) as candidate_refusal:
+        _load_cached_metrics_extended(
+            with_broken_candidate, filepath="tests/test_mod.py"
+        )
+    assert (metric_refusal.value.family, candidate_refusal.value.family) == (
+        "class_metrics",
+        "dead_candidates",
+    )
 
 
 def test_metric_gate_reasons_collects_all_enabled_reasons() -> None:

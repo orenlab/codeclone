@@ -78,6 +78,7 @@ from codeclone.observations.projection import build_observation_bundle
 from codeclone.paths.module_identity.inventory import build_module_registry
 from tests._pipeline_fixtures import analysis_boot, discover_and_process
 from tests._tmp_tree import write_files
+from tests.test_cache_rehydration_refusal import corrupt_cached_dependent_lane
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
@@ -344,6 +345,7 @@ def test_cache_content_identity_stage_is_wrapped_once_and_passive(
         "cache_profile_miss": 1,
         "cache_lane_dependent_api_surface_witness_mismatch": 0,
         "cache_lane_dependent_content_miss": 0,
+        "cache_lane_dependent_malformed_payload": 0,
         "cache_lane_dependent_profile_mismatch": 0,
         "cache_lane_neutral_binding_context_mismatch": 0,
         "cache_lane_neutral_clone_channels_mismatch": 0,
@@ -385,6 +387,7 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
         "cache_profile_miss": 0,
         "cache_lane_dependent_api_surface_witness_mismatch": 0,
         "cache_lane_dependent_content_miss": 0,
+        "cache_lane_dependent_malformed_payload": 0,
         "cache_lane_dependent_profile_mismatch": 0,
         "cache_lane_neutral_binding_context_mismatch": 0,
         "cache_lane_neutral_clone_channels_mismatch": 0,
@@ -410,6 +413,7 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
         "cache_profile_miss": 2,
         "cache_lane_dependent_api_surface_witness_mismatch": 0,
         "cache_lane_dependent_content_miss": 0,
+        "cache_lane_dependent_malformed_payload": 0,
         "cache_lane_neutral_binding_context_mismatch": 0,
         "cache_lane_neutral_clone_channels_mismatch": 0,
         "cache_lane_neutral_content_miss": 0,
@@ -1513,6 +1517,24 @@ def test_every_declared_reuse_reason_counter_has_an_input_that_raises_it(
         "cache_reuse_structural_findings_absent",
     )
 
+    # Both lanes accept a row rehydration cannot rebuild: a candidate kind the
+    # wire carries as a plain string and only rehydration narrows, corrupted
+    # on disk with its length kept so the store's own checks still pass it.
+    malformed = _seed("malformed")
+    _record(
+        _warm_counters(
+            malformed,
+            monkeypatch,
+            warm_boot=_reason_boot(malformed, report_output=False),
+            mutate=lambda: corrupt_cached_dependent_lane(
+                malformed / "cache.json",
+                b'"example",1,2,"function"',
+                wire_path="module.py",
+            ),
+        ),
+        "cache_lane_dependent_malformed_payload",
+    )
+
     declared = set(core_discovery._REUSE_REASON_COUNTER_KEYS)
     assert declared, "no reuse reason counter was declared, so nothing was compared"
     # binding_context_mismatch is reached by the decision, not by a layout:
@@ -1627,15 +1649,18 @@ def test_cache_reuse_reason_counters_are_the_decisions_own_vocabulary() -> None:
 
     lane_reasons = set(get_args(CacheLaneReuseReason))
     assert lane_reasons, "the lane reason vocabulary is empty, so nothing was compared"
-    # malformed_payload is declared by the alias and constructed by no producer
-    # in this build (measured 2026-09-02: zero construction sites); a counter
-    # for it could never leave zero, which is the theatre this file rejects
-    # elsewhere. It is instrumented when something can decide it.
-    decidable = lane_reasons - {"malformed_payload"}
+    # malformed_payload had no producer until 2026-10-13; it is now decided by
+    # the dependent lane alone, when rehydration cannot rebuild a row both
+    # lanes accepted -- so every reason is decidable and none is exempt.
+    decidable = lane_reasons
 
     assert (
         set(core_discovery._NEUTRAL_LANE_REASON_COUNTERS)
-        | {"api_surface_witness_mismatch", "dependent_profile_mismatch"}
+        | {
+            "api_surface_witness_mismatch",
+            "dependent_profile_mismatch",
+            "malformed_payload",
+        }
         == decidable
     )
     assert set(core_discovery._DEPENDENT_LANE_REASON_COUNTERS) <= decidable

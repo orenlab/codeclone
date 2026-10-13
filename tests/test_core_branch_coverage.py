@@ -329,14 +329,17 @@ def test_content_snapshot_binary_lookup_and_external_path(tmp_path: Path) -> Non
     )
 
 
-def test_cached_relationship_decoders_ignore_non_records() -> None:
+def test_cached_relationship_decoders_refuse_non_records() -> None:
+    """A facts row this reader cannot rebuild refuses the entry; never dropped."""
+
+    from codeclone.core.discovery_cache import CachedRowRefused
+
     assert core_discovery._decode_cached_relationship_record({}) is None
-    assert (
+    with pytest.raises(CachedRowRefused) as refused:
         core_discovery._decode_cached_function_relationship_facts(
             [{"source_qualname": 1, "relationships": []}]
         )
-        == []
-    )
+    assert refused.value.family == "function_relationship_facts"
 
 
 def test_cache_decode_structural_invalid_rows() -> None:
@@ -1726,50 +1729,56 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
     cli.print_banner(root=None)
 
 
-def test_load_cached_metrics_extended_skips_unparseable_rows() -> None:
+@pytest.mark.parametrize(
+    ("family", "unparseable"),
+    [
+        ("module_deps", {"module_deps": [{}]}),
+        ("runtime_reachability", {"runtime_reachability": [{"target_kind": "x"}]}),
+        (
+            "api_surface",
+            {
+                "api_surface": {
+                    "module": "pkg.mod",
+                    "filepath": "pkg/mod.py",
+                    "all_declared": "not-a-list",
+                    "symbols": [],
+                }
+            },
+        ),
+    ],
+)
+def test_load_cached_metrics_extended_refuses_unparseable_rows(
+    family: str, unparseable: dict[str, object]
+) -> None:
     import codeclone.core.discovery_cache as dc
     from codeclone.models import CacheEntryV3
 
-    dependent = SimpleNamespace(
-        class_metrics=[],
-        module_deps=[{}],
-        dead_candidates=[],
-        referenced_names=["ref"],
-        referenced_qualnames=["pkg.mod:ref"],
-        security_surfaces=[],
-        runtime_reachability=[{"target_kind": "not-a-kind"}],
-        typing_coverage=None,
-        docstring_coverage=None,
-        api_surface={
-            "module": "pkg.mod",
-            "filepath": "pkg/mod.py",
-            "all_declared": "not-a-list",
-            "symbols": [],
-        },
-        structural_findings=None,
+    sound: dict[str, object] = {
+        "class_metrics": [],
+        "module_deps": [],
+        "dead_candidates": [],
+        "referenced_names": ["ref"],
+        "referenced_qualnames": ["pkg.mod:ref"],
+        "security_surfaces": [],
+        "runtime_reachability": [],
+        "typing_coverage": None,
+        "docstring_coverage": None,
+        "api_surface": None,
+        "structural_findings": None,
+    }
+    sound_entry = SimpleNamespace(module_dependent=SimpleNamespace(**sound))
+    entry = SimpleNamespace(module_dependent=SimpleNamespace(**sound | unparseable))
+
+    # Positive control: the same row without the unparseable family is served.
+    _, _, _, referenced_names, *_ = dc.load_cached_metrics_extended(
+        cast(CacheEntryV3, sound_entry), filepath="pkg/mod.py"
     )
-    entry = SimpleNamespace(module_dependent=dependent)
-    (
-        class_metrics,
-        module_deps,
-        dead_candidates,
-        referenced_names,
-        _referenced_qualnames,
-        _typing_cov,
-        _doc_cov,
-        api_surface,
-        reachability,
-        security,
-    ) = dc.load_cached_metrics_extended(
-        cast(CacheEntryV3, entry), filepath="pkg/mod.py"
-    )
-    assert class_metrics == ()
-    assert module_deps == ()
-    assert dead_candidates == ()
     assert referenced_names == frozenset({"ref"})
-    assert api_surface is None
-    assert reachability == ()
-    assert security == ()
+    with pytest.raises(dc.CachedRowRefused) as refused:
+        dc.load_cached_metrics_extended(
+            cast(CacheEntryV3, entry), filepath="pkg/mod.py"
+        )
+    assert refused.value.family == family
 
 
 def test_usable_cached_source_stats_requires_present_sections() -> None:
