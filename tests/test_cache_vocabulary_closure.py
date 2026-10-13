@@ -352,3 +352,19 @@ def test_only_text_narrows_and_the_member_itself_comes_back() -> None:
     assert type(narrowed) is str
     assert narrow_to_vocabulary(_EqualToEverything(), vocabulary) is None
     assert narrow_to_vocabulary("gamma", vocabulary) is None
+
+
+@pytest.mark.parametrize(
+    "spelling", ["Pydantic", "PYDANTIC", " pydantic", "pydantic ", "pydantic\n"]
+)
+def test_only_the_exact_spelling_of_a_member_narrows(spelling: str) -> None:
+    """A member's case and edges are part of the value; nothing is normalised.
+
+    The wire stores the member exactly as the producer spelled it, so a
+    reader that folded case or trimmed whitespace would admit a row no
+    producer wrote and serve it as a fact.
+    """
+
+    frameworks = get_args(models.RuntimeReachabilityFramework)
+    assert narrow_to_vocabulary("pydantic", frameworks) == "pydantic"
+    assert narrow_to_vocabulary(spelling, frameworks) is None

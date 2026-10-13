@@ -139,15 +139,20 @@ def _security_surfaces(payload: CacheDependentPayload) -> CacheDependentPayload:
     )
 
 
-def _runtime_reachability(payload: CacheDependentPayload) -> CacheDependentPayload:
-    row = _first(payload.runtime_reachability) | {"framework": "quantum"}
-    return replace(
-        payload,
-        runtime_reachability=(
-            *payload.runtime_reachability,
-            cast(RuntimeReachabilityFactDict, row),
-        ),
-    )
+def _reachability_framework(framework: str) -> Tamper:
+    """A copy of the module's reachability row, spelling ``framework``."""
+
+    def _tamper(payload: CacheDependentPayload) -> CacheDependentPayload:
+        row = _first(payload.runtime_reachability) | {"framework": framework}
+        return replace(
+            payload,
+            runtime_reachability=(
+                *payload.runtime_reachability,
+                cast(RuntimeReachabilityFactDict, row),
+            ),
+        )
+
+    return _tamper
 
 
 def _nested_kind(payload: CacheDependentPayload) -> CacheDependentPayload:
@@ -172,20 +177,25 @@ def _nested_reason(payload: CacheDependentPayload) -> CacheDependentPayload:
     )
 
 
-def _relationship_record(payload: CacheDependentPayload) -> CacheDependentPayload:
-    facts = _first(payload.function_relationship_facts)
-    records = facts["relationships"]
-    assert isinstance(records, list) and records
-    first_record = records[0]
-    assert isinstance(first_record, dict)
-    facts["relationships"] = [*records, first_record | {"relation_kind": "teleport"}]
-    return replace(
-        payload,
-        function_relationship_facts=(
-            cast(FunctionRelationshipFactsDict, facts),
-            *payload.function_relationship_facts[1:],
-        ),
-    )
+def _relationship_record(**changes: object) -> Tamper:
+    """A copy of the first relationship record, changed, filed beside it."""
+
+    def _tamper(payload: CacheDependentPayload) -> CacheDependentPayload:
+        facts = _first(payload.function_relationship_facts)
+        records = facts["relationships"]
+        assert isinstance(records, list) and records
+        first_record = records[0]
+        assert isinstance(first_record, dict)
+        facts["relationships"] = [*records, first_record | changes]
+        return replace(
+            payload,
+            function_relationship_facts=(
+                cast(FunctionRelationshipFactsDict, facts),
+                *payload.function_relationship_facts[1:],
+            ),
+        )
+
+    return _tamper
 
 
 def _typing_coverage(payload: CacheDependentPayload) -> CacheDependentPayload:
@@ -228,10 +238,19 @@ _TAMPERS: dict[str, Tamper] = {
     "dead_candidates.live_root_reason": _dead_candidate_reason,
     "dead_candidates.escape_witness": _dead_candidate_witness,
     "security_surfaces": _security_surfaces,
-    "runtime_reachability": _runtime_reachability,
+    "runtime_reachability": _reachability_framework("quantum"),
+    # A member's spelling, not a member: the case and the edges are the value.
+    "runtime_reachability.case": _reachability_framework("Pydantic"),
+    "runtime_reachability.padded": _reachability_framework("pydantic "),
     "nested_definitions.kind": _nested_kind,
     "nested_definitions.live_root_reason": _nested_reason,
-    "function_relationship_facts": _relationship_record,
+    "function_relationship_facts": _relationship_record(relation_kind="teleport"),
+    # A sound record filed under another function: the container's
+    # ``source_qualname`` is the owner, and a record that names a different one
+    # was written by a writer this reader does not understand.
+    "function_relationship_facts.foreign_source": _relationship_record(
+        source_qualname="pkg.mod:BytesAsText.bytes_schema"
+    ),
     "typing_coverage": _typing_coverage,
     "docstring_coverage": _docstring_coverage,
     "api_surface": _api_surface,
@@ -388,6 +407,33 @@ def test_an_untampered_warm_entry_is_served_whole(
     assert counters.get(_REFUSED, 0) == 0
     assert any(
         fact.framework == "pydantic" for fact in discovery.cached_runtime_reachability
+    )
+
+
+def test_a_relationship_record_under_its_own_function_is_served(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Positive control for the foreign-owner case: same edit, same owner.
+
+    The record copied beside the first one keeps its function's
+    ``source_qualname``, so it is a sound row and the file comes off the
+    cache; only the owner differs in the refused case, so the owner is why.
+    """
+
+    root, cache_path, _cold_discovery, _cold_processing = _cold(tmp_path)
+    warm = _warm(root, cache_path, _relationship_record())
+    discovery, counters = _discover(monkeypatch, root, warm)
+
+    assert discovery.files_to_process == ()
+    assert counters.get(_REFUSED, 0) == 0
+    owners = {
+        facts.source_qualname for facts in discovery.cached_function_relationship_facts
+    }
+    assert owners, "the fixture module wrote no relationship facts"
+    assert all(
+        record.source_qualname == facts.source_qualname
+        for facts in discovery.cached_function_relationship_facts
+        for record in facts.relationships
     )
 
 
