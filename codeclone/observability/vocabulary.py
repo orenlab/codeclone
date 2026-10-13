@@ -305,6 +305,7 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "cache_lane_dependent_api_surface_witness_mismatch",
         "cache_lane_dependent_content_miss",
         "cache_lane_dependent_hit",
+        "cache_lane_dependent_malformed_payload",
         "cache_lane_dependent_miss",
         "cache_lane_dependent_profile_mismatch",
         "cache_lane_neutral_binding_context_mismatch",

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Final, Literal, TypeGuard, cast
+from typing import Final, Literal, TypeGuard, cast, get_args
 
 from ..models import (
     LIVE_ROOT_REASONS,
@@ -35,6 +35,7 @@ from ..models import (
     FunctionRelationshipFactsDict,
     GitBlobIdentity,
     GitObjectFormat,
+    ImportSyntaxKind,
     LivenessVocabularyError,
     ModuleApiSurfaceDict,
     ModuleDepDict,
@@ -42,6 +43,7 @@ from ..models import (
     ModuleTypingCoverageDict,
     NearMissElement,
     NestedDefinitionDict,
+    NestedDefinitionKind,
     PublicSymbolDict,
     RelationshipRecordDict,
     RuntimeReachabilityFactDict,
@@ -57,6 +59,7 @@ from ..models import (
     UnreachableStatementItem,
     validate_escape_witness,
 )
+from ..utils.closed_vocabulary import narrow_to_vocabulary
 from ._wire_helpers import (
     _decode_optional_wire_coupled_classes,
     _decode_optional_wire_items,
@@ -106,88 +109,54 @@ from .integrity import (
     as_str_or_none as _as_str,
 )
 
+#: Every closed vocabulary this decoder narrows, each taken from the alias
+#: that declares it; no narrower below spells a member. Held to that by
+#: ``tests/test_cache_vocabulary_closure.py``.
+_EVENT_KINDS: Final[tuple[EventKind, ...]] = get_args(EventKind)
+_DEPENDENCY_RESOLUTIONS: Final[tuple[DependencyResolution, ...]] = get_args(
+    DependencyResolution
+)
+_DEPENDENCY_MECHANISMS: Final[tuple[DependencyMechanism, ...]] = get_args(
+    DependencyMechanism
+)
+_DEPENDENCY_BINDINGS: Final[tuple[DependencyBinding, ...]] = get_args(DependencyBinding)
+_IMPORT_SYNTAX_KINDS: Final[tuple[ImportSyntaxKind, ...]] = get_args(ImportSyntaxKind)
+_FACT_REF_KINDS: Final[tuple[FactRefKind, ...]] = get_args(FactRefKind)
+_EVENT_RESOLUTIONS: Final[tuple[SemanticEventResolution, ...]] = get_args(
+    SemanticEventResolution
+)
+_UNREACHABLE_REASONS: Final[tuple[UnreachableReason, ...]] = get_args(UnreachableReason)
+_NESTED_DEFINITION_KINDS: Final[tuple[NestedDefinitionKind, ...]] = get_args(
+    NestedDefinitionKind
+)
+
 
 def _event_kind(value: object) -> EventKind | None:
-    match value:
-        case "artifact_write":
-            return "artifact_write"
-        case "assign":
-            return "assign"
-        case "compatibility_check":
-            return "compatibility_check"
-        case "compute_digest":
-            return "compute_digest"
-        case "construct":
-            return "construct"
-        case "field_write":
-            return "field_write"
-        case "publish_event":
-            return "publish_event"
-        case "resolve_identity":
-            return "resolve_identity"
-        case "return_value":
-            return "return_value"
-        case "serialize_field":
-            return "serialize_field"
-        case "security_observation":
-            return "security_observation"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _EVENT_KINDS)
 
 
 def _is_dependency_resolution(value: object) -> TypeGuard[DependencyResolution]:
-    return isinstance(value, str) and value in {
-        "analyzed",
-        "known_internal_not_analyzed",
-        "external",
-        "unresolved_relative",
-        "unresolved_dynamic",
-        "ambiguous",
-    }
+    return narrow_to_vocabulary(value, _DEPENDENCY_RESOLUTIONS) is not None
 
 
 def _is_dependency_mechanism(value: object) -> TypeGuard[DependencyMechanism]:
-    return isinstance(value, str) and value in {"static", "dynamic"}
+    return narrow_to_vocabulary(value, _DEPENDENCY_MECHANISMS) is not None
 
 
 def _is_dependency_binding(value: object) -> TypeGuard[DependencyBinding]:
-    return isinstance(value, str) and value in {
-        "import_time",
-        "deferred_function",
-        "deferred_getattr",
-        "type_checking",
-        "lazy_syntax",
-    }
+    return narrow_to_vocabulary(value, _DEPENDENCY_BINDINGS) is not None
 
 
-def _is_module_dep_import_type(
-    value: object,
-) -> TypeGuard[Literal["import", "from_import"]]:
-    return isinstance(value, str) and value in {"import", "from_import"}
+def _is_module_dep_import_type(value: object) -> TypeGuard[ImportSyntaxKind]:
+    return narrow_to_vocabulary(value, _IMPORT_SYNTAX_KINDS) is not None
 
 
 def _fact_ref_kind(value: object) -> FactRefKind | None:
-    match value:
-        case "param":
-            return "param"
-        case "event":
-            return "event"
-        case "const":
-            return "const"
-        case "unresolved":
-            return "unresolved"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _FACT_REF_KINDS)
 
 
 def _event_resolution(value: object) -> SemanticEventResolution | None:
-    match value:
-        case "resolved":
-            return "resolved"
-        case "unavailable":
-            return "unavailable"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _EVENT_RESOLUTIONS)
 
 
 def _decode_fact_ref(
@@ -661,28 +630,21 @@ def _decode_wire_file_entry(
     declared_exports = _decode_optional_wire_names(obj=dependent_obj, key="dx")
     if declared_exports is None:
         return None
-    typing_coverage = _decode_optional_wire_typing_coverage(
-        obj=dependent_obj, filepath=filepath
-    )
-    docstring_coverage = _decode_optional_wire_docstring_coverage(
-        obj=dependent_obj,
+    sections = _decode_wire_dependent_sections(
+        dependent_obj=dependent_obj,
         filepath=filepath,
+        analysed_filepath=analysed_filepath,
     )
-    api_surface = _decode_optional_wire_api_surface(
-        obj=dependent_obj, filepath=filepath
-    )
-    runtime_reachability = _decode_optional_wire_runtime_reachability(
-        obj=dependent_obj,
-        filepath=filepath,
-    )
-    security_surfaces = _decode_optional_wire_security_surfaces(
-        obj=dependent_obj,
-        filepath=analysed_filepath,
-    )
-    function_relationship_facts = _decode_optional_wire_function_relationship_facts(
-        obj=dependent_obj,
-        filepath=filepath,
-    )
+    if sections is None:
+        return None
+    (
+        typing_coverage,
+        docstring_coverage,
+        api_surface,
+        runtime_reachability,
+        security_surfaces,
+        function_relationship_facts,
+    ) = sections
     # Liveness policy v5 nested population. Absent is the legal "no definition
     # under a function scope"; a malformed row rejects the entry like ``dc``.
     nested_definitions = _decode_optional_wire_items_for_filepath(
@@ -696,12 +658,6 @@ def _decode_wire_file_entry(
     if not _apply_wire_class_metrics_sidecars(
         obj=dependent_obj,
         class_metrics=class_metrics,
-    ):
-        return None
-    if (
-        runtime_reachability is None
-        or security_surfaces is None
-        or function_relationship_facts is None
     ):
         return None
 
@@ -753,6 +709,80 @@ def _decode_wire_file_entry(
             materialized_api_surface=materialized_api_surface,
             nested_definitions=tuple(nested_definitions),
         ),
+    )
+
+
+_DependentSections = tuple[
+    ModuleTypingCoverageDict | None,
+    ModuleDocstringCoverageDict | None,
+    ModuleApiSurfaceDict | None,
+    list[RuntimeReachabilityFactDict],
+    list[SecuritySurfaceDict],
+    list[FunctionRelationshipFactsDict],
+]
+
+
+def _decode_wire_dependent_sections(
+    *,
+    dependent_obj: dict[str, object],
+    filepath: str,
+    analysed_filepath: str,
+) -> _DependentSections | None:
+    """The per-module sections of a dependent lane, or ``None`` to refuse it.
+
+    ``tc``, ``dg`` and ``as`` are single optional rows, and their decoders
+    answer ``None`` both for a row that is absent and for one they could not
+    read. Only the first is a fact -- "this run did not collect it" -- so a
+    present row that decodes to nothing refuses the entry, exactly like a
+    malformed row of any list section beside it. Read as absent, it served a
+    module with coverage as a module with none.
+    """
+
+    typing_coverage = _decode_optional_wire_typing_coverage(
+        obj=dependent_obj, filepath=filepath
+    )
+    docstring_coverage = _decode_optional_wire_docstring_coverage(
+        obj=dependent_obj,
+        filepath=filepath,
+    )
+    api_surface = _decode_optional_wire_api_surface(
+        obj=dependent_obj, filepath=filepath
+    )
+    runtime_reachability = _decode_optional_wire_runtime_reachability(
+        obj=dependent_obj,
+        filepath=filepath,
+    )
+    security_surfaces = _decode_optional_wire_security_surfaces(
+        obj=dependent_obj,
+        filepath=analysed_filepath,
+    )
+    function_relationship_facts = _decode_optional_wire_function_relationship_facts(
+        obj=dependent_obj,
+        filepath=filepath,
+    )
+    optional_rows = (
+        ("tc", typing_coverage),
+        ("dg", docstring_coverage),
+        ("as", api_surface),
+    )
+    if any(
+        dependent_obj.get(key) is not None and decoded is None
+        for key, decoded in optional_rows
+    ):
+        return None
+    if (
+        runtime_reachability is None
+        or security_surfaces is None
+        or function_relationship_facts is None
+    ):
+        return None
+    return (
+        typing_coverage,
+        docstring_coverage,
+        api_surface,
+        runtime_reachability,
+        security_surfaces,
+        function_relationship_facts,
     )
 
 
@@ -842,15 +872,7 @@ def _assign_unreachable_statements(unit: UnitDict, facts: tuple[object, ...]) ->
 def _as_unreachable_reason(value: object) -> UnreachableReason | None:
     """Narrow a wire value to a policy clause, closed-list."""
 
-    match value:
-        case "after_terminator":
-            return "after_terminator"
-        case "literal_condition":
-            return "literal_condition"
-        case "unreachable_block":
-            return "unreachable_block"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _UNREACHABLE_REASONS)
 
 
 def _build_unreachable_statement_item(
@@ -887,9 +909,8 @@ def _decode_wire_unit_unreachable_row(
 
 
 #: The closed materialization-witness vocabulary (CACHE_VERSION 3.8).
-_CLONE_CHANNELS: Final[tuple[CloneArtifactChannel, ...]] = (
-    "near_miss",
-    "renamed_structure",
+_CLONE_CHANNELS: Final[tuple[CloneArtifactChannel, ...]] = get_args(
+    CloneArtifactChannel
 )
 
 #: Which witness channels claim each artifact payload key — the measured
@@ -1891,7 +1912,7 @@ def _decode_wire_nested_definition(
     qualname, local_name, kind, lexical_parent, lexical_path, reason, witness = (
         str_fields
     )
-    if kind not in {"function", "class", "method"}:
+    if narrow_to_vocabulary(kind, _NESTED_DEFINITION_KINDS) is None:
         return None
     if reason not in _DECODABLE_LIVE_ROOT_REASONS:
         return None

@@ -27,6 +27,12 @@ from ..models import (
     SecuritySurfaceDict,
     SourceStatsDict,
 )
+from ._wire_decode import (
+    _is_dependency_binding,
+    _is_dependency_mechanism,
+    _is_dependency_resolution,
+    _is_module_dep_import_type,
+)
 from .entries import (
     BlockDict,
     SegmentDict,
@@ -34,6 +40,7 @@ from .entries import (
     _as_relationship_kind,
     _as_relationship_origin_lane,
     _as_relationship_resolution_status,
+    _as_risk_literal,
 )
 
 
@@ -90,8 +97,7 @@ def _is_unit_dict(value: object) -> TypeGuard[UnitDict]:
         isinstance(cyclomatic_complexity, int)
         and isinstance(cfg_cyclomatic_complexity, int)
         and isinstance(nesting_depth, int)
-        and isinstance(risk, str)
-        and risk in {"low", "medium", "high"}
+        and _as_risk_literal(risk) is not None
         and isinstance(raw_hash, str)
         and isinstance(value.get("entry_guard_count", 0), int)
         and isinstance(value.get("entry_guard_terminal_profile", "none"), str)
@@ -224,7 +230,7 @@ def _is_module_dep_dict(value: object) -> TypeGuard[ModuleDepDict]:
         int_keys=("line",),
     ):
         return False
-    if value.get("import_type") not in {"import", "from_import"}:
+    if not _is_module_dep_import_type(value.get("import_type")):
         return False
     detail_keys = {
         "resolution",
@@ -241,13 +247,9 @@ def _is_module_dep_dict(value: object) -> TypeGuard[ModuleDepDict]:
     if binding_pair_present:
         if ("binding" not in value) or ("is_lazy" not in value):
             return False
-        if value.get("binding") not in {
-            "import_time",
-            "deferred_function",
-            "deferred_getattr",
-            "type_checking",
-            "lazy_syntax",
-        } or not isinstance(value.get("is_lazy"), bool):
+        if not _is_dependency_binding(value.get("binding")) or not isinstance(
+            value.get("is_lazy"), bool
+        ):
             return False
     present_detail_keys = detail_keys.intersection(value)
     if not present_detail_keys:
@@ -259,16 +261,8 @@ def _is_module_dep_dict(value: object) -> TypeGuard[ModuleDepDict]:
     level = value.get("level")
     requested_module = value.get("requested_module")
     return (
-        resolution
-        in {
-            "analyzed",
-            "known_internal_not_analyzed",
-            "external",
-            "unresolved_relative",
-            "unresolved_dynamic",
-            "ambiguous",
-        }
-        and value.get("mechanism") in {"static", "dynamic"}
+        _is_dependency_resolution(resolution)
+        and _is_dependency_mechanism(value.get("mechanism"))
         and isinstance(inventory_expansion, bool)
         and isinstance(level, int)
         and not isinstance(level, bool)

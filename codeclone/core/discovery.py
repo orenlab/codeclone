@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Final
 
@@ -22,6 +23,8 @@ from ..cache.store import Cache, file_stat_signature
 from ..models import (
     CacheEntryV3,
     CacheLaneReuseReason,
+    CacheLaneVerdict,
+    CacheReuseDecision,
     ClassMetrics,
     ContentIdentityVerdict,
     DeadCandidate,
@@ -31,6 +34,7 @@ from ..models import (
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
+    ModuleRegistryHandle,
     ModuleTypingCoverage,
     NestedDefinition,
     RehydratedCacheNeutral,
@@ -59,7 +63,11 @@ from ._types import (
     _unit_to_group_item,
     structural_findings_required,
 )
-from .discovery_cache import CachedSourceStatsRefusal
+from .discovery_cache import (
+    CachedMetrics,
+    CachedRowRefused,
+    CachedSourceStatsRefusal,
+)
 from .discovery_cache import (
     cached_source_stats_refusal as _cached_source_stats_refusal,
 )
@@ -99,6 +107,7 @@ _DEPENDENT_LANE_REASON_COUNTERS: Final[Mapping[CacheLaneReuseReason, str]] = {
     "content_miss": "cache_lane_dependent_content_miss",
     "dependent_profile_mismatch": "cache_lane_dependent_profile_mismatch",
     "hit": "cache_lane_dependent_hit",
+    "malformed_payload": "cache_lane_dependent_malformed_payload",
 }
 
 # The refusal that happens AFTER both lanes agree. This is the one that
@@ -143,30 +152,103 @@ def _decode_cached_relationship_record(value: object) -> RelationshipRecord | No
 def _decode_cached_function_relationship_facts(
     rows: Sequence[Mapping[str, object]],
 ) -> list[FunctionRelationshipFacts]:
-    """Reconstruct typed relationship facts from a trusted cache entry.
+    """Reconstruct typed relationship facts from a cached entry, or refuse it.
 
     Kept local to discovery (not in the shared cached-metrics decoder) so the
-    canonical ``load_cached_metrics_extended`` path stays byte-identical. The
-    cache is already integrity-validated on store, so this is a lean rehydration.
+    canonical ``load_cached_metrics_extended`` path stays byte-identical. A
+    record this reader cannot rebuild -- or one filed under another function
+    -- used to be dropped while its facts container was kept; it now refuses
+    the row like every other rehydrated family (``CachedRowRefused``).
     """
-    facts: list[FunctionRelationshipFacts] = []
-    for row in rows:
-        relationships = row.get("relationships")
-        source_qualname = row.get("source_qualname")
-        if not isinstance(relationships, list) or not isinstance(source_qualname, str):
-            continue
-        records = tuple(
-            record
-            for raw_record in relationships
-            if (record := _decode_cached_relationship_record(raw_record)) is not None
-            and record.source_qualname == source_qualname
+    return [_decode_cached_relationship_facts_row(row) for row in rows]
+
+
+def _decode_cached_relationship_facts_row(
+    row: Mapping[str, object],
+) -> FunctionRelationshipFacts:
+    relationships = row.get("relationships")
+    source_qualname = row.get("source_qualname")
+    if not isinstance(relationships, list) or not isinstance(source_qualname, str):
+        raise CachedRowRefused("function_relationship_facts")
+    records: list[RelationshipRecord] = []
+    for raw_record in relationships:
+        record = _decode_cached_relationship_record(raw_record)
+        if record is None or record.source_qualname != source_qualname:
+            raise CachedRowRefused("function_relationship_facts")
+        records.append(record)
+    return FunctionRelationshipFacts(
+        source_qualname=source_qualname, relationships=tuple(records)
+    )
+
+
+#: Every dependent-lane fact of one cached row, rebuilt whole: its metrics,
+#: relationship facts, declared exports and nested population.
+_CachedDependentFacts = tuple[
+    CachedMetrics,
+    tuple[FunctionRelationshipFacts, ...],
+    frozenset[str],
+    tuple[NestedDefinition, ...],
+]
+
+
+#: The verdict a row both lanes accepted gets when this reader cannot rebuild
+#: it. Counted by the dependent family like every other lane reason, so a run
+#: that re-walked a file for it says so instead of looking like a cold file.
+_MALFORMED_DEPENDENT_LANE: Final = CacheLaneVerdict(
+    hit=False, reason="malformed_payload"
+)
+
+
+def _rehydrate_dependent_facts(
+    entry: CacheEntryV3,
+    *,
+    filepath: str,
+    module_registry: ModuleRegistryHandle,
+) -> _CachedDependentFacts | None:
+    try:
+        return (
+            load_cached_metrics_extended(
+                entry, filepath=filepath, module_registry=module_registry
+            ),
+            tuple(
+                _decode_cached_function_relationship_facts(
+                    entry.module_dependent.function_relationship_facts
+                )
+            ),
+            _load_cached_declared_exports(entry),
+            _load_cached_nested_definitions(entry),
         )
-        facts.append(
-            FunctionRelationshipFacts(
-                source_qualname=source_qualname, relationships=records
-            )
-        )
-    return facts
+    except CachedRowRefused:
+        return None
+
+
+def _judge_cached_row(
+    decision: CacheReuseDecision,
+    entry: CacheEntryV3,
+    *,
+    filepath: str,
+    module_registry: ModuleRegistryHandle,
+    metrics_consumed: bool,
+) -> tuple[CacheReuseDecision, _CachedDependentFacts | None]:
+    """The lane verdict this run can stand behind, and the facts it may serve.
+
+    Both lanes can accept a row this reader still cannot rebuild -- a variant
+    its vocabulary does not hold, a row a different writer shaped -- and
+    serving it anyway published a run without the fact (measured 2026-10-13).
+    Such a row is a ``malformed_payload`` refusal of the dependent lane: the
+    file is walked again with its neutral facts reused, exactly as for any
+    other dependent miss. Facts are rebuilt only when this run consumes them;
+    a metrics-skipping run reads none, so it has nothing to refuse.
+    """
+
+    if not (metrics_consumed and decision.neutral.hit and decision.dependent.hit):
+        return decision, None
+    facts = _rehydrate_dependent_facts(
+        entry, filepath=filepath, module_registry=module_registry
+    )
+    if facts is None:
+        return replace(decision, dependent=_MALFORMED_DEPENDENT_LANE), None
+    return decision, facts
 
 
 DiscoveryBuffers = tuple[
@@ -385,11 +467,17 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                 untracked_fallbacks += untracked_fallback
                 digest_verify_cost_us += verdict.digest_verify_cost_us
                 stat_fast_rejects += int(verdict.stat_fast_reject)
-                decision = cache.reuse_decision(
-                    content=verdict,
-                    entry=cached,
-                    runtime_path=filepath,
-                    required_clone_channels=required_clone_channels,
+                decision, dependent_facts = _judge_cached_row(
+                    cache.reuse_decision(
+                        content=verdict,
+                        entry=cached,
+                        runtime_path=filepath,
+                        required_clone_channels=required_clone_channels,
+                    ),
+                    cached,
+                    filepath=filepath,
+                    module_registry=module_registry,
+                    metrics_consumed=not boot.args.skip_metrics,
                 )
                 neutral_hits += int(decision.neutral.hit)
                 dependent_misses += int(not decision.dependent.hit)
@@ -480,16 +568,18 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     # authority tier and a call graph beside a population
                     # that says the metrics were disabled, under a store run
                     # id the same run on a cold cache never gets.
-                    if not boot.args.skip_metrics:
+                    if dependent_facts is not None:
+                        (
+                            cached_metrics,
+                            relationship_facts,
+                            declared_exports,
+                            nested_definitions,
+                        ) = dependent_facts
                         cached_semantic_events.extend(neutral.semantic_facts.events)
                         cached_function_contract_summaries.extend(
                             neutral.semantic_facts.function_contract_summaries
                         )
-                        cached_relationship_facts.extend(
-                            _decode_cached_function_relationship_facts(
-                                cached.module_dependent.function_relationship_facts
-                            )
-                        )
+                        cached_relationship_facts.extend(relationship_facts)
                         (
                             class_metrics,
                             module_deps,
@@ -501,22 +591,14 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                             api_surface,
                             runtime_reachability,
                             security_surfaces,
-                        ) = load_cached_metrics_extended(
-                            cached,
-                            filepath=filepath,
-                            module_registry=module_registry,
-                        )
+                        ) = cached_metrics
                         cached_class_metrics.extend(class_metrics)
                         cached_module_deps.extend(module_deps)
                         cached_dead_candidates.extend(dead_candidates)
                         cached_referenced_names.update(referenced_names)
                         cached_referenced_qualnames.update(referenced_qualnames)
-                        cached_declared_exports.update(
-                            _load_cached_declared_exports(cached)
-                        )
-                        cached_nested_definitions.extend(
-                            _load_cached_nested_definitions(cached)
-                        )
+                        cached_declared_exports.update(declared_exports)
+                        cached_nested_definitions.extend(nested_definitions)
                         if typing_coverage is not None:
                             cached_typing_modules.append(typing_coverage)
                         if docstring_coverage is not None:

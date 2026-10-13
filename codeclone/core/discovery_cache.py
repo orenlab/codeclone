@@ -6,12 +6,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Literal
+from collections.abc import Callable, Iterable, Mapping
+from typing import Final, Literal, TypeVar, get_args
 
+from ..metrics._risk import RiskLevel
 from ..models import (
     LIVE_ROOT_REASONS,
+    ApiParameterKind,
     ApiParamSpec,
+    ApiSymbolKind,
+    ApiVisibility,
     CacheEntryV3,
     ClassMetrics,
     ClassMetricsDict,
@@ -47,116 +51,189 @@ from ..models import (
     StructuralFindingOccurrence,
 )
 from ..paths import is_test_filepath
+from ..utils.closed_vocabulary import narrow_to_vocabulary
 from ..utils.coerce import as_mapping
 from ._types import _as_sorted_str_tuple
 
-_ApiParamKind = Literal["pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"]
-_PublicSymbolKind = Literal["function", "class", "method", "constant"]
-_ExportedViaKind = Literal["all", "name"]
-_RiskLevel = Literal["low", "medium", "high"]
+_RowT = TypeVar("_RowT")
+_FactT = TypeVar("_FactT")
+
+#: Every vocabulary rehydration narrows, each taken from the alias that
+#: declares it. A ``match`` ladder per vocabulary stood here until 2026-10-13,
+#: and the framework ladder was one member short of the model: every warm run
+#: threw the pydantic reachability fact away. Held by
+#: ``tests/test_cache_vocabulary_closure.py``.
+_API_PARAMETER_KINDS: Final[tuple[ApiParameterKind, ...]] = get_args(ApiParameterKind)
+_API_SYMBOL_KINDS: Final[tuple[ApiSymbolKind, ...]] = get_args(ApiSymbolKind)
+_API_VISIBILITIES: Final[tuple[ApiVisibility, ...]] = get_args(ApiVisibility)
+_RISK_LEVELS: Final[tuple[RiskLevel, ...]] = get_args(RiskLevel)
+_DEAD_CODE_CANDIDATE_KINDS: Final[tuple[DeadCodeCandidateKind, ...]] = get_args(
+    DeadCodeCandidateKind
+)
+_NESTED_DEFINITION_KINDS: Final[tuple[NestedDefinitionKind, ...]] = get_args(
+    NestedDefinitionKind
+)
+_SECURITY_SURFACE_CATEGORIES: Final[tuple[SecuritySurfaceCategory, ...]] = get_args(
+    SecuritySurfaceCategory
+)
+_SECURITY_SURFACE_LOCATION_SCOPES: Final[tuple[SecuritySurfaceLocationScope, ...]] = (
+    get_args(SecuritySurfaceLocationScope)
+)
+_SECURITY_SURFACE_CLASSIFICATION_MODES: Final[
+    tuple[SecuritySurfaceClassificationMode, ...]
+] = get_args(SecuritySurfaceClassificationMode)
+_SECURITY_SURFACE_EVIDENCE_KINDS: Final[tuple[SecuritySurfaceEvidenceKind, ...]] = (
+    get_args(SecuritySurfaceEvidenceKind)
+)
+_RUNTIME_REACHABILITY_FRAMEWORKS: Final[tuple[RuntimeReachabilityFramework, ...]] = (
+    get_args(RuntimeReachabilityFramework)
+)
+_RUNTIME_REACHABILITY_EDGE_KINDS: Final[tuple[RuntimeReachabilityEdgeKind, ...]] = (
+    get_args(RuntimeReachabilityEdgeKind)
+)
+_RUNTIME_REACHABILITY_CONFIDENCES: Final[tuple[RuntimeReachabilityConfidence, ...]] = (
+    get_args(RuntimeReachabilityConfidence)
+)
+_RUNTIME_REACHABILITY_TARGET_KINDS: Final[tuple[RuntimeReachabilityTargetKind, ...]] = (
+    get_args(RuntimeReachabilityTargetKind)
+)
 
 
-def _api_param_kind(value: object) -> _ApiParamKind | None:
-    match value:
-        case "pos_only":
-            return "pos_only"
-        case "pos_or_kw":
-            return "pos_or_kw"
-        case "vararg":
-            return "vararg"
-        case "kw_only":
-            return "kw_only"
-        case "kwarg":
-            return "kwarg"
-        case _:
-            return None
+#: Each family rehydration rebuilds row by row, named in a refusal.
+CachedFactFamily = Literal[
+    "api_surface",
+    "class_metrics",
+    "dead_candidates",
+    "docstring_coverage",
+    "function_relationship_facts",
+    "module_deps",
+    "nested_definitions",
+    "runtime_reachability",
+    "security_surfaces",
+    "typing_coverage",
+]
 
 
-def _public_symbol_kind(value: object) -> _PublicSymbolKind | None:
-    match value:
-        case "function":
-            return "function"
-        case "class":
-            return "class"
-        case "method":
-            return "method"
-        case "constant":
-            return "constant"
-        case _:
-            return None
+class CachedRowRefused(Exception):
+    """A cached row this reader cannot rebuild into the fact it stands for.
+
+    Every family used to end ``if parsed is not None: append``, so a row the
+    reader could not rebuild was skipped and its file was still served off the
+    cache -- a published run in which the fact had never existed (measured
+    2026-10-13: the pydantic reachability fact on fastapi). A row is rebuilt
+    whole or the file's dependent lane is refused, typed and counted as
+    ``malformed_payload``, and the file is walked again (ruling 2026-10-13,
+    invariant 2). ``family`` names where the refusal happened.
+    """
+
+    def __init__(self, family: CachedFactFamily) -> None:
+        super().__init__(f"a cached {family} row cannot be rebuilt")
+        self.family: CachedFactFamily = family
 
 
-def _exported_via_kind(value: object) -> _ExportedViaKind | None:
-    match value:
-        case "all":
-            return "all"
-        case "name":
-            return "name"
-        case _:
-            return None
+def _rebuild_all(
+    rows: Iterable[_RowT],
+    rebuild: Callable[[_RowT], _FactT | None],
+    family: CachedFactFamily,
+) -> tuple[_FactT, ...]:
+    """Every row rebuilt, in order, or a refusal of the whole family."""
+
+    facts: list[_FactT] = []
+    for row in rows:
+        fact = rebuild(row)
+        if fact is None:
+            raise CachedRowRefused(family)
+        facts.append(fact)
+    return tuple(facts)
 
 
-def _risk_level(value: object) -> _RiskLevel | None:
-    match value:
-        case "low":
-            return "low"
-        case "medium":
-            return "medium"
-        case "high":
-            return "high"
-        case _:
-            return None
+def _rebuild_optional(
+    row: _RowT | None,
+    rebuild: Callable[[_RowT], _FactT | None],
+    family: CachedFactFamily,
+) -> _FactT | None:
+    """An absent section stays absent; a present one is rebuilt or refused."""
+
+    if row is None:
+        return None
+    fact = rebuild(row)
+    if fact is None:
+        raise CachedRowRefused(family)
+    return fact
+
+
+def _api_param_kind(value: object) -> ApiParameterKind | None:
+    return narrow_to_vocabulary(value, _API_PARAMETER_KINDS)
+
+
+def _public_symbol_kind(value: object) -> ApiSymbolKind | None:
+    return narrow_to_vocabulary(value, _API_SYMBOL_KINDS)
+
+
+def _exported_via_kind(value: object) -> ApiVisibility | None:
+    return narrow_to_vocabulary(value, _API_VISIBILITIES)
+
+
+def _risk_level(value: object) -> RiskLevel | None:
+    return narrow_to_vocabulary(value, _RISK_LEVELS)
 
 
 def _dead_candidate_kind(value: object) -> DeadCodeCandidateKind | None:
     """Narrow one cached ``kind`` string back onto the declared vocabulary.
 
-    The return type is the model's alias rather than a local restatement of
-    the four values, so an arm the vocabulary does not carry is a type error
-    here instead of a silent second authority over a closed vocabulary.
-
-    The ``import`` arm accepts a value the encoder cannot write: it writes
-    ``candidate.kind``, and no producer can construct that kind (measured
-    2026-08-30, pinned by ``tests/test_pipeline_process.py``). It stays while
-    the vocabulary declares it, and it goes with it.
+    The ``import`` member is admitted although the encoder cannot write it: it
+    writes ``candidate.kind``, and no producer can construct that kind
+    (measured 2026-08-30, pinned by ``tests/test_pipeline_process.py``). It is
+    admitted while the vocabulary declares it, and it goes with it.
     """
-    match value:
-        case "function":
-            return "function"
-        case "class":
-            return "class"
-        case "method":
-            return "method"
-        case "import":
-            return "import"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _DEAD_CODE_CANDIDATE_KINDS)
 
 
 def _nested_definition_kind(value: object) -> NestedDefinitionKind | None:
     """Narrow one cached nested ``kind`` onto the population's vocabulary.
 
-    Three arms and no ``import`` arm, because the nested population is
-    definitions only; a row carrying anything else is a writer this reader
-    does not understand and is dropped, never read as a function.
+    Definitions only, no ``import``: a row carrying anything else is a writer
+    this reader does not understand, and it refuses the row.
     """
-    match value:
-        case "function":
-            return "function"
-        case "class":
-            return "class"
-        case "method":
-            return "method"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _NESTED_DEFINITION_KINDS)
+
+
+def _cached_liveness_tags(
+    reason: object, witness: object
+) -> tuple[LiveRootReason | None, str | None] | None:
+    """A row's live-root reason and escape witness, or ``None`` if unreadable.
+
+    ``None`` and ``""`` are each field's legal "nothing here" (a row written
+    before the fact, and the nested row's always-written empty value); any
+    other value must be a member or a witness string, and a value that is
+    neither refuses the row rather than reading as "no reason". Read as no
+    reason, an unknown liveness reason turned a live root into a candidate.
+    """
+
+    decoded_reason = None if reason in (None, "") else _live_root_reason(reason)
+    if reason not in (None, "") and decoded_reason is None:
+        return None
+    if witness is not None and not isinstance(witness, str):
+        return None
+    return decoded_reason, witness or None
+
+
+def _nested_definition_tags(
+    row: NestedDefinitionDict,
+) -> tuple[NestedDefinitionKind, LiveRootReason | None, str | None] | None:
+    kind = _nested_definition_kind(row.get("kind"))
+    tags = _cached_liveness_tags(row.get("live_root_reason"), row.get("escape_witness"))
+    if kind is None or tags is None:
+        return None
+    return kind, *tags
 
 
 def _nested_definition_from_cache_row(
     row: NestedDefinitionDict,
 ) -> NestedDefinition | None:
-    kind = _nested_definition_kind(row.get("kind"))
+    tags = _nested_definition_tags(row)
     if (
-        kind is None
+        tags is None
         or not row.get("qualname")
         or not row.get("local_name")
         or not row.get("filepath")
@@ -164,6 +241,7 @@ def _nested_definition_from_cache_row(
         or not row.get("lexical_path")
     ):
         return None
+    kind, live_root_reason, escape_witness = tags
     try:
         return NestedDefinition(
             qualname=row["qualname"],
@@ -175,14 +253,14 @@ def _nested_definition_from_cache_row(
             start_line=row["start_line"],
             end_line=row["end_line"],
             suppressed_rules=_as_sorted_str_tuple(row.get("suppressed_rules", [])),
-            live_root_reason=_live_root_reason(row.get("live_root_reason")),
+            live_root_reason=live_root_reason,
             owner_base_names=_as_sorted_str_tuple(row.get("owner_base_names", [])),
             owner_has_unresolved_external_base=(
                 row.get("owner_has_unresolved_external_base", False) is True
             ),
             decorator_evidenced=row.get("decorator_evidenced", False) is True,
             self_dispatched=row.get("self_dispatched", False) is True,
-            escape_witness=_escape_witness(row.get("escape_witness")),
+            escape_witness=escape_witness,
         )
     except ValueError:
         # The row's own construction law refused it (a path without a
@@ -192,149 +270,49 @@ def _nested_definition_from_cache_row(
 
 
 def _security_surface_category(value: object) -> SecuritySurfaceCategory | None:
-    match value:
-        case "archive_extraction":
-            return "archive_extraction"
-        case "crypto_transport":
-            return "crypto_transport"
-        case "database_boundary":
-            return "database_boundary"
-        case "deserialization":
-            return "deserialization"
-        case "dynamic_execution":
-            return "dynamic_execution"
-        case "dynamic_loading":
-            return "dynamic_loading"
-        case "filesystem_mutation":
-            return "filesystem_mutation"
-        case "identity_token":
-            return "identity_token"
-        case "network_boundary":
-            return "network_boundary"
-        case "process_boundary":
-            return "process_boundary"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _SECURITY_SURFACE_CATEGORIES)
 
 
 def _security_surface_location_scope(
     value: object,
 ) -> SecuritySurfaceLocationScope | None:
-    match value:
-        case "module":
-            return "module"
-        case "class":
-            return "class"
-        case "callable":
-            return "callable"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _SECURITY_SURFACE_LOCATION_SCOPES)
 
 
 def _security_surface_classification_mode(
     value: object,
 ) -> SecuritySurfaceClassificationMode | None:
-    match value:
-        case "exact_builtin":
-            return "exact_builtin"
-        case "exact_call":
-            return "exact_call"
-        case "exact_import":
-            return "exact_import"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _SECURITY_SURFACE_CLASSIFICATION_MODES)
 
 
 def _security_surface_evidence_kind(
     value: object,
 ) -> SecuritySurfaceEvidenceKind | None:
-    match value:
-        case "builtin":
-            return "builtin"
-        case "call":
-            return "call"
-        case "import":
-            return "import"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _SECURITY_SURFACE_EVIDENCE_KINDS)
 
 
 def _runtime_reachability_framework(
     value: object,
 ) -> RuntimeReachabilityFramework | None:
-    match value:
-        case "aiogram":
-            return "aiogram"
-        case "aiohttp":
-            return "aiohttp"
-        case "celery":
-            return "celery"
-        case "click":
-            return "click"
-        case "dependency_injector":
-            return "dependency_injector"
-        case "django":
-            return "django"
-        case "fastapi":
-            return "fastapi"
-        case "flask":
-            return "flask"
-        case "sqlalchemy":
-            return "sqlalchemy"
-        case "starlette":
-            return "starlette"
-        case "typer":
-            return "typer"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _RUNTIME_REACHABILITY_FRAMEWORKS)
 
 
 def _runtime_reachability_edge_kind(
     value: object,
 ) -> RuntimeReachabilityEdgeKind | None:
-    match value:
-        case "declares_dependency":
-            return "declares_dependency"
-        case "provides":
-            return "provides"
-        case "registers_command":
-            return "registers_command"
-        case "registers_handler":
-            return "registers_handler"
-        case "registers_task":
-            return "registers_task"
-        case "runtime_hook":
-            return "runtime_hook"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _RUNTIME_REACHABILITY_EDGE_KINDS)
 
 
 def _runtime_reachability_confidence(
     value: object,
 ) -> RuntimeReachabilityConfidence | None:
-    match value:
-        case "high":
-            return "high"
-        case "medium":
-            return "medium"
-        case "low":
-            return "low"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _RUNTIME_REACHABILITY_CONFIDENCES)
 
 
 def _runtime_reachability_target_kind(
     value: object,
 ) -> RuntimeReachabilityTargetKind | None:
-    match value:
-        case "function":
-            return "function"
-        case "class":
-            return "class"
-        case "method":
-            return "method"
-        case _:
-            return None
+    return narrow_to_vocabulary(value, _RUNTIME_REACHABILITY_TARGET_KINDS)
 
 
 def decode_cached_structural_finding_group(
@@ -459,7 +437,7 @@ def _cache_dict_int_fields(
 
 def _api_param_fields(
     row: Mapping[str, object],
-) -> tuple[str, _ApiParamKind, bool, str] | None:
+) -> tuple[str, ApiParameterKind, bool, str] | None:
     name = row.get("name")
     validated_kind = _api_param_kind(row.get("kind"))
     has_default = row.get("has_default")
@@ -693,15 +671,28 @@ def _module_dep_from_cache_row(dep_row: ModuleDepDict) -> ModuleDep | None:
     )
 
 
-def _dead_candidate_from_cache_row(dead_row: DeadCandidateDict) -> DeadCandidate | None:
+def _dead_candidate_tags(
+    dead_row: DeadCandidateDict,
+) -> tuple[DeadCodeCandidateKind, LiveRootReason | None, str | None] | None:
     kind = _dead_candidate_kind(dead_row["kind"])
+    tags = _cached_liveness_tags(
+        dead_row.get("live_root_reason"), dead_row.get("escape_witness")
+    )
+    if kind is None or tags is None:
+        return None
+    return kind, *tags
+
+
+def _dead_candidate_from_cache_row(dead_row: DeadCandidateDict) -> DeadCandidate | None:
+    tags = _dead_candidate_tags(dead_row)
     if (
         not dead_row.get("qualname")
         or not dead_row.get("local_name")
         or not dead_row.get("filepath")
-        or kind is None
+        or tags is None
     ):
         return None
+    kind, live_root_reason, escape_witness = tags
     return DeadCandidate(
         qualname=dead_row["qualname"],
         local_name=dead_row["local_name"],
@@ -710,37 +701,24 @@ def _dead_candidate_from_cache_row(dead_row: DeadCandidateDict) -> DeadCandidate
         end_line=dead_row["end_line"],
         kind=kind,
         suppressed_rules=_as_sorted_str_tuple(dead_row.get("suppressed_rules", [])),
-        live_root_reason=_live_root_reason(dead_row.get("live_root_reason")),
+        live_root_reason=live_root_reason,
         star_import_bound=dead_row.get("star_import_bound", False) is True,
-        escape_witness=_escape_witness(dead_row.get("escape_witness")),
+        escape_witness=escape_witness,
     )
-
-
-def _escape_witness(value: object) -> str | None:
-    """Narrow a cached escape witness: a non-empty string, else no witness.
-
-    The wire decoder has already put the string through the model's door, so
-    this only turns the row's ``""`` back into the model's ``None``.
-    """
-    return value if isinstance(value, str) and value else None
 
 
 def _live_root_reason(value: object) -> LiveRootReason | None:
     """Narrow the cached reason back onto its closed set.
 
-    Iterating the vocabulary is what makes this a narrower rather than a sixth
-    authority over it. The arm-per-value ladder this replaces was type-checked
-    in one direction only: inventing a member the vocabulary does not carry is
-    a type error, but FAILING to mention one is not, so a vocabulary that grew
-    would have been silently narrowed here -- every unlisted reason decoding as
-    "no reason at all" -- with nothing red to say so. ``reason`` is already a
-    :data:`~codeclone.contracts.LiveRootReason`, so the return needs no cast.
+    Narrowing against the vocabulary is what makes this a narrower rather
+    than a sixth authority over it. The arm-per-value ladder this replaced was
+    type-checked in one direction only: inventing a member the vocabulary does
+    not carry is a type error, but FAILING to mention one is not. A value
+    outside the set answers ``None`` here; the row decoders refuse such a row
+    (``_cached_liveness_tags``) rather than read it as "no reason".
     """
 
-    for reason in LIVE_ROOT_REASONS:
-        if value == reason:
-            return reason
-    return None
+    return narrow_to_vocabulary(value, LIVE_ROOT_REASONS)
 
 
 def _security_surface_from_cache_row(
@@ -803,12 +781,8 @@ def _runtime_reachability_from_cache_row(
     )
 
 
-def load_cached_metrics_extended(
-    entry: CacheEntryV3,
-    *,
-    filepath: str,
-    module_registry: ModuleRegistryHandle | None = None,
-) -> tuple[
+#: The metrics facts of one cached row, in the order every caller unpacks.
+CachedMetrics = tuple[
     tuple[ClassMetrics, ...],
     tuple[ModuleDep, ...],
     tuple[DeadCandidate, ...],
@@ -819,62 +793,56 @@ def load_cached_metrics_extended(
     ModuleApiSurface | None,
     tuple[RuntimeReachabilityFact, ...],
     tuple[SecuritySurface, ...],
-]:
+]
+
+
+def load_cached_metrics_extended(
+    entry: CacheEntryV3,
+    *,
+    filepath: str,
+    module_registry: ModuleRegistryHandle | None = None,
+) -> CachedMetrics:
+    """Rebuild every metrics fact of one cached row, or refuse the row.
+
+    Raises :class:`CachedRowRefused` naming the first family with a row this
+    reader cannot rebuild; nothing is returned short of the whole row.
+    """
+
     dependent = entry.module_dependent
-    class_metrics_rows = dependent.class_metrics
-    class_metrics_items: list[ClassMetrics] = []
-    for metric_row in class_metrics_rows:
-        parsed_metric = _class_metric_from_cache_row(metric_row)
-        if parsed_metric is not None:
-            class_metrics_items.append(parsed_metric)
-    class_metrics = tuple(class_metrics_items)
-    module_dep_rows = dependent.module_deps
-    module_dep_items: list[ModuleDep] = []
-    for dep_row in module_dep_rows:
-        parsed_dep = _module_dep_from_cache_row(dep_row)
-        if parsed_dep is not None:
-            module_dep_items.append(parsed_dep)
-    module_deps = tuple(module_dep_items)
-    dead_rows = dependent.dead_candidates
-    dead_candidate_items: list[DeadCandidate] = []
-    for dead_row in dead_rows:
-        parsed_dead = _dead_candidate_from_cache_row(dead_row)
-        if parsed_dead is not None:
-            dead_candidate_items.append(parsed_dead)
-    dead_candidates = tuple(dead_candidate_items)
-    referenced_names = (
-        frozenset()
-        if is_test_filepath(filepath, module_registry=module_registry)
-        else frozenset(dependent.referenced_names)
-    )
-    referenced_qualnames = (
-        frozenset()
-        if is_test_filepath(filepath, module_registry=module_registry)
-        else frozenset(dependent.referenced_qualnames)
-    )
-    security_surface_rows = dependent.security_surfaces
-    security_surface_items: list[SecuritySurface] = []
-    for surface_row in security_surface_rows:
-        parsed_surface = _security_surface_from_cache_row(surface_row)
-        if parsed_surface is not None:
-            security_surface_items.append(parsed_surface)
-    reachability_rows = dependent.runtime_reachability
-    reachability_items: list[RuntimeReachabilityFact] = []
-    for fact_row in reachability_rows:
-        parsed_fact = _runtime_reachability_from_cache_row(fact_row)
-        if parsed_fact is not None:
-            reachability_items.append(parsed_fact)
+    test_file = is_test_filepath(filepath, module_registry=module_registry)
     return (
-        class_metrics,
-        module_deps,
-        dead_candidates,
-        referenced_names,
-        referenced_qualnames,
-        _typing_coverage_from_cache_dict(dependent.typing_coverage),
-        _docstring_coverage_from_cache_dict(dependent.docstring_coverage),
-        _api_surface_from_cache_dict(dependent.api_surface),
-        tuple(reachability_items),
-        tuple(security_surface_items),
+        _rebuild_all(
+            dependent.class_metrics, _class_metric_from_cache_row, "class_metrics"
+        ),
+        _rebuild_all(dependent.module_deps, _module_dep_from_cache_row, "module_deps"),
+        _rebuild_all(
+            dependent.dead_candidates, _dead_candidate_from_cache_row, "dead_candidates"
+        ),
+        frozenset() if test_file else frozenset(dependent.referenced_names),
+        frozenset() if test_file else frozenset(dependent.referenced_qualnames),
+        _rebuild_optional(
+            dependent.typing_coverage,
+            _typing_coverage_from_cache_dict,
+            "typing_coverage",
+        ),
+        _rebuild_optional(
+            dependent.docstring_coverage,
+            _docstring_coverage_from_cache_dict,
+            "docstring_coverage",
+        ),
+        _rebuild_optional(
+            dependent.api_surface, _api_surface_from_cache_dict, "api_surface"
+        ),
+        _rebuild_all(
+            dependent.runtime_reachability,
+            _runtime_reachability_from_cache_row,
+            "runtime_reachability",
+        ),
+        _rebuild_all(
+            dependent.security_surfaces,
+            _security_surface_from_cache_row,
+            "security_surfaces",
+        ),
     )
 
 
@@ -903,9 +871,8 @@ def load_cached_nested_definitions(
     reads the file's lane and never the row's.
     """
 
-    rows: list[NestedDefinition] = []
-    for row in entry.module_dependent.nested_definitions:
-        parsed = _nested_definition_from_cache_row(row)
-        if parsed is not None:
-            rows.append(parsed)
-    return tuple(rows)
+    return _rebuild_all(
+        entry.module_dependent.nested_definitions,
+        _nested_definition_from_cache_row,
+        "nested_definitions",
+    )

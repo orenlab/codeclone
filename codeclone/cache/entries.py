@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Literal
+from typing import Final, get_args
 
 from ..findings.structural.detectors import normalize_structural_finding_group
+from ..metrics._risk import RiskLevel
 from ..models import (
     ApiParamSpecDict,
     BlockGroupItem,
@@ -32,12 +33,23 @@ from ..models import (
     NestedDefinition,
     NestedDefinitionDict,
     PublicSymbolDict,
+    RelationshipKind,
+    RelationshipOriginLane,
     RelationshipRecord,
     RelationshipRecordDict,
+    RelationshipResolutionStatus,
+    RuntimeReachabilityConfidence,
+    RuntimeReachabilityEdgeKind,
     RuntimeReachabilityFact,
     RuntimeReachabilityFactDict,
+    RuntimeReachabilityFramework,
+    RuntimeReachabilityTargetKind,
     SecuritySurface,
+    SecuritySurfaceCategory,
+    SecuritySurfaceClassificationMode,
     SecuritySurfaceDict,
+    SecuritySurfaceEvidenceKind,
+    SecuritySurfaceLocationScope,
     SegmentGroupItem,
     SegmentUnit,
     SourceStatsDict,
@@ -46,6 +58,44 @@ from ..models import (
     StructuralFindingOccurrence,
     StructuralFindingOccurrenceDict,
     Unit,
+)
+from ..utils.closed_vocabulary import narrow_to_vocabulary
+
+#: The wire's closed vocabularies, each taken from the alias that declares
+#: it. A narrower below spells none of its members: a member the model gains
+#: is admitted here the moment it is declared there, and the cache read path
+#: is held to that by ``tests/test_cache_vocabulary_closure.py``.
+_RISK_LEVELS: Final[tuple[RiskLevel, ...]] = get_args(RiskLevel)
+_RELATIONSHIP_KINDS: Final[tuple[RelationshipKind, ...]] = get_args(RelationshipKind)
+_RELATIONSHIP_RESOLUTION_STATUSES: Final[tuple[RelationshipResolutionStatus, ...]] = (
+    get_args(RelationshipResolutionStatus)
+)
+_RELATIONSHIP_ORIGIN_LANES: Final[tuple[RelationshipOriginLane, ...]] = get_args(
+    RelationshipOriginLane
+)
+_SECURITY_SURFACE_CATEGORIES: Final[tuple[SecuritySurfaceCategory, ...]] = get_args(
+    SecuritySurfaceCategory
+)
+_SECURITY_SURFACE_LOCATION_SCOPES: Final[tuple[SecuritySurfaceLocationScope, ...]] = (
+    get_args(SecuritySurfaceLocationScope)
+)
+_SECURITY_SURFACE_CLASSIFICATION_MODES: Final[
+    tuple[SecuritySurfaceClassificationMode, ...]
+] = get_args(SecuritySurfaceClassificationMode)
+_SECURITY_SURFACE_EVIDENCE_KINDS: Final[tuple[SecuritySurfaceEvidenceKind, ...]] = (
+    get_args(SecuritySurfaceEvidenceKind)
+)
+_RUNTIME_REACHABILITY_FRAMEWORKS: Final[tuple[RuntimeReachabilityFramework, ...]] = (
+    get_args(RuntimeReachabilityFramework)
+)
+_RUNTIME_REACHABILITY_EDGE_KINDS: Final[tuple[RuntimeReachabilityEdgeKind, ...]] = (
+    get_args(RuntimeReachabilityEdgeKind)
+)
+_RUNTIME_REACHABILITY_CONFIDENCES: Final[tuple[RuntimeReachabilityConfidence, ...]] = (
+    get_args(RuntimeReachabilityConfidence)
+)
+_RUNTIME_REACHABILITY_TARGET_KINDS: Final[tuple[RuntimeReachabilityTargetKind, ...]] = (
+    get_args(RuntimeReachabilityTargetKind)
 )
 
 UnitDict = FunctionGroupItem
@@ -114,133 +164,68 @@ def _normalize_cached_structural_groups(
     return normalized
 
 
-def _as_risk_literal(value: object) -> Literal["low", "medium", "high"] | None:
-    match value:
-        case "low":
-            return "low"
-        case "medium":
-            return "medium"
-        case "high":
-            return "high"
-        case _:
-            return None
+def _as_risk_literal(value: object) -> RiskLevel | None:
+    return narrow_to_vocabulary(value, _RISK_LEVELS)
 
 
-def _as_relationship_kind(value: object) -> Literal["call", "reference"] | None:
-    if value == "call":
-        return "call"
-    if value == "reference":
-        return "reference"
-    return None
+def _as_relationship_kind(value: object) -> RelationshipKind | None:
+    return narrow_to_vocabulary(value, _RELATIONSHIP_KINDS)
 
 
 def _as_relationship_resolution_status(
     value: object,
-) -> Literal["resolved", "unresolved"] | None:
-    if value == "resolved":
-        return "resolved"
-    if value == "unresolved":
-        return "unresolved"
-    return None
+) -> RelationshipResolutionStatus | None:
+    return narrow_to_vocabulary(value, _RELATIONSHIP_RESOLUTION_STATUSES)
 
 
-def _as_relationship_origin_lane(
+def _as_relationship_origin_lane(value: object) -> RelationshipOriginLane | None:
+    return narrow_to_vocabulary(value, _RELATIONSHIP_ORIGIN_LANES)
+
+
+def _as_security_surface_category(value: object) -> SecuritySurfaceCategory | None:
+    return narrow_to_vocabulary(value, _SECURITY_SURFACE_CATEGORIES)
+
+
+def _as_security_surface_location_scope(
     value: object,
-) -> Literal["production", "test"] | None:
-    if value == "production":
-        return "production"
-    if value == "test":
-        return "test"
-    return None
+) -> SecuritySurfaceLocationScope | None:
+    return narrow_to_vocabulary(value, _SECURITY_SURFACE_LOCATION_SCOPES)
 
 
-def _as_security_surface_category(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    if value in {
-        "archive_extraction",
-        "crypto_transport",
-        "database_boundary",
-        "deserialization",
-        "dynamic_execution",
-        "dynamic_loading",
-        "filesystem_mutation",
-        "identity_token",
-        "network_boundary",
-        "process_boundary",
-    }:
-        return value
-    return None
+def _as_security_surface_classification_mode(
+    value: object,
+) -> SecuritySurfaceClassificationMode | None:
+    return narrow_to_vocabulary(value, _SECURITY_SURFACE_CLASSIFICATION_MODES)
 
 
-def _as_security_surface_location_scope(value: object) -> str | None:
-    if isinstance(value, str) and value in {"module", "class", "callable"}:
-        return value
-    return None
+def _as_security_surface_evidence_kind(
+    value: object,
+) -> SecuritySurfaceEvidenceKind | None:
+    return narrow_to_vocabulary(value, _SECURITY_SURFACE_EVIDENCE_KINDS)
 
 
-def _as_security_surface_classification_mode(value: object) -> str | None:
-    if isinstance(value, str) and value in {
-        "exact_builtin",
-        "exact_call",
-        "exact_import",
-    }:
-        return value
-    return None
+def _as_runtime_reachability_framework(
+    value: object,
+) -> RuntimeReachabilityFramework | None:
+    return narrow_to_vocabulary(value, _RUNTIME_REACHABILITY_FRAMEWORKS)
 
 
-def _as_security_surface_evidence_kind(value: object) -> str | None:
-    if isinstance(value, str) and value in {"builtin", "call", "import"}:
-        return value
-    return None
+def _as_runtime_reachability_edge_kind(
+    value: object,
+) -> RuntimeReachabilityEdgeKind | None:
+    return narrow_to_vocabulary(value, _RUNTIME_REACHABILITY_EDGE_KINDS)
 
 
-def _as_runtime_reachability_framework(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    if value in {
-        "aiogram",
-        "aiohttp",
-        "flask",
-        "celery",
-        "click",
-        "dependency_injector",
-        "django",
-        "fastapi",
-        "pydantic",
-        "sqlalchemy",
-        "starlette",
-        "typer",
-    }:
-        return value
-    return None
+def _as_runtime_reachability_confidence(
+    value: object,
+) -> RuntimeReachabilityConfidence | None:
+    return narrow_to_vocabulary(value, _RUNTIME_REACHABILITY_CONFIDENCES)
 
 
-def _as_runtime_reachability_edge_kind(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    if value in {
-        "declares_dependency",
-        "provides",
-        "registers_command",
-        "registers_handler",
-        "registers_task",
-        "runtime_hook",
-    }:
-        return value
-    return None
-
-
-def _as_runtime_reachability_confidence(value: object) -> str | None:
-    if isinstance(value, str) and value in {"high", "medium", "low"}:
-        return value
-    return None
-
-
-def _as_runtime_reachability_target_kind(value: object) -> str | None:
-    if isinstance(value, str) and value in {"function", "class", "method"}:
-        return value
-    return None
+def _as_runtime_reachability_target_kind(
+    value: object,
+) -> RuntimeReachabilityTargetKind | None:
+    return narrow_to_vocabulary(value, _RUNTIME_REACHABILITY_TARGET_KINDS)
 
 
 def _new_optional_metrics_payload() -> tuple[
