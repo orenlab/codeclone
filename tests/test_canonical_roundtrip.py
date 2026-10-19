@@ -2913,6 +2913,29 @@ def test_uniqueness_prover_swallows_the_repeat_no_frozenset_can_carry() -> None:
         _unique_by_key([row, _risk_probe_row(4)], "probe.key", _risk_probe_key)
 
 
+def test_uniqueness_prover_names_the_least_contradiction_in_any_order() -> None:
+    """A refusal that names a different key per process is not a reproducible
+    receipt (ruling 2026-10-19, the determinism debt): every family reaches
+    the prover as a ``frozenset``, whose walk follows the hash seed, so the
+    prover names the least contradicting key by its ``repr`` whatever order
+    it is handed the rows in."""
+    symbol = SymbolId(FileId("pkg/probe.py"), "Probe.run")
+    rows = [
+        RiskObservationRow(symbol, dimension, numerator, 10)
+        for dimension in ("cyclomatic_complexity", "nesting_depth")
+        for numerator in (3, 4)
+    ]
+    messages = set()
+    for ordered in (rows, list(reversed(rows))):
+        with pytest.raises(CanonicalModelError) as refused:
+            _unique_by_key(ordered, "probe.key", _risk_probe_key)
+        messages.add(str(refused.value))
+    assert messages == {
+        f"two facts share one logical key probe.key="
+        f"{(symbol, 'cyclomatic_complexity', 10)!r}"
+    }
+
+
 #: The fact houses whose keyed families reach the uniqueness prover, by the
 #: receiver name the model spells them under (canonical epoch E2 added the
 #: comparison house).
