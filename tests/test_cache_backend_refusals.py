@@ -10,9 +10,13 @@ The backend's promise is narrow and each clause has its own pin here:
 
 * a store it cannot reach is *unreadable*, a named refusal, never a raw
   ``OSError`` and never a file created as a side effect of looking;
-* a lane, a singleton or an identity row that cannot be rebuilt faithfully is
-  *absent* -- one miss -- while its healthy neighbour in the same store still
-  reads back, so the refusal is about the damaged row and not the handle;
+* a lane, a singleton or an identity row whose stored bytes are not the ones
+  written is *refused* with its reason (``CacheRecordRefused``) -- or, for an
+  identity row, named by the scan that skips it -- while its healthy
+  neighbour in the same store still reads back, so the refusal is about the
+  damaged row and not the handle; verification comes before decoding, so a
+  byte that breaks the JSON is corruption, and only bytes a writer really
+  stored can be called undecodable;
 * a SQLite failure reaches the caller as the cache's own
   ``CacheBackendUnusable``, which is the only error the store knows how to
   degrade on;
@@ -39,11 +43,20 @@ from codeclone.cache.backend import (
     CacheBackend,
     CacheBackendUnreadable,
     CacheBackendUnusable,
+    CacheRecordRefused,
+    IdentityRow,
     WireShapeRefused,
+    scan_identities,
+    singleton_checksum,
     split_wire_entry,
 )
+from codeclone.cache.versioning import CacheRefusal
 from codeclone.models import EntryIdentity
-from tests._cache_store_fixtures import open_store, set_identity_column
+from tests._cache_store_fixtures import (
+    open_store,
+    set_identity_column,
+    write_lane_bytes,
+)
 
 #: Any generation mark will do: nothing here crosses a generation boundary.
 _VERSION = "backend-refusal-fixture"
@@ -69,7 +82,7 @@ def _identity(wire_path: str) -> EntryIdentity:
     )
 
 
-def _two_entry_store(cache_path: Path) -> dict[str, int]:
+def _two_entry_store(cache_path: Path) -> dict[str, IdentityRow]:
     """One entry to damage and one to prove the handle still reads."""
 
     with CacheBackend(cache_path) as backend:
@@ -85,8 +98,8 @@ def _two_entry_store(cache_path: Path) -> dict[str, int]:
         backend.write_singleton(_DAMAGED, {"k": 1}, version=_VERSION)
         backend.write_singleton(_HEALTHY, {"k": 2}, version=_VERSION)
         return {
-            identity.wire_path: file_id
-            for file_id, identity in backend.iter_identities(_VERSION)
+            row.identity.wire_path: row
+            for row in scan_identities(backend, _VERSION).verified
         }
 
 
@@ -123,6 +136,10 @@ def test_a_store_the_filesystem_refuses_is_unreadable(
     assert not (tmp_path / "never-written.sqlite3").exists()
 
 
+def _read_neutral(backend: CacheBackend, row: IdentityRow) -> object:
+    return backend.read_lane(TABLE_NEUTRAL, row.file_id, row.digests.neutral)
+
+
 @pytest.mark.parametrize(
     "statement",
     [
@@ -135,19 +152,58 @@ def test_a_store_the_filesystem_refuses_is_unreadable(
             f"UPDATE {TABLE_NEUTRAL} SET payload = X'FF00' WHERE file_id = ?",
             id="payload-is-not-json",
         ),
+        pytest.param(
+            f"UPDATE {TABLE_NEUTRAL} SET payload = CAST('{{\"k\":9}}' AS BLOB) "
+            "WHERE file_id = ?",
+            id="payload-value-changed",
+        ),
     ],
 )
-def test_a_lane_that_cannot_be_read_back_is_absent(
+def test_a_lane_that_is_not_the_written_bytes_is_refused_as_corrupt(
     tmp_path: Path,
     statement: str,
 ) -> None:
+    """Missing, retyped, broken or merely rewritten: all are corruption.
+
+    The last case decodes perfectly -- ``{"k":9}`` is a sound lane -- and was
+    served as truth while the checksum covered lengths only.
+    """
+
     cache_path = tmp_path / "cache.sqlite3"
-    ids = _two_entry_store(cache_path)
-    _damage(cache_path, statement, ids[_DAMAGED])
+    rows = _two_entry_store(cache_path)
+    _damage(cache_path, statement, rows[_DAMAGED].file_id)
 
     with CacheBackend(cache_path, read_only=True) as backend:
-        assert backend.read_lane(TABLE_NEUTRAL, ids[_DAMAGED]) is None
-        assert backend.read_lane(TABLE_NEUTRAL, ids[_HEALTHY]) == {"k": 1}
+        with pytest.raises(CacheRecordRefused) as refused:
+            _read_neutral(backend, rows[_DAMAGED])
+        assert refused.value.reason is CacheRefusal.CORRUPT
+        assert _read_neutral(backend, rows[_HEALTHY]) == {"k": 1}
+
+
+def test_verified_lane_bytes_that_are_not_json_are_undecodable(
+    tmp_path: Path,
+) -> None:
+    """Bytes a writer really stored, digest and all, that are no record."""
+
+    cache_path = tmp_path / "cache.sqlite3"
+    _two_entry_store(cache_path)
+    write_lane_bytes(
+        cache_path,
+        _DAMAGED,
+        TABLE_NEUTRAL,
+        b"\xff\x00",
+        as_writer=True,
+        version=_VERSION,
+    )
+    with CacheBackend(cache_path, read_only=True) as backend:
+        rows = {
+            row.identity.wire_path: row
+            for row in scan_identities(backend, _VERSION).verified
+        }
+        with pytest.raises(CacheRecordRefused) as refused:
+            _read_neutral(backend, rows[_DAMAGED])
+        assert refused.value.reason is CacheRefusal.UNDECODABLE
+        assert _read_neutral(backend, rows[_HEALTHY]) == {"k": 1}
 
 
 @pytest.mark.parametrize(
@@ -156,15 +212,20 @@ def test_a_lane_that_cannot_be_read_back_is_absent(
         pytest.param("payload", "text", id="payload-is-text"),
         pytest.param("payload", b"\xff", id="payload-is-not-json"),
         pytest.param("payload", b'{"k":9}', id="payload-rewritten"),
+        pytest.param("payload", b'{ "k":1}', id="payload-re-encoded"),
         pytest.param("checksum", b"\x00", id="checksum-is-a-blob"),
     ],
 )
-def test_a_singleton_that_fails_its_checks_is_absent(
+def test_a_singleton_that_fails_its_checks_is_refused_as_corrupt(
     tmp_path: Path,
     column: str,
     value: object,
 ) -> None:
-    """A rewritten payload is refused by its checksum, not trusted as new data."""
+    """A rewritten payload is refused by its checksum, not trusted as new data.
+
+    The checksum covers the stored bytes, so even a re-encoding of the same
+    value is bytes the writer did not store.
+    """
 
     cache_path = tmp_path / "cache.sqlite3"
     _two_entry_store(cache_path)
@@ -176,8 +237,28 @@ def test_a_singleton_that_fails_its_checks_is_absent(
     )
 
     with CacheBackend(cache_path, read_only=True) as backend:
-        assert backend.read_singleton(_DAMAGED, _VERSION) is None
+        with pytest.raises(CacheRecordRefused) as refused:
+            backend.read_singleton(_DAMAGED, _VERSION)
+        assert refused.value.reason is CacheRefusal.CORRUPT
         assert backend.read_singleton(_HEALTHY, _VERSION) == {"k": 2}
+        assert backend.read_singleton("never-written", _VERSION) is None
+
+
+def test_a_verified_singleton_that_is_not_json_is_undecodable(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.sqlite3"
+    _two_entry_store(cache_path)
+    _damage(
+        cache_path,
+        "UPDATE cache_singletons SET payload = ?, checksum = ? WHERE key = ?",
+        b"\xff",
+        singleton_checksum(version=_VERSION, key=_DAMAGED, payload=b"\xff"),
+        _DAMAGED,
+    )
+
+    with CacheBackend(cache_path, read_only=True) as backend:
+        with pytest.raises(CacheRecordRefused) as refused:
+            backend.read_singleton(_DAMAGED, _VERSION)
+        assert refused.value.reason is CacheRefusal.UNDECODABLE
 
 
 def _stat_is_text(cache_path: Path) -> None:
@@ -223,15 +304,38 @@ def test_an_identity_row_that_cannot_be_rebuilt_is_skipped_and_named_corrupt(
     """
 
     cache_path = tmp_path / "cache.sqlite3"
-    ids = _two_entry_store(cache_path)
+    rows = _two_entry_store(cache_path)
     damage(cache_path)
 
     with CacheBackend(cache_path, read_only=True) as backend:
-        served = [
-            identity.wire_path for _id, identity in backend.iter_identities(_VERSION)
-        ]
-        assert served == [_HEALTHY]
-        assert backend.corrupt_ids(_VERSION) == [ids[_DAMAGED]]
+        scan = scan_identities(backend, _VERSION)
+        served = [row.identity.wire_path for row in scan.verified]
+        assert (served, scan.refused) == ([_HEALTHY], [_DAMAGED])
+        assert backend.corrupt_ids(_VERSION) == [rows[_DAMAGED].file_id]
+
+
+def test_an_identity_row_without_a_text_path_is_skipped_unnamed_and_collected(
+    tmp_path: Path,
+) -> None:
+    """A row whose own path is damaged cannot name a file, so it names none.
+
+    It is still refused and still collected: nothing reads it, and the sweep
+    takes it, so it cannot sit in the store as a row that looks healthy.
+    """
+
+    cache_path = tmp_path / "cache.sqlite3"
+    rows = _two_entry_store(cache_path)
+    _damage(
+        cache_path,
+        "UPDATE cache_entry SET wire_path = X'00' WHERE file_id = ?",
+        rows[_DAMAGED].file_id,
+    )
+
+    with CacheBackend(cache_path, read_only=True) as backend:
+        scan = scan_identities(backend, _VERSION)
+        assert [row.identity.wire_path for row in scan.verified] == [_HEALTHY]
+        assert scan.refused == []
+        assert backend.corrupt_ids(_VERSION) == [rows[_DAMAGED].file_id]
 
 
 @pytest.mark.parametrize(
@@ -244,7 +348,7 @@ def test_an_identity_row_that_cannot_be_rebuilt_is_skipped_and_named_corrupt(
         ),
         pytest.param(lambda backend: backend.reclaim(), "readonly", id="reclaim"),
         pytest.param(
-            lambda backend: backend.iter_identities(_VERSION),
+            lambda backend: scan_identities(backend, _VERSION),
             "no such table",
             id="read-without-entry-table",
         ),

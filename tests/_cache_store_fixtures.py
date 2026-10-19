@@ -21,9 +21,12 @@ rule was never about this file.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
+
+import orjson
 
 from codeclone.cache.backend import (
     META_KEY_CHECKSUM,
@@ -35,12 +38,15 @@ from codeclone.cache.backend import (
     META_TABLE,
     TABLE_DEPENDENT,
     TABLE_NEUTRAL,
+    LaneDigests,
     encode_payload,
     envelope_checksum,
     identity_checksum,
     join_wire_entry,
+    lane_digests,
     split_wire_entry,
 )
+from codeclone.cache.integrity import cache_envelope_checksum
 from codeclone.cache.store import Cache
 from codeclone.models import EntryIdentity
 
@@ -63,10 +69,15 @@ __all__ = [
     "read_cache_meta",
     "read_cache_rows",
     "read_identity_columns",
+    "read_lane_bytes",
     "set_identity_column",
+    "set_lane_digest_column",
     "sole_cache_row",
+    "swap_lane_bytes",
+    "transcribe_to_schema_two",
     "write_cache_meta",
     "write_cache_row",
+    "write_lane_bytes",
 ]
 
 
@@ -173,20 +184,24 @@ def write_cache_row(
     identity, neutral, dependent = split_wire_entry(
         wire_path, {str(k): v for k, v in entry.items()}
     )
+    digests = lane_digests(neutral, dependent)
     with open_store(cache_path) as conn:
         conn.execute(
             "INSERT INTO cache_entry("
             "wire_path, binding_version, stat_mtime_ns, stat_size, source_digest, "
             "git_blob_format, git_blob_id, neutral_profile, dependent_profile, "
             "binding_context, clone_channels, generation, last_used_epoch, "
-            "neutral_bytes, dependent_bytes, checksum) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,1,1,?,?,?) "
+            "neutral_bytes, dependent_bytes, neutral_digest, dependent_digest, "
+            "checksum) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,1,1,?,?,?,?,?) "
             "ON CONFLICT(wire_path) DO UPDATE SET "
             "binding_version=excluded.binding_version, "
             "stat_mtime_ns=excluded.stat_mtime_ns, stat_size=excluded.stat_size, "
             "source_digest=excluded.source_digest, "
             "neutral_bytes=excluded.neutral_bytes, "
             "dependent_bytes=excluded.dependent_bytes, "
+            "neutral_digest=excluded.neutral_digest, "
+            "dependent_digest=excluded.dependent_digest, "
             "checksum=excluded.checksum",
             (
                 identity.wire_path,
@@ -202,7 +217,9 @@ def write_cache_row(
                 ",".join(identity.clone_channels),
                 identity.neutral_bytes,
                 identity.dependent_bytes,
-                identity_checksum(version=resolved, identity=identity),
+                digests.neutral,
+                digests.dependent,
+                identity_checksum(version=resolved, identity=identity, digests=digests),
             ),
         )
         file_id = int(
@@ -268,7 +285,11 @@ def set_identity_column(
         conn.execute(
             "UPDATE cache_entry SET checksum = ? WHERE wire_path = ?",
             (
-                identity_checksum(version=resolved, identity=_identity_of(row)),
+                identity_checksum(
+                    version=resolved,
+                    identity=_identity_of(row),
+                    digests=_digests_of(row),
+                ),
                 wire_path,
             ),
         )
@@ -319,3 +340,290 @@ def _identity_of(row: sqlite3.Row) -> EntryIdentity:
         neutral_bytes=int(row["neutral_bytes"]),
         dependent_bytes=int(row["dependent_bytes"]),
     )
+
+
+#: The content-digest column that names each lane's bytes, where the store has
+#: one. Looked up on the live table rather than assumed, so these helpers also
+#: run against a store that predates the columns.
+_LANE_DIGEST_COLUMNS = {
+    TABLE_NEUTRAL: "neutral_digest",
+    TABLE_DEPENDENT: "dependent_digest",
+}
+
+
+def _file_id(conn: sqlite3.Connection, wire_path: str) -> int:
+    row = conn.execute(
+        "SELECT file_id FROM cache_entry WHERE wire_path = ?", (wire_path,)
+    ).fetchone()
+    assert row is not None, wire_path
+    return int(row[0])
+
+
+def _entry_columns(conn: sqlite3.Connection) -> set[str]:
+    return {str(row[1]) for row in conn.execute("PRAGMA table_info(cache_entry)")}
+
+
+def read_lane_bytes(cache_path: Path, wire_path: str, table: str) -> bytes:
+    with open_store(cache_path) as conn:
+        row = conn.execute(
+            f"SELECT payload FROM {table} WHERE file_id = ?",
+            (_file_id(conn, wire_path),),
+        ).fetchone()
+    assert row is not None, (wire_path, table)
+    return bytes(row[0])
+
+
+def write_lane_bytes(
+    cache_path: Path,
+    wire_path: str,
+    table: str,
+    payload: bytes,
+    *,
+    as_writer: bool,
+    version: str | None = None,
+) -> None:
+    """Replace one lane's stored bytes.
+
+    ``as_writer=False`` changes the bytes under an untouched identity row --
+    what a torn write, a stale backup restored over half a store or a flipped
+    bit does. ``as_writer=True`` also stores what a writer that produced these
+    bytes would have stored beside them: where the store keeps a content
+    digest, the lane's digest column and the identity checksum are re-minted
+    over the new bytes. That is the only way a test reaches the readers that
+    sit BEHIND the integrity check -- a consistent row this build still cannot
+    read -- without the check refusing it first.
+    """
+
+    resolved = Cache._CACHE_VERSION if version is None else version
+    with open_store(cache_path) as conn:
+        conn.row_factory = sqlite3.Row
+        file_id = _file_id(conn, wire_path)
+        conn.execute(
+            f"UPDATE {table} SET payload = ? WHERE file_id = ?", (payload, file_id)
+        )
+        column = _LANE_DIGEST_COLUMNS[table]
+        if not as_writer or column not in _entry_columns(conn):
+            return
+        conn.execute(
+            f"UPDATE cache_entry SET {column} = ? WHERE file_id = ?",
+            (hashlib.sha256(payload).digest(), file_id),
+        )
+        _remint_identity_checksum(conn, file_id, version=resolved)
+
+
+def swap_lane_bytes(
+    cache_path: Path,
+    wire_path: str,
+    table: str,
+    *,
+    anchor: bytes,
+    needle: bytes,
+    replacement: bytes,
+    as_writer: bool = False,
+) -> None:
+    """Replace the first ``needle`` after ``anchor`` in one lane, length kept.
+
+    The swap is asserted to land: a needle that matched nothing would leave
+    the warm run reading a sound row, and a test would pass over a corruption
+    that never happened.
+    """
+
+    assert len(needle) == len(replacement) and needle != replacement
+    payload = read_lane_bytes(cache_path, wire_path, table)
+    start = payload.find(anchor)
+    assert start >= 0, (anchor, wire_path, table)
+    at = payload.find(needle, start)
+    assert at >= 0, (needle, wire_path, table)
+    changed = payload[:at] + replacement + payload[at + len(needle) :]
+    assert len(changed) == len(payload)
+    write_lane_bytes(cache_path, wire_path, table, changed, as_writer=as_writer)
+
+
+def set_lane_digest_column(
+    cache_path: Path, wire_path: str, table: str, digest: bytes
+) -> None:
+    """Overwrite one lane's digest column and NOT the identity checksum.
+
+    Against a store without the column there is nothing to overwrite; the
+    lane bytes a caller changed beside it are then guarded by nothing at all,
+    which is the defect the column exists to close.
+    """
+
+    with open_store(cache_path) as conn:
+        column = _LANE_DIGEST_COLUMNS[table]
+        if column not in _entry_columns(conn):
+            return
+        conn.execute(
+            f"UPDATE cache_entry SET {column} = ? WHERE wire_path = ?",
+            (digest, wire_path),
+        )
+
+
+def _remint_identity_checksum(
+    conn: sqlite3.Connection, file_id: int, *, version: str
+) -> None:
+    row = conn.execute(
+        "SELECT * FROM cache_entry WHERE file_id = ?", (file_id,)
+    ).fetchone()
+    conn.execute(
+        "UPDATE cache_entry SET checksum = ? WHERE file_id = ?",
+        (
+            identity_checksum(
+                version=version, identity=_identity_of(row), digests=_digests_of(row)
+            ),
+            file_id,
+        ),
+    )
+
+
+def _digests_of(row: sqlite3.Row) -> LaneDigests:
+    return LaneDigests(
+        neutral=bytes(row["neutral_digest"]),
+        dependent=bytes(row["dependent_digest"]),
+    )
+
+
+# -- the previous physical generation -----------------------------------------
+#
+# Byte for byte the schema bd7223a3 created (``CACHE_BACKEND_SCHEMA_VERSION``
+# "2"), and the checksum it minted: the identity alone, lane lengths included,
+# lane CONTENT not. A literal on purpose -- a helper that derived it from the
+# running build would describe whatever the build now is, not what a user's
+# disk already holds.
+
+_SCHEMA_TWO = "2"
+_SCHEMA_TWO_DDL = (
+    f"CREATE TABLE {META_TABLE}(key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+    "CREATE TABLE cache_entry("
+    "file_id INTEGER PRIMARY KEY, "
+    "wire_path TEXT NOT NULL, "
+    "binding_version TEXT NOT NULL, "
+    "stat_mtime_ns INTEGER NOT NULL, "
+    "stat_size INTEGER NOT NULL, "
+    "source_digest BLOB NOT NULL, "
+    "git_blob_format TEXT, "
+    "git_blob_id BLOB, "
+    "neutral_profile BLOB NOT NULL, "
+    "dependent_profile BLOB NOT NULL, "
+    "binding_context BLOB NOT NULL, "
+    "clone_channels TEXT NOT NULL, "
+    "generation INTEGER NOT NULL, "
+    "last_used_epoch INTEGER NOT NULL, "
+    "neutral_bytes INTEGER NOT NULL, "
+    "dependent_bytes INTEGER NOT NULL, "
+    "checksum TEXT NOT NULL)",
+    f"CREATE TABLE {TABLE_NEUTRAL}("
+    "file_id INTEGER PRIMARY KEY REFERENCES cache_entry(file_id) "
+    "ON DELETE CASCADE, payload BLOB NOT NULL)",
+    f"CREATE TABLE {TABLE_DEPENDENT}("
+    "file_id INTEGER PRIMARY KEY REFERENCES cache_entry(file_id) "
+    "ON DELETE CASCADE, payload BLOB NOT NULL)",
+    "CREATE TABLE cache_singletons("
+    "key TEXT PRIMARY KEY, payload BLOB NOT NULL, checksum TEXT NOT NULL)",
+    "CREATE UNIQUE INDEX ux_entry_path ON cache_entry(wire_path)",
+    "CREATE INDEX ix_entry_gen ON cache_entry(generation, wire_path)",
+    "CREATE INDEX ix_entry_used ON cache_entry(last_used_epoch)",
+)
+_SCHEMA_TWO_COLUMNS = (
+    "file_id",
+    "wire_path",
+    "binding_version",
+    "stat_mtime_ns",
+    "stat_size",
+    "source_digest",
+    "git_blob_format",
+    "git_blob_id",
+    "neutral_profile",
+    "dependent_profile",
+    "binding_context",
+    "clone_channels",
+    "generation",
+    "last_used_epoch",
+    "neutral_bytes",
+    "dependent_bytes",
+)
+
+
+def _schema_two_checksum(version: str, row: sqlite3.Row) -> str:
+    identity = _identity_of(row)
+    return cache_envelope_checksum(
+        version,
+        {
+            "p": identity.wire_path,
+            "cb": identity.binding_version,
+            "st": [identity.stat_mtime_ns, identity.stat_size],
+            "sd": identity.source_digest.hex(),
+            "gb": (
+                None
+                if identity.git_blob_id is None
+                else [identity.git_blob_format, identity.git_blob_id.hex()]
+            ),
+            "np": identity.neutral_profile.hex(),
+            "dp": identity.dependent_profile.hex(),
+            "bc": identity.binding_context.hex(),
+            "mt": list(identity.clone_channels),
+            "nb": identity.neutral_bytes,
+            "db": identity.dependent_bytes,
+        },
+    )
+
+
+def transcribe_to_schema_two(source: Path, target: Path) -> None:
+    """Write ``source``'s entries as the previous generation would have.
+
+    Every identity column, every lane byte and every singleton is carried
+    over unchanged; only the shape is the old one: no content digests, the
+    old identity checksum, the old singleton checksum (over the decoded
+    value) and ``schema_version`` "2". A row that verified there is exactly
+    a row a user's disk holds after running bd7223a3.
+    """
+
+    meta = read_cache_meta(source)
+    version = meta[META_KEY_VERSION]
+    with open_store(source) as src, open_store(target) as dst:
+        src.row_factory = sqlite3.Row
+        for statement in _SCHEMA_TWO_DDL:
+            dst.execute(statement)
+        placeholders = ",".join("?" * (len(_SCHEMA_TWO_COLUMNS) + 1))
+        for row in src.execute("SELECT * FROM cache_entry ORDER BY file_id"):
+            dst.execute(
+                f"INSERT INTO cache_entry({','.join(_SCHEMA_TWO_COLUMNS)}, checksum) "
+                f"VALUES ({placeholders})",
+                (
+                    *(row[column] for column in _SCHEMA_TWO_COLUMNS),
+                    _schema_two_checksum(version, row),
+                ),
+            )
+        for table in (TABLE_NEUTRAL, TABLE_DEPENDENT):
+            dst.executemany(
+                f"INSERT INTO {table}(file_id, payload) VALUES (?, ?)",
+                src.execute(f"SELECT file_id, payload FROM {table}").fetchall(),
+            )
+        for key, payload in src.execute("SELECT key, payload FROM cache_singletons"):
+            value = orjson.loads(bytes(payload))
+            dst.execute(
+                "INSERT INTO cache_singletons(key, payload, checksum) VALUES (?,?,?)",
+                (
+                    key,
+                    bytes(payload),
+                    cache_envelope_checksum(version, {"p": key, "e": value}),
+                ),
+            )
+        dst.executemany(
+            f"INSERT INTO {META_TABLE}(key, value) VALUES (?, ?)",
+            sorted(
+                {
+                    **{
+                        key: value
+                        for key, value in meta.items()
+                        if key != META_KEY_SCHEMA
+                    },
+                    META_KEY_SCHEMA: _SCHEMA_TWO,
+                    META_KEY_CHECKSUM: envelope_checksum(
+                        version=version,
+                        python_tag=meta[META_KEY_PYTHON_TAG],
+                        fingerprint_version=meta[META_KEY_FINGERPRINT],
+                    ),
+                }.items()
+            ),
+        )

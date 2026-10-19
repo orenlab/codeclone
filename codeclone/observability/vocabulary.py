@@ -315,6 +315,10 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "cache_lane_neutral_profile_mismatch",
         "cache_profile_hit",
         "cache_profile_miss",
+        "cache_refused_corrupt",
+        "cache_refused_incompatible",
+        "cache_refused_undecodable",
+        "cache_refused_unreadable",
         "cache_reuse_structural_findings_absent",
         "cache_stat_fast_reject",
         # The producer edge of the canonical backend (step 7): ONE span at

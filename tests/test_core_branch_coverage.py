@@ -1350,6 +1350,12 @@ def _discover_with_single_cached_entry(
         def prune_file_entries(self, existing_filepaths: object) -> int:
             return 0
 
+        def refusal_counts(self) -> dict[str, int]:
+            return {}
+
+        def refusal_warnings(self) -> tuple[str, ...]:
+            return ()
+
     boot = BootstrapResult(
         root=tmp_path,
         config=NormalizationConfig(),

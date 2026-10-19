@@ -66,10 +66,13 @@ from .backend import (
     CacheBackendForeign,
     CacheBackendUnreadable,
     CacheBackendUnusable,
-    EntryIdentity,
+    CacheRecordRefused,
+    IdentityRow,
+    IdentityScan,
     WireShapeRefused,
     attribute_db_cost,
     join_wire_entry,
+    scan_identities,
     split_wire_entry,
     verify_envelope,
 )
@@ -109,9 +112,12 @@ from .versioning import (
     LEGACY_CACHE_SECRET_FILENAME,
     MAX_CACHE_SIZE_BYTES,
     CacheData,
+    CacheRefusal,
+    CacheRefusals,
     CacheStatus,
     _empty_cache_data,
     _resolve_root,
+    new_refusal_tally,
     new_tracked_files,
     tracked_files,
 )
@@ -188,6 +194,8 @@ class Cache:
         "_module_names_by_runtime_path",
         "_module_neutral_profile",
         "_reader",
+        "_refusals",
+        "_refused_rows",
         "_used_wire_paths",
         "_write_enabled",
         "_written_bytes",
@@ -276,7 +284,14 @@ class Cache:
         self._generation: int = 0
         # Identity for every stored row: 0.48% of the store, measured. The
         # lanes behind these rows stay on disk until somebody asks for one.
-        self._identity: dict[str, tuple[int, EntryIdentity]] = {}
+        self._identity: dict[str, IdentityRow] = {}
+        # Rows the load could not verify, by runtime path, so the lookup that
+        # asks for one says why its file is walked again instead of passing
+        # for a file that was never cached.
+        self._refused_rows: dict[str, str] = {}
+        # Every record this run refused, by reason: what the counters and the
+        # warning of the run are read from.
+        self._refusals = new_refusal_tally()
         # Paths this run actually read, so the TTL sweep can tell a live entry
         # from one nothing has wanted for weeks.
         self._used_wire_paths: set[str] = set()
@@ -439,6 +454,7 @@ class Cache:
         )
         self._canonical_runtime_paths = set()
         self._identity = {}
+        self._refused_rows = {}
         self._used_wire_paths = set()
         self._discard_store = True
         self.segment_report_projection = None
@@ -526,8 +542,8 @@ class Cache:
                         load_span.set_counter(
                             "cache_backend_read_bytes",
                             sum(
-                                len(identity.wire_path)
-                                for _fid, identity in self._identity.values()
+                                len(row.identity.wire_path)
+                                for row in self._identity.values()
                             ),
                         )
                 finally:
@@ -628,21 +644,16 @@ class Cache:
         # questions worth 247 KB. ``decoded_entries`` stays at zero on purpose:
         # nothing has been decoded yet, and a counter that said otherwise would
         # be reporting work that has not happened.
-        identities: dict[str, tuple[int, EntryIdentity]] = {}
         with span(name="cache.decode_entries") as decode_span:
-            for file_id, identity in backend.iter_identities(version):
-                runtime_path = runtime_filepath_from_wire(
-                    identity.wire_path, root=self.root
-                )
-                identities[runtime_path] = (file_id, identity)
-            decode_span.set_counter("cache_entries", len(identities))
+            self._identity, self._refused_rows = _identity_register(
+                scan_identities(backend, version), root=self.root
+            )
+            decode_span.set_counter("cache_entries", len(self._identity))
             decode_span.set_counter("decoded_entries", 0)
-        self._identity = identities
         self._used_wire_paths = set()
         with span(name="cache.segment_projection"):
-            self.segment_report_projection = decode_segment_report_projection(
-                backend.read_singleton(SINGLETON_SEGMENT_REPORT, version),
-                root=self.root,
+            self.segment_report_projection = _read_segment_projection(
+                backend, version, root=self.root, refusals=self._refusals
             )
 
         self.cache_schema_version = version
@@ -738,16 +749,14 @@ class Cache:
             dirty_runtime_paths = sorted(moved & set(self.data["files"]))
             deleted_runtime_paths = sorted(dropped)
 
-        rows: list[tuple[EntryIdentity, bytes, bytes]] = []
-        for runtime_path in dirty_runtime_paths:
-            entry = self.get_file_entry(runtime_path)
-            if entry is None:
-                continue
-            wire_path = wire_filepath_from_runtime(runtime_path, root=self.root)
-            identity, neutral, dependent = split_wire_entry(
-                wire_path, self._encode_entry(entry)
+        rows = [
+            split_wire_entry(
+                wire_filepath_from_runtime(runtime_path, root=self.root),
+                self._encode_entry(entry),
             )
-            rows.append((identity, neutral, dependent))
+            for runtime_path in dirty_runtime_paths
+            if (entry := self.get_file_entry(runtime_path)) is not None
+        ]
         written = backend.upsert_entries(
             rows,
             version=self._CACHE_VERSION,
@@ -911,61 +920,66 @@ class Cache:
     def _mark_used(self, runtime_path: str) -> None:
         known = self._identity.get(runtime_path)
         if known is not None:
-            self._used_wire_paths.add(known[1].wire_path)
+            self._used_wire_paths.add(known.identity.wire_path)
+
+    def refusal_counts(self) -> dict[str, int]:
+        """Records this run refused, by the reason's spelling, every reason present.
+
+        Keyed by spelling because that is all a reader publishes: the counter
+        suffix and the warning both say ``corrupt``, never the enum.
+        """
+
+        return {
+            reason.value: count for reason, count in self._refusals.counts().items()
+        }
+
+    def refusal_warnings(self) -> tuple[str, ...]:
+        """One line per refusal reason that fired; none for ordinary misses."""
+
+        return self._refusals.warnings()
 
     def _materialize(self, runtime_path: str) -> CacheEntryV3 | None:
-        """Pull one entry's lanes off disk and decode it.
+        """Pull one entry's lanes off disk, verify them, and decode it.
 
-        A lane that fails to decode makes this one entry a miss, never the
-        store: the identity row that named it is dropped so the run re-analyses
-        that file and the next save replaces it.
+        Nothing is served from a record that is not exactly what was written:
+        each way a record fails is one typed refusal, counted by reason, and
+        the identity row that named it is dropped so the run re-analyses that
+        file and the next save replaces it. Only a store that cannot be opened
+        keeps the row -- it says nothing against any one row. A path no row
+        names is an ordinary miss and is neither counted nor reported.
         """
 
         known = self._identity.get(runtime_path)
         if known is None:
+            unverified = self._refused_rows.pop(runtime_path, None)
+            if unverified is not None:
+                self._refusals.record(CacheRefusal.CORRUPT, unverified)
             return None
-        file_id, identity = known
-        try:
-            backend = self._lane_reader()
-            if backend is None:
-                return None
-            with (
-                span(name="cache.backend.load_generation") as lane_span,
-                attribute_db_cost(lane_span, backend),
-            ):
-                neutral = backend.read_lane(TABLE_NEUTRAL, file_id)
-                dependent = backend.read_lane(TABLE_DEPENDENT, file_id)
-                lane_span.set_counter(
-                    "cache_backend_read_bytes",
-                    identity.neutral_bytes + identity.dependent_bytes,
-                )
-        except CacheBackendUnusable:
-            self._identity.pop(runtime_path, None)
+        reader = self._lane_reader()
+        if reader is None:
+            self._refusals.record(CacheRefusal.UNREADABLE, known.identity.wire_path)
             return None
-        except OSError:
-            self._identity.pop(runtime_path, None)
+        wire = _read_wire(reader, known)
+        if isinstance(wire, CacheRefusal):
+            _refuse(self._identity, self._refusals, runtime_path, wire)
             return None
-        if neutral is None or dependent is None:
-            self._identity.pop(runtime_path, None)
-            return None
-        try:
-            wire = join_wire_entry(identity, neutral, dependent)
-        except WireShapeRefused:
-            self._identity.pop(runtime_path, None)
-            return None
-        # ``identity.wire_path`` IS the analysed spelling — it is what this
-        # load derived ``runtime_path`` FROM — and the decoder is handed both
-        # so it never has to pick one for a family whose domain it cannot see.
+        # ``wire_path`` IS the analysed spelling — it is what this load derived
+        # ``runtime_path`` FROM — and the decoder is handed both so it never
+        # has to pick one for a family whose domain it cannot see. The bytes
+        # were verified before they were decoded, so a decoder that refuses
+        # them refuses what a writer really stored: an incompatibility.
         entry = self._decode_entry(
-            wire, runtime_path, analysed_filepath=identity.wire_path
+            wire, runtime_path, analysed_filepath=known.identity.wire_path
         )
         if entry is None:
-            self._identity.pop(runtime_path, None)
+            _refuse(
+                self._identity, self._refusals, runtime_path, CacheRefusal.INCOMPATIBLE
+            )
             return None
         # A materialised entry is what the store already holds, so it enters
         # the map without being marked changed.
         dict.__setitem__(self.data["files"], runtime_path, entry)
-        self._used_wire_paths.add(identity.wire_path)
+        self._used_wire_paths.add(known.identity.wire_path)
         return entry
 
     def put_file_entry(
@@ -1248,6 +1262,102 @@ class Cache:
             self._canonical_runtime_paths.discard(runtime_path)
         self._dirty = True
         return len(stale_runtime_paths)
+
+
+def _identity_register(
+    scan: IdentityScan, *, root: Path | None
+) -> tuple[dict[str, IdentityRow], dict[str, str]]:
+    """A load's identity scan keyed by runtime path: the served rows, the refused.
+
+    The refused ones are kept by path so the lookup that asks for one can say
+    why its file is walked again instead of passing for a file never cached.
+    """
+
+    return (
+        {
+            runtime_filepath_from_wire(row.identity.wire_path, root=root): row
+            for row in scan.verified
+        },
+        {
+            runtime_filepath_from_wire(wire_path, root=root): wire_path
+            for wire_path in scan.refused
+        },
+    )
+
+
+def _refuse(
+    identities: dict[str, IdentityRow],
+    refusals: CacheRefusals,
+    runtime_path: str,
+    reason: CacheRefusal,
+) -> None:
+    """Count one refused entry and forget its row, so its file is re-walked."""
+
+    known = identities.pop(runtime_path)
+    refusals.record(reason, known.identity.wire_path)
+
+
+def _read_wire(
+    reader: CacheBackend, known: IdentityRow
+) -> dict[str, object] | CacheRefusal:
+    """One stored entry's wire form -- or the reason it may not be decoded.
+
+    The lanes are verified against the digests the verified identity names
+    BEFORE either is decoded (``CacheBackend.read_lane``), so from the first
+    decoded byte on every failure is about bytes some writer really stored:
+    bytes that are not a record at all are ``UNDECODABLE``.
+    """
+
+    identity = known.identity
+    try:
+        with (
+            span(name="cache.backend.load_generation") as lane_span,
+            attribute_db_cost(lane_span, reader),
+        ):
+            neutral = reader.read_lane(
+                TABLE_NEUTRAL, known.file_id, known.digests.neutral
+            )
+            dependent = reader.read_lane(
+                TABLE_DEPENDENT, known.file_id, known.digests.dependent
+            )
+            lane_span.set_counter(
+                "cache_backend_read_bytes",
+                identity.neutral_bytes + identity.dependent_bytes,
+            )
+        return join_wire_entry(identity, neutral, dependent)
+    except CacheRecordRefused as refused:
+        return refused.reason
+    except WireShapeRefused:
+        return CacheRefusal.UNDECODABLE
+    except (CacheBackendUnusable, OSError):
+        return CacheRefusal.UNREADABLE
+
+
+def _read_segment_projection(
+    backend: CacheBackend,
+    version: str,
+    *,
+    root: Path | None,
+    refusals: CacheRefusals,
+) -> SegmentReportProjection | None:
+    """The stored segment projection, verified and decoded, or ``None``.
+
+    No stored projection is an ordinary miss. A stored one that fails its
+    checksum, or that verifies and still does not decode, is a refusal like
+    any entry's: counted, warned, and recomputed by the run.
+    """
+
+    try:
+        stored = backend.read_singleton(SINGLETON_SEGMENT_REPORT, version)
+    except CacheRecordRefused as refused:
+        refusals.record(refused.reason, SINGLETON_SEGMENT_REPORT)
+        return None
+    if stored is None:
+        return None
+    projection = decode_segment_report_projection(stored, root=root)
+    if projection is None:
+        refusals.record(CacheRefusal.INCOMPATIBLE, SINGLETON_SEGMENT_REPORT)
+    return projection
 
 
 def _validate_materialized_api_surface(

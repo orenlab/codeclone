@@ -71,7 +71,7 @@ from codeclone.cache.projection import (
 )
 from codeclone.cache.reuse import binding_context_digest
 from codeclone.cache.store import Cache, file_stat_signature
-from codeclone.cache.versioning import CacheStatus, _resolve_root
+from codeclone.cache.versioning import CacheRefusal, CacheStatus, _resolve_root
 from codeclone.contracts import CACHE_VERSION
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import _unit_to_group_item
@@ -1919,14 +1919,18 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
     assert str(target) not in files
 
 
-def test_cache_row_checksum_covers_content_not_stored_bytes(tmp_path: Path) -> None:
-    """Integrity is a claim about the entry, not about how it was serialised.
+def test_a_lane_re_encoded_on_disk_is_refused_not_trusted(tmp_path: Path) -> None:
+    """The checksum covers the stored bytes, so a rewrite is never taken on trust.
 
-    The JSON store proved this against document whitespace; a row store proves
-    the same property against key order and spacing inside the row payload. A
-    checksum that bound the literal bytes would make every re-encoding a false
-    integrity failure, which is how a disposable cache turns into a permanent
-    cold path.
+    This used to pin the opposite: a lane rewritten with reversed keys and
+    indentation loaded cleanly, because the checksum covered the identity and
+    the lane was only decoded. That is exactly the gap through which a lane
+    rewritten with a wrong VALUE in the same shape was served as truth
+    (measured 2026-10-13, fastapi and this repository). The cache's own writer
+    always stores one canonical encoding, so a differently encoded lane is
+    bytes that writer did not write: one typed refusal, and the run that
+    re-walks the file stores the canonical bytes again (the warm path comes
+    back on the next run -- ``test_cache_content_integrity``).
     """
 
     cache_path = tmp_path / "cache.sqlite3"
@@ -1936,9 +1940,6 @@ def test_cache_row_checksum_covers_content_not_stored_bytes(tmp_path: Path) -> N
     assert isinstance(entry, dict)
     neutral = entry["n"]
     assert isinstance(neutral, dict)
-    # Rewrite the lane with reversed key order and indentation. The identity
-    # checksum is untouched and still holds, because it covers the identity;
-    # the lane is decoded, not compared byte for byte.
     reordered = dict(reversed(list(neutral.items())))
     reordered.pop("mt", None)
     _overwrite_lane(
@@ -1948,7 +1949,12 @@ def test_cache_row_checksum_covers_content_not_stored_bytes(tmp_path: Path) -> N
         json.dumps(reordered, indent=2).encode("utf-8"),
     )
 
-    _assert_loads_cleanly(cache_path, "x.py")
+    loaded = Cache(cache_path)
+    loaded.load()
+    assert loaded.load_status is CacheStatus.OK
+    assert loaded.get_file_entry("x.py") is None
+    assert loaded.refusal_counts()[CacheRefusal.CORRUPT] == 1
+    assert any("x.py" in line for line in loaded.refusal_warnings())
 
 
 def test_cache_checksum_matches_legacy_string_digest_for_unicode_payload() -> None:

@@ -643,6 +643,12 @@ def _capture_cache_path_for_args(
         def prune_file_entries(self, existing_filepaths: object) -> int:
             return 0
 
+        def refusal_counts(self) -> dict[str, int]:
+            return {}
+
+        def refusal_warnings(self) -> tuple[str, ...]:
+            return ()
+
     monkeypatch.setattr(cli, "Cache", _CacheStub)
     _write_default_source(tmp_path)
     _run_parallel_main(monkeypatch, [str(tmp_path), *extra_args, "--no-progress"])
@@ -1004,6 +1010,12 @@ def test_cli_default_cache_dir_per_root(
         def prune_file_entries(self, existing_filepaths: object) -> int:
             return 0
 
+        def refusal_counts(self) -> dict[str, int]:
+            return {}
+
+        def refusal_warnings(self) -> tuple[str, ...]:
+            return ()
+
     monkeypatch.setattr(cli, "Cache", _CacheStub)
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root1), "--no-progress"])
@@ -1217,6 +1229,12 @@ def test_cli_no_legacy_warning_when_paths_match(
         def prune_file_entries(self, existing_filepaths: object) -> int:
             return 0
 
+        def refusal_counts(self) -> dict[str, int]:
+            return {}
+
+        def refusal_warnings(self) -> tuple[str, ...]:
+            return ()
+
     monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", _LegacyPathSame(cache_path))
     monkeypatch.setattr(cli, "Cache", _CacheStub)
     _patch_parallel(monkeypatch)
@@ -1278,6 +1296,12 @@ def test_cli_cache_status_string_fallback(
 
         def prune_file_entries(self, existing_filepaths: object) -> int:
             return 0
+
+        def refusal_counts(self) -> dict[str, int]:
+            return {}
+
+        def refusal_warnings(self) -> tuple[str, ...]:
+            return ()
 
     monkeypatch.setattr(cli, "Cache", _CacheStub)
     _patch_parallel(monkeypatch)

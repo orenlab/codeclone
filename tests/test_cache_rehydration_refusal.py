@@ -24,9 +24,8 @@ and each can come back on its own.
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Callable, Iterator
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -51,6 +50,7 @@ from codeclone.models import (
     RuntimeReachabilityFactDict,
     SecuritySurfaceDict,
 )
+from tests._cache_store_fixtures import read_lane_bytes, write_lane_bytes
 from tests._pipeline_fixtures import analysis_boot, discover_and_process
 
 _MODULE = '''"""Rows in every family a warm run rebuilds."""
@@ -311,25 +311,26 @@ def corrupt_cached_dependent_lane(
     The swap is asserted to land exactly once: a needle that matched nothing
     would leave the warm run reading a sound row, and the test would pass
     over a corruption that never happened.
+
+    The row is stored as a writer that produced these bytes would store it --
+    content digest and identity checksum re-minted over them -- because the
+    callers are after the READERS: a row whose integrity holds and whose
+    content this build cannot rebuild. Changed bytes under an untouched
+    digest are refused before any reader sees them
+    (``test_cache_content_integrity``).
     """
 
-    with closing(sqlite3.connect(cache)) as connection:
-        row = connection.execute(
-            f"SELECT d.file_id, d.payload FROM {TABLE_DEPENDENT} d "
-            "JOIN cache_entry e ON e.file_id = d.file_id "
-            "WHERE e.wire_path = ?",
-            (wire_path,),
-        ).fetchone()
-        assert row is not None
-        file_id, payload = int(row[0]), bytes(row[1])
-        assert payload.count(needle) == 1, (needle, payload)
-        swapped = needle[:-2] + (b"q" if needle[-2:-1] != b"q" else b"z") + b'"'
-        assert len(swapped) == len(needle)
-        connection.execute(
-            f"UPDATE {TABLE_DEPENDENT} SET payload = ? WHERE file_id = ?",
-            (payload.replace(needle, swapped), file_id),
-        )
-        connection.commit()
+    payload = read_lane_bytes(cache, wire_path, TABLE_DEPENDENT)
+    assert payload.count(needle) == 1, (needle, payload)
+    swapped = needle[:-2] + (b"q" if needle[-2:-1] != b"q" else b"z") + b'"'
+    assert len(swapped) == len(needle)
+    write_lane_bytes(
+        cache,
+        wire_path,
+        TABLE_DEPENDENT,
+        payload.replace(needle, swapped),
+        as_writer=True,
+    )
 
 
 def _discover(

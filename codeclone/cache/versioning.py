@@ -52,6 +52,95 @@ class CacheStatus(str, Enum):
     INTEGRITY_FAILED = "integrity_failed"
 
 
+class CacheRefusal(str, Enum):
+    """Why one stored record was not served although the store was usable.
+
+    A store-wide verdict stays a :class:`CacheStatus`; this is the per-record
+    vocabulary, and an ordinary miss -- no record, or a record for content
+    that has since changed -- is deliberately absent from it: nothing is
+    wrong with the store then, so there is nothing to refuse or to report.
+
+    ``CORRUPT``       the stored bytes are not the bytes that were written:
+                      an identity checksum, a lane or singleton digest, or a
+                      lane row that is gone.
+    ``UNDECODABLE``   verified bytes -- exactly what a writer stored -- that
+                      are not a cache record at all.
+    ``INCOMPATIBLE``  a verified record this build's decoder refuses: a
+                      writer and a reader that disagree under one generation.
+    ``UNREADABLE``    the store could not hand the record back.
+
+    Every member is a refusal with a count and a warning, and the file it
+    names is walked again from source; none is ever served.
+    """
+
+    CORRUPT = "corrupt"
+    UNDECODABLE = "undecodable"
+    INCOMPATIBLE = "incompatible"
+    UNREADABLE = "unreadable"
+
+
+_REFUSAL_MEANING: dict[CacheRefusal, str] = {
+    CacheRefusal.CORRUPT: "corrupt (the stored bytes are not the bytes written)",
+    CacheRefusal.UNDECODABLE: "undecodable (verified bytes that are not a record)",
+    CacheRefusal.INCOMPATIBLE: (
+        "incompatible (a verified record this build cannot read)"
+    ),
+    CacheRefusal.UNREADABLE: "unreadable (the store could not return the record)",
+}
+
+#: How many refused names one warning spells out before it counts the rest.
+_REFUSAL_NAMES_SHOWN = 5
+
+
+class CacheRefusals:
+    """The refusals one run made, by reason, with the records they named.
+
+    Counted where the refusal happens rather than inferred later from a
+    miss, because a miss and a refusal re-walk a file identically and only
+    the place that refused knows which one it was.
+    """
+
+    __slots__ = ("_names",)
+
+    def __init__(self) -> None:
+        self._names: dict[CacheRefusal, list[str]] = {
+            reason: [] for reason in CacheRefusal
+        }
+
+    def record(self, reason: CacheRefusal, name: str) -> None:
+        self._names[reason].append(name)
+
+    def counts(self) -> dict[CacheRefusal, int]:
+        """Every reason, zero included: zero is a measurement, not an absence."""
+
+        return {reason: len(names) for reason, names in self._names.items()}
+
+    def warnings(self) -> tuple[str, ...]:
+        """One line per reason that refused anything, naming what it refused."""
+
+        lines: list[str] = []
+        for reason, names in self._names.items():
+            if not names:
+                continue
+            ordered = sorted(names)
+            shown = ", ".join(ordered[:_REFUSAL_NAMES_SHOWN])
+            rest = len(ordered) - _REFUSAL_NAMES_SHOWN
+            more = f" (+{rest} more)" if rest > 0 else ""
+            lines.append(
+                f"Cache refused {len(ordered)} "
+                f"record{'' if len(ordered) == 1 else 's'} as "
+                f"{_REFUSAL_MEANING[reason]}; recomputed from source: "
+                f"{shown}{more}"
+            )
+        return tuple(lines)
+
+
+def new_refusal_tally() -> CacheRefusals:
+    """A fresh per-run refusal tally, built the way ``CacheData`` already is."""
+
+    return CacheRefusals()
+
+
 class TrackedFiles(dict[str, CacheEntryV3]):
     """The loaded entry map, recording which keys a run actually changed.
 
@@ -167,11 +256,14 @@ __all__ = [
     "MAX_CACHE_SIZE_BYTES",
     "_DEFAULT_WIRE_UNIT_FLOW_PROFILES",
     "CacheData",
+    "CacheRefusal",
+    "CacheRefusals",
     "CacheStatus",
     "TrackedFiles",
     "_empty_cache_data",
     "_resolve_root",
     "mark_deleted",
+    "new_refusal_tally",
     "new_tracked_files",
     "tracked_files",
 ]

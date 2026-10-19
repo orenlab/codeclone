@@ -352,6 +352,10 @@ def test_cache_content_identity_stage_is_wrapped_once_and_passive(
         "cache_lane_neutral_content_miss": 0,
         "cache_lane_neutral_profile_mismatch": 0,
         "cache_reuse_structural_findings_absent": 0,
+        "cache_refused_corrupt": 0,
+        "cache_refused_incompatible": 0,
+        "cache_refused_undecodable": 0,
+        "cache_refused_unreadable": 0,
     }
 
 
@@ -394,6 +398,10 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
         "cache_lane_neutral_content_miss": 0,
         "cache_lane_neutral_profile_mismatch": 0,
         "cache_reuse_structural_findings_absent": 0,
+        "cache_refused_corrupt": 0,
+        "cache_refused_incompatible": 0,
+        "cache_refused_undecodable": 0,
+        "cache_refused_unreadable": 0,
     }
 
     (tmp_path / "added.py").write_text("VALUE = 1\n", "utf-8")
@@ -419,6 +427,10 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
         "cache_lane_neutral_content_miss": 0,
         "cache_lane_neutral_profile_mismatch": 0,
         "cache_reuse_structural_findings_absent": 0,
+        "cache_refused_corrupt": 0,
+        "cache_refused_incompatible": 0,
+        "cache_refused_undecodable": 0,
+        "cache_refused_unreadable": 0,
     }
 
 

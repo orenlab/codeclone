@@ -20,6 +20,7 @@ from ..cache.entries import (
 from ..cache.projection import rehydrate_cache_neutral
 from ..cache.reuse import clone_artifact_channels, prove_cached_source_identity
 from ..cache.store import Cache, file_stat_signature
+from ..cache.versioning import CacheRefusal
 from ..models import (
     CacheEntryV3,
     CacheLaneReuseReason,
@@ -116,6 +117,18 @@ _DEPENDENT_LANE_REASON_COUNTERS: Final[Mapping[CacheLaneReuseReason, str]] = {
 # indistinguishable from an entry that was never cached.
 _POST_LANE_REFUSAL_COUNTERS: Final[Mapping[CachedSourceStatsRefusal, str]] = {
     "structural_findings_absent": "cache_reuse_structural_findings_absent",
+}
+
+# A record the cache refused to serve -- its bytes are not the bytes written,
+# or are no record this build can read, or could not be read back -- is walked
+# again exactly like a miss; only the cache knows it was a refusal, so the
+# count is the cache's, published here beside the lane reasons. An ordinary
+# miss has no key of its own here on purpose: it is not a refusal.
+_CACHE_REFUSAL_COUNTERS: Final[Mapping[CacheRefusal, str]] = {
+    CacheRefusal.CORRUPT: "cache_refused_corrupt",
+    CacheRefusal.INCOMPATIBLE: "cache_refused_incompatible",
+    CacheRefusal.UNDECODABLE: "cache_refused_undecodable",
+    CacheRefusal.UNREADABLE: "cache_refused_unreadable",
 }
 
 #: Every member is published on every run, zero included, so a zero means
@@ -326,6 +339,14 @@ def _count_post_lane_refusal(
     )
     if refusal is not None:
         counts[_POST_LANE_REFUSAL_COUNTERS[refusal]] += 1
+
+
+def _count_cache_refusals(counts: dict[str, int], cache: Cache) -> None:
+    """Fold the cache's own refusal tally into the published family."""
+
+    refused = cache.refusal_counts()
+    for reason, counter_key in _CACHE_REFUSAL_COUNTERS.items():
+        counts[counter_key] = refused.get(reason.value, 0)
 
 
 def _publish_reuse_reasons(handle: SpanHandle, counts: Mapping[str, int]) -> None:
@@ -653,7 +674,11 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         # reuse happened and nothing about whether it worked.
         profile_span.set_counter("cache_profile_hit", cache_hits)
         profile_span.set_counter("cache_profile_miss", len(files_to_process))
+        _count_cache_refusals(reuse_reasons, cache)
         _publish_reuse_reasons(profile_span, reuse_reasons)
+    # A refusal is reported where every surface already reads discovery's
+    # warnings; an ordinary miss adds nothing here.
+    skipped_warnings.extend(cache.refusal_warnings())
 
     cache.prune_file_entries(all_file_paths)
 

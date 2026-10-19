@@ -91,8 +91,17 @@ a lost authority record.  The run store's ``FULL`` is untouched by this choice.
 
 Integrity
 ---------
-Each entry carries a checksum over its identity, so a row that fails
-verification is dropped as one cache miss instead of condemning the store.
+Each entry carries a checksum over its identity, and its identity names the
+SHA-256 of both lanes' stored bytes, so every byte a reader later decodes is
+covered: a lane is verified against its digest before it is decoded, and a
+row that fails either check is one typed refusal (``CacheRefusal``) instead
+of a fact or a condemned store. Measured 2026-10-13: while the checksum
+covered the identity and the lane LENGTHS only, one byte changed inside a
+lane, length kept, was served as truth and moved findings, verdicts and run
+ids on fastapi and on this repository. Schema "2" is that generation; a
+store still carrying it is refused whole as a version mismatch and its
+tables are dropped at the next write, never adapted -- re-signing old rows
+with fresh digests would sign whatever they already held.
 The meta envelope is checksummed over
 ``{version, python_tag, fingerprint_version}`` for the same reason the JSON
 envelope bound ``v``: a generation retagged in place must be refused, not
@@ -103,6 +112,8 @@ for the ruled threat model.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -120,8 +131,12 @@ from ..utils.sqlite_store import (
     open_sqlite_db_readonly,
 )
 from .integrity import cache_envelope_checksum, verify_cache_envelope_checksum
+from .versioning import CacheRefusal
 
-CACHE_BACKEND_SCHEMA_VERSION: Final = "2"
+#: "3": every identity row names the SHA-256 of both lanes' stored bytes, and
+#: its checksum covers those digests. "2" covered identity and lane lengths
+#: only, so its rows cannot be verified by this reader and are never adapted.
+CACHE_BACKEND_SCHEMA_VERSION: Final = "3"
 
 #: ``synchronous`` for the disposable cache.  See the module docstring: this
 #: is intentionally not the run store's ``FULL``.
@@ -192,6 +207,8 @@ _DDL: Final = (
     "last_used_epoch INTEGER NOT NULL, "
     "neutral_bytes INTEGER NOT NULL, "
     "dependent_bytes INTEGER NOT NULL, "
+    "neutral_digest BLOB NOT NULL, "
+    "dependent_digest BLOB NOT NULL, "
     "checksum TEXT NOT NULL)",
     f"CREATE TABLE IF NOT EXISTS {TABLE_NEUTRAL}("
     "file_id INTEGER PRIMARY KEY REFERENCES cache_entry(file_id) "
@@ -213,9 +230,22 @@ _IDENTITY_COLUMNS: Final = (
     "file_id, wire_path, binding_version, stat_mtime_ns, stat_size, "
     "source_digest, git_blob_format, git_blob_id, neutral_profile, "
     "dependent_profile, binding_context, clone_channels, generation, "
-    "last_used_epoch, neutral_bytes, dependent_bytes, checksum"
+    "last_used_epoch, neutral_bytes, dependent_bytes, neutral_digest, "
+    "dependent_digest, checksum"
 )
-_CHECKSUM_AT: Final = 16
+_NEUTRAL_DIGEST_AT: Final = 16
+_DEPENDENT_DIGEST_AT: Final = 17
+_CHECKSUM_AT: Final = 18
+
+#: Everything a generation of this store creates, dependents first so a
+#: foreign key never outlives the table it names.
+_GENERATION_TABLES: Final = (
+    TABLE_NEUTRAL,
+    TABLE_DEPENDENT,
+    "cache_singletons",
+    "cache_entry",
+    META_TABLE,
+)
 
 
 class CacheBackendUnusable(Exception):
@@ -238,6 +268,45 @@ class CacheBackendForeign(CacheBackendUnusable):
     and simply belongs to something else.  Reporting it as corrupt would
     invite a user to delete a healthy database of their own.
     """
+
+
+class CacheRecordRefused(Exception):
+    """One stored record this reader will not serve, and why.
+
+    Raised by the reads that verify before they decode, so a caller can never
+    take bytes that failed their check for a record that was merely absent.
+    """
+
+    def __init__(self, reason: CacheRefusal, detail: str) -> None:
+        super().__init__(f"{reason.value}: {detail}")
+        self.reason = reason
+
+
+class LaneDigests(NamedTuple):
+    """SHA-256 of each lane's stored bytes, as the writer stored them."""
+
+    neutral: bytes
+    dependent: bytes
+
+
+class IdentityRow(NamedTuple):
+    """One verified identity row: the key of its lanes, and what they hold."""
+
+    file_id: int
+    identity: EntryIdentity
+    digests: LaneDigests
+
+
+class IdentityScan(NamedTuple):
+    """A load's reading of the identity table.
+
+    ``refused`` names the rows whose checksum or columns failed, by their
+    stored path, so the run can say which files it walked again and why
+    instead of letting them look like files that were never cached.
+    """
+
+    verified: list[IdentityRow]
+    refused: list[str]
 
 
 class WireShapeRefused(Exception):
@@ -303,7 +372,35 @@ def _bind_incremental_vacuum(connection: sqlite3.Connection) -> None:
     connection.execute("VACUUM")
 
 
+def _retire_other_generation(connection: sqlite3.Connection) -> None:
+    """Drop a store a different physical schema wrote, before creating ours.
+
+    ``CREATE TABLE IF NOT EXISTS`` keeps an older ``cache_entry`` as it is, so
+    without this the first write after an upgrade met a table without the
+    digest columns and failed -- and every later run stayed cold. The load
+    already refused that generation as a version mismatch without reading a
+    row of it; what remains is to replace it, never to adapt it: computing
+    digests over its lanes would declare verified whatever bytes they held.
+    """
+
+    has_meta = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (META_TABLE,),
+    ).fetchone()
+    if has_meta is None:
+        return
+    stored = connection.execute(
+        f"SELECT value FROM {META_TABLE} WHERE key = ?", (META_KEY_SCHEMA,)
+    ).fetchone()
+    if stored is not None and stored[0] == CACHE_BACKEND_SCHEMA_VERSION:
+        return
+    for table in _GENERATION_TABLES:
+        connection.execute(f"DROP TABLE IF EXISTS {table}")
+    connection.commit()
+
+
 def _ensure_schema(connection: sqlite3.Connection) -> None:
+    _retire_other_generation(connection)
     # ``auto_vacuum`` is storage management, not part of the durability trio
     # the shared owner holds.  It is bound here, before the tables, because
     # that is the cheapest moment for the migration below -- an empty database
@@ -470,39 +567,33 @@ class CacheBackend:
 
     # -- identity ----------------------------------------------------------
 
-    def iter_identities(self, version: str) -> list[tuple[int, EntryIdentity]]:
-        """Yield ``(file_id, identity)`` for every row whose checksum holds.
+    def identity_rows(self) -> list[tuple[object, ...]]:
+        """Every identity row as stored, unverified: what a load reads first.
 
         This is the whole of a load.  The lanes stay on disk until somebody
-        asks for one, which is the point of the schema.
-
-        A list rather than a generator: the caller drains it into a dict
-        immediately, so lazily yielding bought nothing and kept a cursor open
-        across the whole loop.
+        asks for one, which is the point of the schema.  Verification is
+        :func:`scan_identities`, kept beside the checksum it applies.
         """
 
-        rows = self._query(
+        rows: list[tuple[object, ...]] = self._query(
             f"SELECT {_IDENTITY_COLUMNS} FROM cache_entry ORDER BY wire_path"
         ).fetchall()
-        resolved = (_verified_identity(row, version) for row in rows)
-        return [found for found in resolved if found is not None]
+        return rows
 
     # -- lanes -------------------------------------------------------------
 
-    def read_lane(self, table: str, file_id: int) -> object | None:
+    def read_lane(self, table: str, file_id: int, digest: bytes) -> object:
+        """One lane, decoded only after its bytes are proved to be the written ones.
+
+        ``digest`` is the one the verified identity row names. Every way the
+        stored lane can fail to be that lane is :class:`CacheRecordRefused`
+        with its reason; a SQLite failure stays ``CacheBackendUnusable``.
+        """
+
         row = self._query(
             f"SELECT payload FROM {table} WHERE file_id = ?", (file_id,)
         ).fetchone()
-        if row is None:
-            return None
-        payload = row[0]
-        if not isinstance(payload, bytes | bytearray):
-            return None
-        try:
-            decoded: object = orjson.loads(bytes(payload))
-        except orjson.JSONDecodeError:
-            return None
-        return decoded
+        return _verified_payload(None if row is None else row[0], digest, label=table)
 
     # -- writes ------------------------------------------------------------
 
@@ -523,8 +614,9 @@ class CacheBackend:
             "wire_path, binding_version, stat_mtime_ns, stat_size, "
             "source_digest, git_blob_format, git_blob_id, neutral_profile, "
             "dependent_profile, binding_context, clone_channels, generation, "
-            "last_used_epoch, neutral_bytes, dependent_bytes, checksum) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "last_used_epoch, neutral_bytes, dependent_bytes, neutral_digest, "
+            "dependent_digest, checksum) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(wire_path) DO UPDATE SET "
             "binding_version=excluded.binding_version, "
             "stat_mtime_ns=excluded.stat_mtime_ns, "
@@ -540,27 +632,18 @@ class CacheBackend:
             "last_used_epoch=excluded.last_used_epoch, "
             "neutral_bytes=excluded.neutral_bytes, "
             "dependent_bytes=excluded.dependent_bytes, "
+            "neutral_digest=excluded.neutral_digest, "
+            "dependent_digest=excluded.dependent_digest, "
             "checksum=excluded.checksum",
             [
-                (
-                    identity.wire_path,
-                    identity.binding_version,
-                    identity.stat_mtime_ns,
-                    identity.stat_size,
-                    identity.source_digest,
-                    identity.git_blob_format,
-                    identity.git_blob_id,
-                    identity.neutral_profile,
-                    identity.dependent_profile,
-                    identity.binding_context,
-                    ",".join(identity.clone_channels),
-                    generation,
-                    now_epoch,
-                    identity.neutral_bytes,
-                    identity.dependent_bytes,
-                    identity_checksum(version=version, identity=identity),
+                _entry_row(
+                    identity,
+                    lane_digests(neutral, dependent),
+                    version=version,
+                    generation=generation,
+                    now_epoch=now_epoch,
                 )
-                for identity, _neutral, _dependent in entries
+                for identity, neutral, dependent in entries
             ],
             commit=False,
         )
@@ -720,26 +803,23 @@ class CacheBackend:
     # -- singleton payloads ------------------------------------------------
 
     def read_singleton(self, key: str, version: str) -> object | None:
+        """The stored value, ``None`` when there is none, refused when untrue.
+
+        Verified before it is decoded, like a lane: the checksum covers the
+        SHA-256 of the stored bytes, so a value that merely decodes is never
+        taken for the value that was written.
+        """
+
         row = self._query(
             "SELECT payload, checksum FROM cache_singletons WHERE key = ?",
             (key,),
         ).fetchone()
         if row is None:
             return None
-        payload, checksum = row
-        if not isinstance(checksum, str) or not isinstance(payload, bytes | bytearray):
-            return None
-        try:
-            value: object = orjson.loads(bytes(payload))
-        except orjson.JSONDecodeError:
-            return None
-        if not verify_cache_envelope_checksum(
-            version, {"p": key, "e": value}, checksum
-        ):
-            return None
-        return value
+        return _verified_singleton(key, row[0], row[1], version=version)
 
     def write_singleton(self, key: str, value: object, *, version: str) -> None:
+        payload = encode_payload(value)
         self._executemany(
             "INSERT INTO cache_singletons(key, payload, checksum) VALUES (?,?,?) "
             "ON CONFLICT(key) DO UPDATE SET "
@@ -747,8 +827,8 @@ class CacheBackend:
             (
                 (
                     key,
-                    encode_payload(value),
-                    cache_envelope_checksum(version, {"p": key, "e": value}),
+                    payload,
+                    singleton_checksum(version=version, key=key, payload=payload),
                 ),
             ),
         )
@@ -928,15 +1008,21 @@ def verify_envelope(
     )
 
 
-def identity_checksum(*, version: str, identity: EntryIdentity) -> str:
-    return cache_envelope_checksum(version, identity_preimage(identity))
+def identity_checksum(
+    *, version: str, identity: EntryIdentity, digests: LaneDigests
+) -> str:
+    return cache_envelope_checksum(version, identity_preimage(identity, digests))
 
 
-def identity_preimage(identity: EntryIdentity) -> dict[str, object]:
+def identity_preimage(
+    identity: EntryIdentity, digests: LaneDigests
+) -> dict[str, object]:
     """The bytes an entry's checksum covers: its whole identity, path included.
 
     The path is inside the scope so a row copied under another key is refused
-    rather than served as that other file's facts.
+    rather than served as that other file's facts. The lane digests are
+    inside it so a lane rewritten together with its digest column is refused
+    too: the checksum is what binds the row to the bytes behind it.
     """
 
     return {
@@ -955,6 +1041,8 @@ def identity_preimage(identity: EntryIdentity) -> dict[str, object]:
         "mt": list(identity.clone_channels),
         "nb": identity.neutral_bytes,
         "db": identity.dependent_bytes,
+        "nh": digests.neutral.hex(),
+        "dh": digests.dependent.hex(),
     }
 
 
@@ -962,23 +1050,128 @@ def encode_payload(value: object) -> bytes:
     return orjson.dumps(value, option=orjson.OPT_SORT_KEYS)
 
 
-def _verified_identity(
-    row: tuple[object, ...], version: str
-) -> tuple[int, EntryIdentity] | None:
-    identity = _identity_from_row(row)
-    if identity is None:
+def lane_digests(neutral: bytes, dependent: bytes) -> LaneDigests:
+    """The content digests of two lanes, taken from the bytes to be stored."""
+
+    return LaneDigests(
+        neutral=hashlib.sha256(neutral).digest(),
+        dependent=hashlib.sha256(dependent).digest(),
+    )
+
+
+def singleton_checksum(*, version: str, key: str, payload: bytes) -> str:
+    """A singleton's checksum: its key and the SHA-256 of its stored bytes."""
+
+    return cache_envelope_checksum(
+        version, {"p": key, "h": hashlib.sha256(payload).hexdigest()}
+    )
+
+
+def scan_identities(backend: CacheBackend, version: str) -> IdentityScan:
+    """Every row whose checksum holds, and the paths of those that did not.
+
+    Lists rather than generators: the caller drains them into dicts
+    immediately, so lazily yielding bought nothing and kept a cursor open
+    across the whole loop.
+    """
+
+    verified: list[IdentityRow] = []
+    refused: list[str] = []
+    for row in backend.identity_rows():
+        found = _verified_identity(row, version)
+        if found is not None:
+            verified.append(found)
+        elif isinstance(row[1], str):
+            refused.append(row[1])
+    return IdentityScan(verified=verified, refused=refused)
+
+
+def _entry_row(
+    identity: EntryIdentity,
+    digests: LaneDigests,
+    *,
+    version: str,
+    generation: int,
+    now_epoch: int,
+) -> tuple[object, ...]:
+    """The ``cache_entry`` values of one entry, in the upsert's column order.
+
+    ``digests`` are taken from the lane bytes the same upsert writes, so a
+    row can only ever name the lanes stored beside it.
+    """
+
+    return (
+        identity.wire_path,
+        identity.binding_version,
+        identity.stat_mtime_ns,
+        identity.stat_size,
+        identity.source_digest,
+        identity.git_blob_format,
+        identity.git_blob_id,
+        identity.neutral_profile,
+        identity.dependent_profile,
+        identity.binding_context,
+        ",".join(identity.clone_channels),
+        generation,
+        now_epoch,
+        identity.neutral_bytes,
+        identity.dependent_bytes,
+        digests.neutral,
+        digests.dependent,
+        identity_checksum(version=version, identity=identity, digests=digests),
+    )
+
+
+def _verified_singleton(
+    key: str, payload: object, checksum: object, *, version: str
+) -> object:
+    if not isinstance(checksum, str) or not isinstance(payload, bytes | bytearray):
+        raise CacheRecordRefused(CacheRefusal.CORRUPT, f"{key} is not stored bytes")
+    expected = singleton_checksum(version=version, key=key, payload=bytes(payload))
+    if not hmac.compare_digest(checksum, expected):
+        raise CacheRecordRefused(CacheRefusal.CORRUPT, f"{key} checksum mismatch")
+    return _decoded(bytes(payload), label=key)
+
+
+def _verified_payload(payload: object | None, digest: bytes, *, label: str) -> object:
+    if payload is None:
+        raise CacheRecordRefused(CacheRefusal.CORRUPT, f"{label} row missing")
+    if not isinstance(payload, bytes | bytearray):
+        raise CacheRecordRefused(CacheRefusal.CORRUPT, f"{label} is not stored bytes")
+    stored = bytes(payload)
+    if not hmac.compare_digest(hashlib.sha256(stored).digest(), digest):
+        raise CacheRecordRefused(CacheRefusal.CORRUPT, f"{label} digest mismatch")
+    return _decoded(stored, label=label)
+
+
+def _decoded(payload: bytes, *, label: str) -> object:
+    try:
+        decoded: object = orjson.loads(payload)
+    except orjson.JSONDecodeError as exc:
+        raise CacheRecordRefused(
+            CacheRefusal.UNDECODABLE, f"{label} is not JSON"
+        ) from exc
+    return decoded
+
+
+def _verified_identity(row: tuple[object, ...], version: str) -> IdentityRow | None:
+    parsed = _identity_from_row(row)
+    if parsed is None:
         return None
+    identity, digests = parsed
     checksum = row[_CHECKSUM_AT]
     if not isinstance(checksum, str):
         return None
     if not verify_cache_envelope_checksum(
-        version, identity_preimage(identity), checksum
+        version, identity_preimage(identity, digests), checksum
     ):
         return None
-    return int(str(row[0])), identity
+    return IdentityRow(file_id=int(str(row[0])), identity=identity, digests=digests)
 
 
-def _identity_from_row(row: tuple[object, ...]) -> EntryIdentity | None:
+def _identity_from_row(
+    row: tuple[object, ...],
+) -> tuple[EntryIdentity, LaneDigests] | None:
     try:
         return EntryIdentity(
             wire_path=str(row[1]),
@@ -994,6 +1187,9 @@ def _identity_from_row(row: tuple[object, ...]) -> EntryIdentity | None:
             clone_channels=tuple(c for c in str(row[11]).split(",") if c),
             neutral_bytes=_as_int(row[14], "neutral_bytes"),
             dependent_bytes=_as_int(row[15], "dependent_bytes"),
+        ), LaneDigests(
+            neutral=_as_bytes(row[_NEUTRAL_DIGEST_AT]),
+            dependent=_as_bytes(row[_DEPENDENT_DIGEST_AT]),
         )
     except (TypeError, ValueError, WireShapeRefused):
         return None
@@ -1067,13 +1263,20 @@ __all__ = [
     "CacheBackendForeign",
     "CacheBackendUnreadable",
     "CacheBackendUnusable",
+    "CacheRecordRefused",
     "EntryIdentity",
+    "IdentityRow",
+    "IdentityScan",
+    "LaneDigests",
     "WireShapeRefused",
     "encode_payload",
     "envelope_checksum",
     "identity_checksum",
     "identity_preimage",
     "join_wire_entry",
+    "lane_digests",
+    "scan_identities",
+    "singleton_checksum",
     "split_wire_entry",
     "verify_envelope",
 ]

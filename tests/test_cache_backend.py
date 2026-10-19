@@ -31,6 +31,7 @@ from codeclone.cache.backend import (
     CacheBackend,
     CacheBackendForeign,
     CacheBackendUnreadable,
+    scan_identities,
 )
 from codeclone.cache.store import Cache
 from codeclone.cache.versioning import CacheStatus
@@ -436,7 +437,7 @@ def _bulk_store(cache_path: Path) -> None:
 def _delete_oldest(cache_path: Path, count: int) -> None:
     with CacheBackend(cache_path) as backend:
         found = sorted(
-            file_id for file_id, _identity in backend.iter_identities(_BULK_VERSION)
+            row.file_id for row in scan_identities(backend, _BULK_VERSION).verified
         )
         assert len(found) == _BULK_ENTRIES
         backend.delete_by_ids(found[:count])
@@ -562,8 +563,8 @@ def test_a_store_written_before_the_binding_is_migrated_not_rebuilt(
     _bulk_store(cache_path)
     with CacheBackend(cache_path) as backend:
         before = {
-            identity.wire_path
-            for _file_id, identity in backend.iter_identities(_BULK_VERSION)
+            row.identity.wire_path
+            for row in scan_identities(backend, _BULK_VERSION).verified
         }
 
     _unbind_auto_vacuum(cache_path)
@@ -571,8 +572,8 @@ def test_a_store_written_before_the_binding_is_migrated_not_rebuilt(
 
     with CacheBackend(cache_path) as backend:
         after = {
-            identity.wire_path
-            for _file_id, identity in backend.iter_identities(_BULK_VERSION)
+            row.identity.wire_path
+            for row in scan_identities(backend, _BULK_VERSION).verified
         }
 
     assert _storage(cache_path)["auto_vacuum"] == _AUTO_VACUUM_INCREMENTAL
