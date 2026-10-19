@@ -475,8 +475,14 @@ def test_a_warm_run_refuses_exactly_as_the_cold_one(
     publications: list[RunSnapshotPublication],
 ) -> None:
     """The cache does not change the guard's outcome: the warm run reads
-    every file from the cache (the probe reaches the cached path) and is
-    refused under the same family and key."""
+    the cache (the probe reaches the cached path) and is refused under the
+    same family and key.
+
+    ``app/__init__.py`` is served from the cache; ``app/mod.py`` declares
+    ``_Box`` twice, so its record cannot hand each class its own class facts
+    back and the cache reader recomputes it (``ambiguous_declaration_
+    identity``, ruling 2026-10-19 8.2) -- before that, both files came off
+    the cache with the second class's facts on the first."""
     root = _corpus(tmp_path, CLS_SAME)
     report = root / "report.json"
     reasons: list[str] = []
@@ -488,7 +494,7 @@ def test_a_warm_run_refuses_exactly_as_the_cold_one(
         reasons.append(publications[-1].reason)
         document = json.loads(report.read_text("utf-8"))
         cached.append(int(document["inventory"]["files"]["cached"]))
-    assert cached == [0, 2]
+    assert cached == [0, 1]
     assert (
         reasons[0]
         == reasons[1]

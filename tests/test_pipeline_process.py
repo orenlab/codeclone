@@ -343,6 +343,7 @@ def test_cache_content_identity_stage_is_wrapped_once_and_passive(
         "cache_lane_dependent_miss": 0,
         "cache_profile_hit": 0,
         "cache_profile_miss": 1,
+        "cache_lane_dependent_ambiguous_declaration_identity": 0,
         "cache_lane_dependent_api_surface_witness_mismatch": 0,
         "cache_lane_dependent_content_miss": 0,
         "cache_lane_dependent_malformed_payload": 0,
@@ -389,6 +390,7 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
         "cache_lane_dependent_miss": 0,
         "cache_profile_hit": 1,
         "cache_profile_miss": 0,
+        "cache_lane_dependent_ambiguous_declaration_identity": 0,
         "cache_lane_dependent_api_surface_witness_mismatch": 0,
         "cache_lane_dependent_content_miss": 0,
         "cache_lane_dependent_malformed_payload": 0,
@@ -419,6 +421,7 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
         "cache_lane_dependent_profile_mismatch": 1,
         "cache_profile_hit": 0,
         "cache_profile_miss": 2,
+        "cache_lane_dependent_ambiguous_declaration_identity": 0,
         "cache_lane_dependent_api_surface_witness_mismatch": 0,
         "cache_lane_dependent_content_miss": 0,
         "cache_lane_dependent_malformed_payload": 0,
@@ -1547,6 +1550,23 @@ def test_every_declared_reuse_reason_counter_has_an_input_that_raises_it(
         "cache_lane_dependent_malformed_payload",
     )
 
+    # Two same-named classes: the record cannot give each its own class facts
+    # back, so the dependent lane is refused for its own reason (P0-B).
+    ambiguous = _seed("ambiguous")
+    _rewrite(
+        ambiguous / "module.py",
+        "class C:\n    def a(self):\n        return 1\n\n\n"
+        "class C:\n    def b(self):\n        return 2\n",
+    )
+    _record(
+        _warm_counters(
+            ambiguous,
+            monkeypatch,
+            warm_boot=_reason_boot(ambiguous, report_output=False),
+        ),
+        "cache_lane_dependent_ambiguous_declaration_identity",
+    )
+
     declared = set(core_discovery._REUSE_REASON_COUNTER_KEYS)
     assert declared, "no reuse reason counter was declared, so nothing was compared"
     # binding_context_mismatch is reached by the decision, not by a layout:
@@ -1669,6 +1689,7 @@ def test_cache_reuse_reason_counters_are_the_decisions_own_vocabulary() -> None:
     assert (
         set(core_discovery._NEUTRAL_LANE_REASON_COUNTERS)
         | {
+            "ambiguous_declaration_identity",
             "api_surface_witness_mismatch",
             "dependent_profile_mismatch",
             "malformed_payload",
