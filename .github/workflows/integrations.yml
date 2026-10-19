@@ -45,6 +45,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -53,8 +55,21 @@ jobs:
           cache: npm
           cache-dependency-path: extensions/vscode-codeclone/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
+      # Installing a dependency grants it no right to run code: no npm
+      # lifecycle scripts run during this install. That is all the flag
+      # covers: the explicit `npm run check` and `npm test` below still run
+      # dependency code. Optional dependencies stay included, because
+      # esbuild's platform binary arrives through them.
+      # Two separate contracts; one does not replace the other:
+      #   configuration - this command, `persist-credentials: false` and the
+      #     step order are pinned by tests/test_integrations_workflow_contract.py;
+      #   environment - the next step proves the locked esbuild is actually
+      #     installed and runs on this runner (test/verifyToolchain.js).
+      - name: Install dependencies (no lifecycle scripts)
+        run: npm ci --ignore-scripts --include=optional
+
+      - name: Verify esbuild (lock version, platform binary, transform)
+        run: node test/verifyToolchain.js linux-x64
 
       - name: Build, typecheck, and syntax-check
         run: npm run check
@@ -71,6 +86,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -79,8 +96,11 @@ jobs:
           cache: npm
           cache-dependency-path: extensions/claude-desktop-codeclone/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
+      # Same install policy as the VS Code job: no npm lifecycle scripts run
+      # during this install; the explicit steps below still run package code.
+      # Pinned statically by tests/test_integrations_workflow_contract.py.
+      - name: Install dependencies (no lifecycle scripts)
+        run: npm ci --ignore-scripts --include=optional
 
       - name: Syntax-check launcher and server
         run: npm run check
