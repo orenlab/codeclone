@@ -1503,6 +1503,7 @@ class StructuralFindingGroupDict(TypedDict):
 
 
 CacheLaneReuseReason = Literal[
+    "ambiguous_declaration_identity",
     "api_surface_witness_mismatch",
     "binding_context_mismatch",
     "clone_channels_mismatch",
@@ -1628,6 +1629,14 @@ class CacheDependentPayload:
     #: a function scope; a row written before the population existed never
     #: reads as that, for the same reason ``declared_exports`` never does.
     nested_definitions: tuple[NestedDefinitionDict, ...] = ()
+    #: The reader's verdict on this record (ruling 2026-10-19, 8.2): two of
+    #: its ``class_metrics`` rows share one qualname, so the class sidecars,
+    #: keyed by that qualname alone, cannot be handed back to the class that
+    #: wrote them and were not applied to either. Decided from the rows on
+    #: every read and never written, so a record an older build stored is
+    #: judged the same way; a fresh entry is always ``False``. The dependent
+    #: lane of such a record is not served (``ambiguous_declaration_identity``).
+    ambiguous_declaration_identity: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

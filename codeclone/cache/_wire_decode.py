@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Final, Literal, TypeGuard, cast, get_args
+from typing import Final, Literal, NamedTuple, TypeGuard, cast, get_args
 
 from ..models import (
     LIVE_ROOT_REASONS,
@@ -655,10 +655,11 @@ def _decode_wire_file_entry(
     )
     if nested_definitions is None:
         return None
-    if not _apply_wire_class_metrics_sidecars(
+    class_sidecars = _apply_wire_class_metrics_sidecars(
         obj=dependent_obj,
         class_metrics=class_metrics,
-    ):
+    )
+    if class_sidecars is None:
         return None
 
     has_structural_findings = "sf" in dependent_obj
@@ -708,6 +709,7 @@ def _decode_wire_file_entry(
             ),
             materialized_api_surface=materialized_api_surface,
             nested_definitions=tuple(nested_definitions),
+            ambiguous_declaration_identity=class_sidecars == "ambiguous",
         ),
     )
 
@@ -1240,55 +1242,114 @@ def _decode_optional_wire_runtime_reachability(
     )
 
 
+#: What the reader did with a record's class sidecars: gave each row its own,
+#: or gave none of them to any row because two rows share the key they ride.
+_ClassSidecarOutcome = Literal["applied", "ambiguous"]
+
+
+class _ClassSidecars(NamedTuple):
+    """The five class sidecars of one record, each keyed by class qualname."""
+
+    coupled_classes: dict[str, list[str]]
+    class_bases: dict[str, tuple[list[str], bool]]
+    decorator_evidence: dict[str, list[str]]
+    self_dispatch: dict[str, list[str]]
+    instantiation_candidates: dict[str, list[str]]
+
+
+def _class_declarations_share_a_qualname(
+    class_metrics: list[ClassMetricsDict],
+) -> bool:
+    """Whether two ``cm`` rows name one qualname (ruling 2026-10-19, 8.2).
+
+    Read off the rows themselves, never off the sidecar maps: a map has
+    already folded two rows into one key, and a class with no row in a
+    sidecar leaves nothing there to collide with -- yet it would still be
+    handed the other class's value.
+    """
+    qualnames = [metric["qualname"] for metric in class_metrics]
+    return len(set(qualnames)) != len(qualnames)
+
+
+def _decode_wire_class_sidecars(obj: dict[str, object]) -> _ClassSidecars | None:
+    coupled_classes = _decode_optional_wire_coupled_classes(obj=obj, key="cc")
+    decorator_evidence = _decode_optional_wire_coupled_classes(obj=obj, key="de")
+    self_dispatch = _decode_optional_wire_coupled_classes(obj=obj, key="sd")
+    instantiation_candidates = _decode_optional_wire_coupled_classes(
+        obj=obj,
+        key="ic",
+    )
+    class_bases = _decode_optional_wire_class_bases(obj=obj)
+    if (
+        coupled_classes is None
+        or decorator_evidence is None
+        or self_dispatch is None
+        or instantiation_candidates is None
+        or class_bases is None
+    ):
+        return None
+    return _ClassSidecars(
+        coupled_classes=coupled_classes,
+        class_bases=class_bases,
+        decorator_evidence=decorator_evidence,
+        self_dispatch=self_dispatch,
+        instantiation_candidates=instantiation_candidates,
+    )
+
+
+def _attach_class_sidecars(metric: ClassMetricsDict, sidecars: _ClassSidecars) -> None:
+    qualname = metric["qualname"]
+    names = sidecars.coupled_classes.get(qualname, [])
+    if names:
+        metric["coupled_classes"] = names
+    class_base_row = sidecars.class_bases.get(qualname)
+    if class_base_row is not None:
+        base_names, has_unresolved_external_base = class_base_row
+        metric["base_names"] = base_names
+        metric["has_unresolved_external_base"] = has_unresolved_external_base
+    evidenced_methods = sidecars.decorator_evidence.get(qualname, [])
+    if evidenced_methods:
+        metric["decorator_evidenced_methods"] = evidenced_methods
+    dispatched_methods = sidecars.self_dispatch.get(qualname, [])
+    if dispatched_methods:
+        metric["self_dispatched_methods"] = dispatched_methods
+    candidates = sidecars.instantiation_candidates.get(qualname, [])
+    if candidates:
+        metric["instantiation_candidates"] = candidates
+
+
 def _apply_wire_class_metrics_sidecars(
     *,
     obj: dict[str, object],
     class_metrics: list[ClassMetricsDict],
-) -> bool:
-    """Attach every class-metrics sidecar to its row; False when malformed.
+) -> _ClassSidecarOutcome | None:
+    """Attach every class-metrics sidecar to its row; ``None`` when malformed.
 
     All five sidecars key off the class qualname and are optional, so they
     are decoded and applied together rather than adding one decode-and-guard
     pair per family to the entry decoder. "de", "sd" and "ic" are shaped
     exactly like "cc" (qualname -> names); "bs" carries the extra rule-3
     opacity flag.
+
+    The qualname is the whole key, so two classes declared under one name --
+    a module that redefines ``class C`` -- cannot each get their own row back:
+    a map keyed by it hands BOTH the last row's value, and that merge was
+    served silently (measured 2026-10-19: cold ``C@9 coupled [X]``, warm
+    ``C@9 coupled [Y]``). Whether the rows are ambiguous is decided first,
+    from the ``cm`` rows; such a record gets no sidecar at all, and its
+    dependent lane is refused by its own reason (``ambiguous_declaration_
+    identity``). The sidecars are still decoded, so a record this build
+    cannot read is refused as one whatever its rows say.
     """
-    coupled_classes_map = _decode_optional_wire_coupled_classes(obj=obj, key="cc")
-    decorator_evidence_map = _decode_optional_wire_coupled_classes(obj=obj, key="de")
-    self_dispatch_map = _decode_optional_wire_coupled_classes(obj=obj, key="sd")
-    instantiation_candidate_map = _decode_optional_wire_coupled_classes(
-        obj=obj,
-        key="ic",
-    )
-    class_base_map = _decode_optional_wire_class_bases(obj=obj)
-    if (
-        coupled_classes_map is None
-        or decorator_evidence_map is None
-        or self_dispatch_map is None
-        or instantiation_candidate_map is None
-        or class_base_map is None
-    ):
-        return False
+    ambiguous = _class_declarations_share_a_qualname(class_metrics)
+    sidecars = _decode_wire_class_sidecars(obj)
+    if sidecars is None:
+        return None
+    if ambiguous:
+        return "ambiguous"
     for metric in class_metrics:
-        qualname = metric["qualname"]
-        names = coupled_classes_map.get(qualname, [])
-        if names:
-            metric["coupled_classes"] = names
-        class_base_row = class_base_map.get(qualname)
-        if class_base_row is not None:
-            base_names, has_unresolved_external_base = class_base_row
-            metric["base_names"] = base_names
-            metric["has_unresolved_external_base"] = has_unresolved_external_base
-        evidenced_methods = decorator_evidence_map.get(qualname, [])
-        if evidenced_methods:
-            metric["decorator_evidenced_methods"] = evidenced_methods
-        dispatched_methods = self_dispatch_map.get(qualname, [])
-        if dispatched_methods:
-            metric["self_dispatched_methods"] = dispatched_methods
-        candidates = instantiation_candidate_map.get(qualname, [])
-        if candidates:
-            metric["instantiation_candidates"] = candidates
-    return True
+        _attach_class_sidecars(metric, sidecars)
+    return "applied"
 
 
 def _decode_optional_wire_class_bases(

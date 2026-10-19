@@ -104,6 +104,9 @@ _NEUTRAL_LANE_REASON_COUNTERS: Final[Mapping[CacheLaneReuseReason, str]] = {
 }
 
 _DEPENDENT_LANE_REASON_COUNTERS: Final[Mapping[CacheLaneReuseReason, str]] = {
+    "ambiguous_declaration_identity": (
+        "cache_lane_dependent_ambiguous_declaration_identity"
+    ),
     "api_surface_witness_mismatch": "cache_lane_dependent_api_surface_witness_mismatch",
     "content_miss": "cache_lane_dependent_content_miss",
     "dependent_profile_mismatch": "cache_lane_dependent_profile_mismatch",
@@ -211,6 +214,13 @@ _MALFORMED_DEPENDENT_LANE: Final = CacheLaneVerdict(
     hit=False, reason="malformed_payload"
 )
 
+#: The verdict for a row the reader could not give back to its declarations:
+#: two of its classes share one qualname (ruling 2026-10-19, 8.2). The record
+#: is exactly what was written, so this is a lane reason, never a refusal.
+_AMBIGUOUS_DEPENDENT_LANE: Final = CacheLaneVerdict(
+    hit=False, reason="ambiguous_declaration_identity"
+)
+
 
 def _rehydrate_dependent_facts(
     entry: CacheEntryV3,
@@ -252,16 +262,36 @@ def _judge_cached_row(
     file is walked again with its neutral facts reused, exactly as for any
     other dependent miss. Facts are rebuilt only when this run consumes them;
     a metrics-skipping run reads none, so it has nothing to refuse.
+
+    A row the reader marked ambiguous -- two classes under one qualname, whose
+    sidecars it could not hand back to either -- is refused the same way, by
+    its own reason, before any of its rows is rebuilt.
     """
 
     if not (metrics_consumed and decision.neutral.hit and decision.dependent.hit):
         return decision, None
+    facts = _servable_dependent_facts(
+        entry, filepath=filepath, module_registry=module_registry
+    )
+    if isinstance(facts, CacheLaneVerdict):
+        return replace(decision, dependent=facts), None
+    return decision, facts
+
+
+def _servable_dependent_facts(
+    entry: CacheEntryV3,
+    *,
+    filepath: str,
+    module_registry: ModuleRegistryHandle,
+) -> _CachedDependentFacts | CacheLaneVerdict:
+    """A consumed row's dependent facts, or the verdict that refuses them."""
+
+    if entry.module_dependent.ambiguous_declaration_identity:
+        return _AMBIGUOUS_DEPENDENT_LANE
     facts = _rehydrate_dependent_facts(
         entry, filepath=filepath, module_registry=module_registry
     )
-    if facts is None:
-        return replace(decision, dependent=_MALFORMED_DEPENDENT_LANE), None
-    return decision, facts
+    return _MALFORMED_DEPENDENT_LANE if facts is None else facts
 
 
 DiscoveryBuffers = tuple[
