@@ -14,6 +14,9 @@ Distinct failure surfaces, never conflated:
   keys).  :class:`SemanticGrammarError` narrows it for the shared identity
   grammar, and :class:`LegacyIngestError` narrows THAT for the document
   shape only the legacy ingest oracle can be handed.
+  :class:`DeclarationCollisionError` narrows it for two declarations that
+  produced one key of a stored fact, refused where a producer's sequence
+  becomes a family (:func:`refuse_declaration_collisions`).
 * :class:`WireDecodeError` — decoder-side: a typed refusal with a stable
   ``W``-code from the closed refusal table of the wire contract (F-3 §7.7).
   One error class carries one code; silent degradation is forbidden.
@@ -25,7 +28,11 @@ Distinct failure surfaces, never conflated:
 from __future__ import annotations
 
 import shlex
-from typing import Final
+from collections import Counter
+from collections.abc import Callable, Iterable
+from typing import Final, TypeVar
+
+_RowT = TypeVar("_RowT")
 
 
 class CanonicalModelError(ValueError):
@@ -70,6 +77,69 @@ class LegacyIngestError(SemanticGrammarError):
     distinguishable, and keeps every existing ``LegacyIngestError`` handler
     catching what it always caught.
     """
+
+
+class DeclarationCollisionError(CanonicalModelError):
+    """Two declarations produced one key of a stored fact family.
+
+    Ruling 2026-10-19 (stage A, fail-closed): the family's key cannot tell
+    the two declarations apart, so storing them would merge two facts into
+    one -- silently when their rows are equal, because the family is a set.
+    The refusal names the family, the least colliding key by its ``repr``
+    (never the first one a walk happened to meet: the order of a producer's
+    rows may follow a hash seed) and how many declarations share it.  A
+    model law, so the publication contains it like every model refusal and
+    every surface names this type in its one line.
+    """
+
+    def __init__(
+        self,
+        *,
+        family: str,
+        key_field: str,
+        key: object,
+        declarations: int,
+        colliding_keys: int,
+    ) -> None:
+        super().__init__(
+            f"{family}.{key_field}={key!r}: {declarations} declarations share "
+            f"one fact key (colliding keys: {colliding_keys}); refusing to "
+            "merge them into one fact"
+        )
+        self.family = family
+        self.key = key
+
+
+def refuse_declaration_collisions(
+    rows: Iterable[_RowT],
+    *,
+    family: str,
+    key_field: str,
+    key_of: Callable[[_RowT], object],
+) -> frozenset[_RowT]:
+    """The family's rows as the set the model carries -- or the typed refusal.
+
+    Called where a producer's SEQUENCE becomes a family, and only on families
+    whose producer can repeat a key solely from two different declarations
+    (each call site states why).  Every key is counted before any set exists:
+    once the rows are a set, two equal rows of two declarations are one row
+    and the collision can no longer be seen -- the model's own key prover is
+    blind to it by construction.  ``key_of`` is the family's logical key as
+    the model proves it, and its ``repr`` must not depend on set order.
+    """
+    materialized = tuple(rows)
+    counts = Counter(key_of(row) for row in materialized)
+    colliding = [key for key, count in counts.items() if count > 1]
+    if colliding:
+        least = min(colliding, key=repr)
+        raise DeclarationCollisionError(
+            family=family,
+            key_field=key_field,
+            key=least,
+            declarations=counts[least],
+            colliding_keys=len(colliding),
+        )
+    return frozenset(materialized)
 
 
 class RunStoreError(RuntimeError):

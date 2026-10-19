@@ -76,6 +76,7 @@ from ..canonical.errors import (
     StoreCompatibilityError,
     StoreUnavailableError,
     UnknownRunError,
+    refuse_declaration_collisions,
 )
 from ..canonical.evaluation_rows import UnitRiskRow
 from ..canonical.executions import RetentionWindow
@@ -118,6 +119,8 @@ from ..canonical.model import (
     SinkRoleRow,
     UnitSpanRow,
     ViolationRow,
+    api_symbol_natural_key,
+    coupling_cohesion_key,
     relationship_resolution_status,
 )
 from ..canonical.semantic_grammar import (
@@ -559,15 +562,30 @@ def _run_scalars(
 def _coupling_cohesion_rows(
     rows: Sequence[IntegerObservation], index: IdentityIndex
 ) -> frozenset[CouplingCohesionRow]:
-    return frozenset(
-        CouplingCohesionRow(
-            symbol=parse_lane_symbol(
-                index, row.source.file.path, row.qualname, "coupling_cohesion"
-            ),
-            dimension=row.dimension,
-            numerator=row.numerator,
-        )
-        for row in rows
+    """The family keyed ``(SYMBOL, dimension)``, guarded before it is a set.
+
+    The producer (``observations.projection``) emits at most one row per
+    dimension for each class it measured, and one class measurement per
+    ``ClassDef`` of an analysed file, so a key met twice here is two class
+    declarations under one qualname -- never one declaration said twice.
+    Two equal such rows used to leave this function as ONE row and publish
+    (measured on bd7223a3: two identical ``_Box`` classes, six report facts,
+    three stored); the guard refuses instead (ruling 2026-10-19).
+    """
+    return refuse_declaration_collisions(
+        (
+            CouplingCohesionRow(
+                symbol=parse_lane_symbol(
+                    index, row.source.file.path, row.qualname, "coupling_cohesion"
+                ),
+                dimension=row.dimension,
+                numerator=row.numerator,
+            )
+            for row in rows
+        ),
+        family="coupling_cohesion_observations",
+        key_field="key",
+        key_of=coupling_cohesion_key,
     )
 
 
@@ -602,31 +620,42 @@ def _adoption_rows(
 def _api_symbol_rows(
     rows: Sequence[ApiSymbolObservation], index: IdentityIndex
 ) -> frozenset[ApiSymbolRow]:
-    return frozenset(
-        ApiSymbolRow(
-            symbol=parse_lane_symbol(
-                index, row.owner.file.path, row.symbol, "api_surface"
-            ),
-            symbol_kind=row.symbol_kind,
-            visibility=row.visibility,
-            parameters=tuple(
-                ApiParameterFact(
-                    name=parameter.name,
-                    kind=parameter.kind,
-                    has_default=parameter.has_default,
-                    annotation_digest=(
-                        None
-                        if parameter.annotation_digest is None
-                        else parameter.annotation_digest.value
-                    ),
-                )
-                for parameter in row.parameters
-            ),
-            returns_digest=(
-                None if row.returns_digest is None else row.returns_digest.value
-            ),
-        )
-        for row in rows
+    """The family keyed ``(SYMBOL, signature variant)``, guarded before it is
+    a set.  The producer (``metrics.api_surface``) emits one symbol per
+    function, class or top-level assignment it collected, so a key met twice
+    is two declarations of one name with one signature -- two identical
+    ``def api(value)``, or a property getter and its deleter -- which used
+    to publish as one api fact (measured on bd7223a3)."""
+    return refuse_declaration_collisions(
+        (
+            ApiSymbolRow(
+                symbol=parse_lane_symbol(
+                    index, row.owner.file.path, row.symbol, "api_surface"
+                ),
+                symbol_kind=row.symbol_kind,
+                visibility=row.visibility,
+                parameters=tuple(
+                    ApiParameterFact(
+                        name=parameter.name,
+                        kind=parameter.kind,
+                        has_default=parameter.has_default,
+                        annotation_digest=(
+                            None
+                            if parameter.annotation_digest is None
+                            else parameter.annotation_digest.value
+                        ),
+                    )
+                    for parameter in row.parameters
+                ),
+                returns_digest=(
+                    None if row.returns_digest is None else row.returns_digest.value
+                ),
+            )
+            for row in rows
+        ),
+        family="api_symbols",
+        key_field="key",
+        key_of=api_symbol_natural_key,
     )
 
 

@@ -57,7 +57,11 @@ from dataclasses import dataclass
 from typing import Final, cast
 
 from codeclone.canonical.comparison_rows import OBSERVATION_LANES
-from codeclone.canonical.errors import CanonicalModelError, LegacyIngestError
+from codeclone.canonical.errors import (
+    CanonicalModelError,
+    LegacyIngestError,
+    refuse_declaration_collisions,
+)
 from codeclone.canonical.identity import SymbolId
 from codeclone.contracts import (
     ExitCode,
@@ -538,15 +542,18 @@ def finding_verdicts(findings: Mapping[str, object]) -> frozenset[FindingEvaluat
     the one reading of the four evaluation keys of a finding group, shared by
     the ingest oracle (the serialized document) and the producer-native
     snapshot (the body the same document is sealed from).  The groups are
-    walked through their one owner (``utils.finding_groups``); two groups of
-    one declaration name share one id, and the model refuses them if they
-    ever disagree."""
-    verdicts: set[FindingEvaluationRow] = set()
+    walked through their one owner (``utils.finding_groups``).  Every group
+    is one finding of one declaration, so two groups under one id are two
+    declarations of one name, which the id cannot tell apart; their
+    verdicts are refused before they become a set (ruling 2026-10-19) rather
+    than merged -- equal verdicts, the dead-code case, used to merge
+    silently."""
+    verdicts: list[FindingEvaluationRow] = []
     for group in flatten_finding_groups(groups_root_of_findings(findings)):
         where = "finding group"
         priority = _read(group, "priority", where)
         clone_type = group.get("clone_type")
-        verdicts.add(
+        verdicts.append(
             FindingEvaluationRow(
                 finding_id=_read_text(group, "id", where),
                 severity=_read_text(group, "severity", where),
@@ -555,7 +562,16 @@ def finding_verdicts(findings: Mapping[str, object]) -> frozenset[FindingEvaluat
                 clone_type=None if clone_type is None else str(clone_type),
             )
         )
-    return frozenset(verdicts)
+    return refuse_declaration_collisions(
+        verdicts,
+        family="finding_evaluation",
+        key_field="id",
+        key_of=_verdict_id,
+    )
+
+
+def _verdict_id(row: FindingEvaluationRow) -> str:
+    return row.finding_id
 
 
 def document_selections(derived: Mapping[str, object]) -> frozenset[HotlistRow]:

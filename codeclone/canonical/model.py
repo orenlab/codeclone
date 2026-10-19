@@ -1460,26 +1460,46 @@ def _unique_by_key(
     frozenset), because an unexecuted unreachability claim rots.
 
     The branch is kept, not deleted, and the reason is a boundary, not
-    taste: deleting it would make a byte-identical repeat a REFUSAL, and
-    what such a repeat IS — refusal, counted multiplicity, or a collapse
-    with a receipt — is an open wire/identity ruling.  Read it as a hazard,
-    not as tolerance: the day a family becomes a SEQUENCE (a list or tuple,
-    keyed the same way), this branch silently accepts a duplicated row —
-    measured directly, not reasoned — and would mask exactly the loss class
-    the F4 lane exhibited at ingest until the declaration site joined its
-    key (``DeadCodeObservationRow``).  Whoever makes a family a sequence
-    must decide this branch first.
+    taste.  Ruling 2026-10-19 decided what a repeat produced by two
+    DECLARATIONS is: a refusal, raised where the producer's sequence becomes
+    the family and BEFORE the set absorbs it
+    (``errors.refuse_declaration_collisions``) -- this prover meets the set
+    afterwards and cannot see it.  Any other repeat stays undecided here.
+    Read the branch as a hazard, not as tolerance: the day a family becomes
+    a SEQUENCE (a list or tuple, keyed the same way), this branch silently
+    accepts a duplicated row — measured directly, not reasoned — and would
+    mask exactly the loss class the F4 lane exhibited at ingest until the
+    declaration site joined its key (``DeadCodeObservationRow``).  Whoever
+    makes a family a sequence must decide this branch first.
+
+    The refusal names the LEAST contradicted key by its ``repr``, never the
+    first one the walk met: every family arrives as a ``frozenset``, whose
+    walk follows the hash seed, and a refusal naming a different key per
+    process is not a reproducible receipt (the ruling's determinism debt).
     """
+    contradicted = _contradicted_keys(rows, key_of)
+    if contradicted:
+        least = min(contradicted, key=repr)
+        raise CanonicalModelError(
+            f"two facts share one logical key {key_name}={least!r}"
+        )
+
+
+def _contradicted_keys(
+    rows: Iterable[_RowT], key_of: Callable[[_RowT], object]
+) -> list[object]:
+    """Every key under which two DIFFERING rows were met, in walk order; the
+    byte-identical repeat :func:`_unique_by_key` describes is swallowed."""
     seen: dict[object, object] = {}
+    contradicted: list[object] = []
     for row in rows:
         key = key_of(row)
         if key in seen:
             byte_identical_repeat = seen[key] == row
             if not byte_identical_repeat:
-                raise CanonicalModelError(
-                    f"two facts share one logical key {key_name}={key!r}"
-                )
+                contradicted.append(key)
         seen[key] = row
+    return contradicted
 
 
 def _prove_entity_invariants(
@@ -1572,13 +1592,22 @@ def _dead_code_observation_key(row: DeadCodeObservationRow) -> tuple[object, ...
     return (*dead_code_entity_key(row.entity), row.observation_kind, row.start_line)
 
 
-def _api_symbol_natural_key(row: ApiSymbolRow) -> tuple[object, ...]:
-    # The ratified F5 key: the SYMBOL plus the canonical signature variant,
-    # computed through its ONE formula owner — never a second spelling.
+def api_symbol_natural_key(row: ApiSymbolRow) -> tuple[object, ...]:
+    """The ratified F5 key: the SYMBOL plus the canonical signature variant,
+    computed through its ONE formula owner — never a second spelling.  Read
+    by this model's key prover and by the producer edge's collision guard,
+    so the two cannot disagree about what one api fact is."""
     return (
         canonical_key(row.symbol),
         signature_variant(parameters=row.parameters, returns_digest=row.returns_digest),
     )
+
+
+def coupling_cohesion_key(row: CouplingCohesionRow) -> tuple[object, ...]:
+    """The family's logical key: the SYMBOL and the dimension -- no
+    declaration site, so two declarations of one qualname share it.  Read by
+    this model's key prover and by the producer edge's collision guard."""
+    return (canonical_key(row.symbol), row.dimension)
 
 
 def _violation_natural_key(row: ViolationRow) -> tuple[object, ...]:
@@ -1845,9 +1874,9 @@ def _prove_logical_keys(facts: AnalysisFacts) -> None:
     _unique_by_key(
         facts.coupling_cohesion_observations,
         "coupling_cohesion_observations.key",
-        lambda row: (canonical_key(row.symbol), row.dimension),
+        coupling_cohesion_key,
     )
-    _unique_by_key(facts.api_symbols, "api_symbols.key", _api_symbol_natural_key)
+    _unique_by_key(facts.api_symbols, "api_symbols.key", api_symbol_natural_key)
     _unique_by_key(
         facts.risk_observations,
         "risk_observations.key",

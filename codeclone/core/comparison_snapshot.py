@@ -50,6 +50,7 @@ from ..canonical.comparison_rows import (
     baseline_statuses_stated,
     comparison_availability_state,
 )
+from ..canonical.errors import refuse_declaration_collisions
 from ..canonical.finding_projection import (
     complexity_hotspot_skeletons,
     coupling_hotspot_skeletons,
@@ -260,14 +261,21 @@ def _entity_novelty_rows(
     finding_ids: Iterable[str],
     identity: _Identity,
 ) -> frozenset[FindingNoveltyRow]:
-    rows: set[FindingNoveltyRow] = set()
+    """One novelty per published finding, guarded before it is a set.
+
+    The ids come from rows the analysis house already holds apart by their
+    declaration site, so an id met twice is two declarations under one
+    qualname -- the finding id cannot tell them apart -- and their two
+    novelties, equal by construction, used to become one row (ruling
+    2026-10-19: refused instead)."""
+    rows: list[FindingNoveltyRow] = []
     for finding_id in finding_ids:
         novelty, reason = entity_novelty(
             identity=_suffix(finding_id, family),
             domain=domain,
             entity_novelty_facts=inputs.entity_novelty_facts,
         )
-        rows.add(
+        rows.append(
             FindingNoveltyRow(
                 **identity,
                 finding_id=finding_id,
@@ -275,7 +283,13 @@ def _entity_novelty_rows(
                 novelty_reason=reason,
             )
         )
-    return frozenset(rows)
+    return refuse_declaration_collisions(
+        rows, family=family, key_field="id", key_of=_novelty_id
+    )
+
+
+def _novelty_id(row: FindingNoveltyRow) -> str:
+    return row.finding_id
 
 
 def _governed_finding_ids(
