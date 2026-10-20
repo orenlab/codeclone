@@ -105,11 +105,12 @@ def _health_delta(*, baseline: int | None, current: int | None) -> int:
     """Subtract two health scores, or report no movement when one is absent.
 
     A missing score on either side means no health comparison happened, so
-    there is no difference to state. Zero is what this repository already
-    publishes for a comparison that did not run -- the report writes it beside
-    ``baseline_diff_available: false``, which is the fact that keeps it apart
-    from "compared, unchanged" (`RP2`, `G4`). Subtracting against an absent
-    score instead would manufacture the whole of the present score as movement.
+    there is no difference to state. The raw diff keeps an ``int`` and writes
+    0 here; it is never a published answer: a comparison that did not run is
+    published as ``null`` (``core.comparison_state``), and 0 is reserved for a
+    measured comparison that found no movement (ruling 2026-10-03, "not
+    compared is null"). Subtracting against an absent score instead would
+    manufacture the whole of the present score as movement.
     """
 
     if baseline is None or current is None:
@@ -149,11 +150,11 @@ def diff_metrics(
         dependency_cycles=(),
         dependency_max_depth=0,
         dead_code_items=(),
-        health_score=0,
-        health_grade="F",
-        # An absent baseline carries no permille measurement, so the absent
-        # placeholder says so; a literal 0 here would be a fabricated 0‰ the
-        # deltas below subtract against (`B8`).
+        # An absent baseline carries no health or permille measurement, so the
+        # absent placeholder says so; a literal 0 here would be a fabricated
+        # score the deltas below subtract against (`B8`).
+        health_score=None,
+        health_grade=None,
         typing_param_permille=None,
         typing_return_permille=None,
         docstring_permille=None,

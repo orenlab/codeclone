@@ -1094,6 +1094,24 @@ def test_diff_metrics_does_not_subtract_against_an_absent_current_health() -> No
     assert measured.health_delta == -6
 
 
+def test_diff_metrics_does_not_subtract_against_an_absent_baseline() -> None:
+    """The other absent side: no baseline snapshot, no health movement.
+
+    The placeholder standing in for a missing baseline carries no health
+    number, like its permille twins; a literal 0 there made the whole current
+    score read as movement in the raw diff.
+    """
+
+    absent = diff_metrics(
+        baseline_snapshot=None,
+        current_snapshot=_current_half_snapshot(85, "B"),
+        baseline_api_surface=None,
+        current_api_surface=None,
+    )
+
+    assert absent.health_delta == 0
+
+
 def test_an_empty_current_scope_withholds_the_health_comparison(
     baseline_without_clone: Path,
     tmp_path: Path,
