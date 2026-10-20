@@ -738,7 +738,8 @@ def _safe_read_text(path: Path) -> tuple[str | None, bool]:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         with open(fd, encoding="utf-8") as handle:
             return handle.read(), True
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # Present but undecodable is "cannot be read": unknown, not a crash.
         return None, True
 
 

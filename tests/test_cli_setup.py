@@ -1869,6 +1869,38 @@ def test_setup_discover_vscode_settings_symlink_refused(
     assert _client_config_present(tmp_path) is False
 
 
+def test_setup_discover_reads_a_non_utf8_config_as_unknown(
+    tmp_path: Path,
+) -> None:
+    """Present but undecodable is unknown, like its refused-symlink twin."""
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    ctx = _empty_discover_context(tmp_path)
+    (tmp_path / ".pre-commit-config.yaml").write_bytes(b"repos: codeclone \xff\n")
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "codeclone.yml").write_bytes(b"uses: codeclone \xff\n")
+    (tmp_path / ".vscode").mkdir()
+    (tmp_path / ".vscode" / "settings.json").write_bytes(b'{"codeclone": "\xff"}')
+
+    assert discover_mod._probe_pre_commit_hook(ctx).installation == "unknown"
+    assert discover_mod._probe_github_workflow(ctx).installation == "unknown"
+    assert _client_config_present(tmp_path) is False
+
+
+def test_setup_json_answers_over_a_non_utf8_config(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    (tmp_path / ".pre-commit-config.yaml").write_bytes(b"repos: codeclone \xff\n")
+    out = io.StringIO()
+    with redirect_stdout(out):
+        rc = setup_main(["--json", "--root", str(tmp_path)])
+    assert rc == int(ExitCode.SUCCESS)
+    assert json.loads(out.getvalue())["projection_kind"] == "setup_snapshot"
+
+
 def test_setup_rollup_axes_satisfied_invalid_configuration() -> None:
     meta = CapabilityMeta(
         id="analysis",
