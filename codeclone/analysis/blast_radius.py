@@ -260,12 +260,16 @@ def _edge_pairs(
 ) -> tuple[tuple[str, str], ...]:
     """The ``(source, target)`` import edges, both ends named, sorted unique."""
     pairs = {
-        (str(edge.get("source", "")).strip(), str(edge.get("target", "")).strip())
-        for edge in edges
+        (_edge_end(edge.get("source")), _edge_end(edge.get("target"))) for edge in edges
     }
     return tuple(
         sorted((source, target) for source, target in pairs if source and target)
     )
+
+
+def _edge_end(value: object) -> str:
+    """One edge end: a module name, or ``""`` -- ``str(None)`` is no module."""
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _opaque_dynamic_load_paths(
@@ -316,7 +320,8 @@ def _compute_direct_dependents(
     dependents: set[str] = set()
     for module in origin_modules:
         dependents.update(reverse_graph.get(module, set()))
-    return _dedupe_sorted(dependents)
+    # An origin importing another origin is the change itself, not its radius.
+    return _dedupe_sorted(dependents - set(origin_modules))
 
 
 def _compute_transitive_dependents(
@@ -852,7 +857,12 @@ def compute_blast_radius_from_facts(
     )
     clone_cohort_members = _compute_clone_cohort_members(
         clone_groups=facts.clone_groups,
-        origin_paths=origin_paths,
+        # A directory origin stands for its package's file (``file_module``):
+        # that file's clone groups are the directory's cohort too.
+        origin_paths=(
+            *origin_paths,
+            *(module_paths[module] for module in origin_modules),
+        ),
     )
     dependency_cycle_members = _compute_cycle_membership(
         origin_modules=origin_modules,
