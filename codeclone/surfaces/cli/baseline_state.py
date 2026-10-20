@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import UUID, uuid4
 
 from ... import ui_messages as ui
-from ...api.comparison import foreign_interpreter_provenance
+from ...api.comparison import blocking_lanes, foreign_interpreter_provenance
 from ...api.config_delivery import tool_codeclone_table_state
 from ...baseline import (
     BASELINE_UNTRUSTED_STATUSES,
@@ -154,14 +154,20 @@ def gate_blocking_lanes(
     *,
     required_lanes: frozenset[str],
 ) -> tuple[str, ...]:
-    """Return the untrusted lanes that an active gate actually reads.
+    """Return the opaque lanes that must keep this run fail-closed.
 
+    The decision is the shared owner's (``api.comparison.blocking_lanes``), the
+    one MCP consults too, so the two surfaces cannot hold two rules: a
+    container that does not describe this run at all (another
+    ``baseline_scope_id``) is refused whatever the gates read -- disabled gates
+    never waive the check that a baseline belongs to the project -- and a lane
+    that is merely stale blocks only when an active gate reads it.
     ``required_lanes`` is resolved once by the gate layer, behind the versioned
-    gate-to-lane matrix, so this surface never re-derives gate policy — it only
-    intersects. A non-empty answer means the run must stay fail-closed.
+    gate-to-lane matrix, so this surface never re-derives gate policy. A
+    non-empty answer means the run must stay fail-closed.
     """
 
-    return tuple(sorted({item.name for item in unavailable} & required_lanes))
+    return blocking_lanes(unavailable, required_lanes=required_lanes)
 
 
 def _print_foreign_interpreter_note(
@@ -505,8 +511,10 @@ def resolve_metrics_baseline_state(
         or not clone_baseline_state.trusted_for_diff
         or scope_id is None
     ):
-        if metrics_baseline_exists and scope_id is None:
-            state.status = MetricsBaselineStatus.MISMATCH_SCOPE_ID
+        if metrics_baseline_exists:
+            state.status = _refused_file_status(
+                scope_id=scope_id, clone_status=clone_baseline_state.status
+            )
         if _metrics_baseline_gate_requested(args) and not args.update_baseline:
             state.failure_code = ExitCode.CONTRACT_ERROR
             _print_metrics_baseline_required(
@@ -561,6 +569,29 @@ def resolve_metrics_baseline_state(
     )
 
 
+def _refused_file_status(
+    *, scope_id: UUID | None, clone_status: BaselineStatus
+) -> MetricsBaselineStatus:
+    """The metrics lanes' status when their file exists and is not read.
+
+    No ``baseline_scope_id`` configured is ``mismatch_scope_id``.  Otherwise
+    the clone resolver refused the file, and one container holds both lane
+    kinds, so the clone refusal is the file's: a foreign scope is
+    ``mismatch_scope_id`` here too, a failed digest ``integrity_failed`` --
+    never ``missing``: the file exists, and saying otherwise is a claim
+    nothing measured.  A refusal the metrics vocabulary has no word for (a
+    clone fingerprint version) keeps the absence this resolver states for an
+    unread file.
+    """
+
+    if scope_id is None:
+        return MetricsBaselineStatus.MISMATCH_SCOPE_ID
+    try:
+        return MetricsBaselineStatus(clone_status.value)
+    except ValueError:
+        return MetricsBaselineStatus.MISSING
+
+
 def _metrics_mode_short_circuit(
     *,
     args: _BaselineArgs,
@@ -599,6 +630,10 @@ def _enforce_metrics_gate_schema_requirements(
     needs_adoption_snapshot = bool(
         args.fail_on_typing_regression or args.fail_on_docstring_regression
     )
+    # A baseline without an API snapshot is not condemned here: every other
+    # metrics lane stays comparable, and an API gate is refused per lane by
+    # the one evaluator (``lane:unavailable:api_surface``, the contract-error
+    # code) -- as MCP answers the same file (audit 2026-10-19, item 14).
     if needs_adoption_snapshot and not getattr(
         baseline, "has_coverage_adoption_snapshot", False
     ):
@@ -607,13 +642,6 @@ def _enforce_metrics_gate_schema_requirements(
         state.status = MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION
         state.failure_code = ExitCode.CONTRACT_ERROR
         console.print(ui.fmt_contract_error(ui.ERR_METRICS_BASELINE_TYPING_GATES))
-        return
-    if args.fail_on_api_break and baseline.api_surface_snapshot is None:
-        state.loaded = False
-        state.trusted_for_diff = False
-        state.status = MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION
-        state.failure_code = ExitCode.CONTRACT_ERROR
-        console.print(ui.fmt_contract_error(ui.ERR_METRICS_BASELINE_API_GATES))
 
 
 def _probe_metrics_baseline_section(path: Path) -> _MetricsBaselineSectionProbe:

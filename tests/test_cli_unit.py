@@ -4053,15 +4053,64 @@ def test_metrics_baseline_runtime_requires_adoption_snapshot_for_regression_gate
     )
 
 
-def test_metrics_baseline_runtime_requires_api_surface_snapshot_for_api_gate() -> None:
+@pytest.mark.parametrize(
+    ("scope_id", "clone_status", "metrics_status"),
+    [
+        pytest.param(None, "ok", "mismatch_scope_id", id="no-scope-configured"),
+        pytest.param(
+            UUID(int=1), "mismatch_scope_id", "mismatch_scope_id", id="foreign"
+        ),
+        pytest.param(
+            UUID(int=1), "integrity_failed", "integrity_failed", id="corrupted"
+        ),
+        pytest.param(
+            UUID(int=1),
+            "mismatch_fingerprint_version",
+            "missing",
+            id="no-metrics-word-keeps-the-unread-file-answer",
+        ),
+    ],
+)
+def test_a_refused_existing_file_names_its_own_refusal_for_the_metrics_lanes(
+    scope_id: UUID | None, clone_status: str, metrics_status: str
+) -> None:
+    """One container holds both lane kinds, so the clone refusal is the
+    file's: ``integrity_failed`` stays ``integrity_failed``, never
+    ``missing``.  A refusal the metrics vocabulary has no word for (a clone
+    fingerprint version) keeps the answer the resolver gives an unread file
+    -- the one input that reaches the fallback."""
+    refused = cli_baselines_mod._refused_file_status(
+        scope_id=scope_id, clone_status=baseline_mod.BaselineStatus(clone_status)
+    )
+    assert refused is metrics_baseline_mod.MetricsBaselineStatus(metrics_status)
+
+
+@pytest.mark.parametrize(
+    ("typing_gate", "api_snapshot", "condemned"),
+    [
+        pytest.param(False, None, False, id="api-gate-without-snapshot-keeps-file"),
+        pytest.param(False, "present", False, id="api-gate-with-snapshot"),
+        pytest.param(True, None, True, id="control-typing-gate-without-adoption"),
+    ],
+)
+def test_a_missing_api_snapshot_never_condemns_the_metrics_baseline(
+    typing_gate: bool, api_snapshot: str | None, condemned: bool
+) -> None:
+    """An API gate over a baseline that holds no API snapshot: the file
+    keeps every other metrics lane -- loaded, ``ok``, trusted, nothing
+    printed -- and the gate is refused per lane by the evaluator
+    (``lane:unavailable:api_surface``), as MCP does.  The control: the same
+    owner still condemns the file when a typing gate finds no adoption data,
+    so the call reaches a branch that can act."""
     runtime = _metrics_baseline_runtime_for_gate_checks()
-    runtime.baseline.has_coverage_adoption_snapshot = True
-    runtime.baseline.api_surface_snapshot = None
+    runtime.status = metrics_baseline_mod.MetricsBaselineStatus.OK
+    runtime.baseline.has_coverage_adoption_snapshot = False
+    runtime.baseline.api_surface_snapshot = cast(Any, api_snapshot)
     printer = _RecordingPrinter()
 
     cli_baselines_mod._enforce_metrics_gate_schema_requirements(
         args=SimpleNamespace(
-            fail_on_typing_regression=False,
+            fail_on_typing_regression=typing_gate,
             fail_on_docstring_regression=False,
             fail_on_api_break=True,
         ),
@@ -4069,11 +4118,15 @@ def test_metrics_baseline_runtime_requires_api_surface_snapshot_for_api_gate() -
         console=printer,
     )
 
-    _assert_metrics_gate_schema_contract_error(
-        runtime,
-        printer,
-        expected_fragment="public API surface data",
-    )
+    if condemned:
+        _assert_metrics_gate_schema_contract_error(
+            runtime, printer, expected_fragment="coverage adoption data"
+        )
+        return
+    assert (runtime.loaded, runtime.trusted_for_diff) == (True, True)
+    assert runtime.status == metrics_baseline_mod.MetricsBaselineStatus.OK
+    assert runtime.failure_code is None
+    assert printer.lines == []
 
 
 def test_print_verbose_clone_hashes_noop_on_empty() -> None:

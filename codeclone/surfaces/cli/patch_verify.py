@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Final
 
 from ... import ui_messages as ui
 from ...budget.patch_contract import (
@@ -17,7 +18,13 @@ from ...budget.patch_contract import (
 from ...contracts import ExitCode
 from ...contracts.comparison_state import COMPARISON_HEALTH, TERM_SCORE_DELTA
 from ...core._types import AnalysisResult
-from ...report.gates.evaluator import GateResult, MetricGateConfig
+from ...report.gates.evaluator import (
+    _POPULATION_REFUSALS,
+    GateResult,
+    MetricGateConfig,
+)
+from ...report.messages.comparison import comparison_text, comparison_text_compact
+from ...ui_messages.formatters import _patch_verify_compact_health
 from ...ui_messages.styling import _L
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -25,12 +32,6 @@ from ...utils.coerce import as_sequence as _as_sequence
 from .baseline_state import CloneBaselineState
 from .post_run import DiffContext
 from .types import CLIArgsLike, PrinterLike
-
-_STATUS_STYLES = {
-    "accepted": ui.STYLE_VERDICT_PASS_STRONG,
-    "violated": ui.STYLE_VERDICT_FAIL,
-    "unverified": ui.STYLE_VERDICT_WARN,
-}
 
 
 def validate_strictness(value: str) -> StrictnessProfile:
@@ -136,26 +137,317 @@ def _gate_result_from_report_document(
     )
 
 
-def _status_text(status: str) -> str:
-    style = _STATUS_STYLES.get(status)
-    return f"[{style}]{status}[/{style}]" if style else status
-
-
 def _gate_status(gate_result: GateResult) -> str:
     return "FAIL" if gate_result.exit_code != 0 else "pass"
 
 
-def _contract_violations(
+#: The gate's closed exit contract.  A pass and a failure on a fact are a
+#: verdict; the contract-error code is a required check that did not run (a
+#: lane it could not read, a comparison the run did not make, a missing
+#: evaluation); the internal-error code is the gate's own crash.  Any other
+#: exit is a protocol error of the evaluation -- never a check that did not
+#: run, never a verdict (ruling 2026-10-20 (17)).
+_GATE_PASSED: Final = int(ExitCode.SUCCESS)
+_GATE_UNAVAILABLE: Final = int(ExitCode.CONTRACT_ERROR)
+_GATE_FAILED: Final = int(ExitCode.GATING_FAILURE)
+_GATE_CRASHED: Final = int(ExitCode.INTERNAL_ERROR)
+_GATE_ANSWERS: Final = (_GATE_PASSED, _GATE_UNAVAILABLE, _GATE_FAILED)
+#: The gate's population refusals, worded as the gate states them (its one
+#: table, ``_POPULATION_REFUSALS``): the gate's failure code over a
+#: population nobody measured is an answer it declined to give, never a
+#: fact it found.
+_POPULATION_REFUSAL_REASONS: Final = frozenset(
+    f"metric:{reason}" for reason in _POPULATION_REFUSALS.values()
+)
+
+
+def _refused_over_the_population(gate_result: GateResult) -> bool:
+    return (
+        gate_result.exit_code == _GATE_FAILED
+        and bool(gate_result.reasons)
+        and all(reason in _POPULATION_REFUSAL_REASONS for reason in gate_result.reasons)
+    )
+
+
+def contract_violations(
+    *, diff_context: DiffContext, gate_result: GateResult
+) -> tuple[str, ...]:
+    """What the run PROVED against the patch: new clone groups on the clone
+    lanes it compared, or a gate that failed on a fact.  A lane that was not
+    compared proves nothing either way and is never counted here, and
+    neither is the gate's refusal to answer over an unmeasured population
+    (:func:`policy_failures`)."""
+    violations: list[str] = []
+    if diff_context.clone_novelty_available and diff_context.new_clones_count > 0:
+        violations.append("structural_regressions")
+    if gate_result.exit_code == _GATE_FAILED and not _refused_over_the_population(
+        gate_result
+    ):
+        violations.append("gate_failures")
+    return tuple(violations)
+
+
+def policy_failures(gate_result: GateResult) -> tuple[str, ...]:
+    """The measurements the policy required and the run did not make: the
+    gate's population refusals (``unmeasured``, ``complete_empty``), as it
+    stated them.  Never a proven violation, never a regression -- the
+    verification is incomplete (ruling 2026-10-20 (17))."""
+    return gate_result.reasons if _refused_over_the_population(gate_result) else ()
+
+
+def _clone_lanes_not_compared(report_document: Mapping[str, object]) -> list[str]:
+    """``lane:reason`` of every clone lane the document states it did not
+    trust -- read off the run's own lane trust, never re-derived."""
+    baseline = _as_mapping(report_document.get("baseline"))
+    rows = (_as_mapping(row) for row in _as_sequence(baseline.get("sorted_lane_trust")))
+    return [
+        f"{row.get('name')}:{row.get('reason')}"
+        for row in rows
+        if str(row.get("name", "")).startswith("clones.")
+        and row.get("status") != "trusted"
+    ]
+
+
+def not_verified(
     *,
     diff_context: DiffContext,
     gate_result: GateResult,
+    baseline_state: CloneBaselineState,
+    report_document: Mapping[str, object],
 ) -> tuple[str, ...]:
-    violations: list[str] = []
-    if diff_context.new_clones_count > 0:
-        violations.append("structural_regressions")
-    if gate_result.exit_code != 0:
-        violations.append("gate_failures")
-    return tuple(violations)
+    """Each check the verification needed and could not complete, named: a
+    baseline this run cannot trust, every clone lane it did not compare --
+    one opaque lane beside a compared one too, under every profile (ruling
+    2026-10-20 (17)) -- and a gate that could not answer (a lane it could
+    not read, a comparison the run did not make, a missing evaluation).  The
+    gate's crash and an exit outside its contract are not here:
+    :func:`internal_errors`."""
+    reasons: list[str] = []
+    if not baseline_state.trusted_for_diff:
+        reasons.append(f"baseline:{baseline_state.status.value}")
+    lanes = _clone_lanes_not_compared(report_document)
+    if lanes:
+        reasons.extend(lanes)
+    elif not diff_context.clone_novelty_available:
+        reasons.append("clones:not_compared")
+    if gate_result.exit_code == _GATE_UNAVAILABLE:
+        reasons.extend(gate_result.reasons or [f"gate:exit:{gate_result.exit_code}"])
+    return tuple(dict.fromkeys(reasons))
+
+
+def internal_errors(gate_result: GateResult) -> tuple[str, ...]:
+    """The gate's internal error with its cause, first-hand: the exit and
+    the gate's own reasons -- its crash (5), or an exit outside its closed
+    contract, a protocol error named with the code the document carried.
+    Neither is an analytical abstention, so neither is folded into what a
+    lane could not compare (rulings 2026-10-20 (13), (17)): the
+    verification is incomplete and exits with the internal-error code."""
+    code = gate_result.exit_code
+    if code in _GATE_ANSWERS:
+        return ()
+    head = (
+        f"gate:exit:{code}"
+        if code == _GATE_CRASHED
+        else f"gate:protocol_error:exit:{code}"
+    )
+    return (head, *gate_result.reasons)
+
+
+def patch_status(
+    *,
+    violations: tuple[str, ...],
+    unverified: tuple[str, ...],
+    internal: tuple[str, ...],
+    policy: tuple[str, ...],
+) -> str:
+    """One status per row:
+
+    ===============================================  ==================
+    the run                                          status
+    ===============================================  ==================
+    proved a violation                               ``violated``
+    proved none; the gate crashed or broke protocol  ``internal_error``
+    proved none; a check or a measurement missing    ``unverified``
+    proved none; every check ran                     ``accepted``
+    ===============================================  ==================
+
+    A proven violation outranks what could not be checked -- the
+    uncertainty of one fact never hides the failure of another -- and what
+    could not be checked is never accepted.  Whether the verification was
+    complete is the second fact, stated beside the status, never inside it.
+    """
+    if violations:
+        return "violated"
+    if internal:
+        return "internal_error"
+    return "unverified" if unverified or policy else "accepted"
+
+
+def patch_exit_code(
+    *,
+    violations: tuple[str, ...],
+    unverified: tuple[str, ...],
+    internal: tuple[str, ...],
+    policy: tuple[str, ...],
+    strictness: StrictnessProfile,
+) -> int:
+    """One code per row, under every profile:
+
+    ===============================================  ============================
+    the run                                          exit
+    ===============================================  ============================
+    the gate crashed or broke its exit contract      5 (internal error)
+    a required check or measurement did not happen   2 (verification unavailable)
+    proved a violation; every check ran              3 (``relaxed``: 0, advisory)
+    proved none; every check ran                     0
+    ===============================================  ============================
+
+    A check that did not run exits with the contract-error code the gate
+    itself returns for an unavailable lane before it evaluates any failure
+    (``report.gates.evaluator._unavailable``) -- beside a proven violation
+    too, whose verdict still reads ``violated`` -- and never 0: ``relaxed``
+    makes a violation advisory, never a missing check.  A crash keeps its
+    own code; it is never an abstention and never an acceptance.
+    """
+    if internal:
+        return int(ExitCode.INTERNAL_ERROR)
+    if unverified or policy:
+        return int(ExitCode.CONTRACT_ERROR)
+    if violations and strictness != "relaxed":
+        return int(ExitCode.GATING_FAILURE)
+    return int(ExitCode.SUCCESS)
+
+
+def patch_complete(
+    *,
+    unverified: tuple[str, ...],
+    internal: tuple[str, ...],
+    policy: tuple[str, ...],
+) -> bool:
+    """Whether the verification ran to the end: no required check left
+    undone, no required measurement missing, no internal error.  The second
+    fact of every verdict, stated beside the status, never inside it."""
+    return not unverified and not internal and not policy
+
+
+def _regressions(diff_context: DiffContext) -> int | None:
+    """The new clone groups the run compared, or ``None`` when no clone
+    lane was compared -- never a zero nobody measured."""
+    if not diff_context.clone_novelty_available:
+        return None
+    return diff_context.new_clones_count
+
+
+def _compact_line(
+    *,
+    status: str,
+    health_after: int,
+    health_delta: int | None,
+    regressions: int | None,
+    gate_status: str,
+) -> str:
+    return ui.SUMMARY_COMPACT_PATCH_VERIFY.format(
+        status=status,
+        health=_patch_verify_compact_health(
+            health_after=health_after, health_delta=health_delta
+        ),
+        regressions=comparison_text_compact(regressions),
+        gate_status=gate_status,
+    )
+
+
+def _verdict_line(*, status: str, complete: bool, exit_code: int) -> str:
+    if status == "accepted":
+        return ui.styled(
+            f"{ui.GLYPH_OK} {ui.PATCH_VERIFY_ACCEPTED}", ui.STYLE_VERDICT_PASS_STRONG
+        )
+    if status == "unverified":
+        return ui.styled(
+            f"{ui.GLYPH_WARN} {ui.PATCH_VERIFY_UNVERIFIED}", ui.STYLE_VERDICT_WARN
+        )
+    if status == "internal_error":
+        return ui.styled(
+            f"{ui.GLYPH_FAIL} {ui.PATCH_VERIFY_INTERNAL_ERROR}", ui.STYLE_VERDICT_FAIL
+        )
+    if not complete:
+        return ui.styled(
+            f"{ui.GLYPH_FAIL} {ui.PATCH_VERIFY_VIOLATED_INCOMPLETE}",
+            ui.STYLE_VERDICT_FAIL,
+        )
+    if exit_code != int(ExitCode.SUCCESS):
+        return ui.styled(
+            f"{ui.GLYPH_FAIL} {ui.PATCH_VERIFY_VIOLATED}", ui.STYLE_VERDICT_FAIL
+        )
+    return ui.styled(
+        f"{ui.GLYPH_WARN} {ui.PATCH_VERIFY_RELAXED_ADVISORY}", ui.STYLE_VERDICT_WARN
+    )
+
+
+#: The verdict word of each status, as the labelled verdict line states it.
+_VERDICT_WORDS: Final[Mapping[str, str]] = {
+    "accepted": ui.PATCH_VERIFY_VERDICT_ACCEPTED,
+    "violated": ui.PATCH_VERIFY_VERDICT_VIOLATED,
+    "unverified": ui.PATCH_VERIFY_VERDICT_UNVERIFIED,
+    "internal_error": ui.PATCH_VERIFY_VERDICT_INTERNAL_ERROR,
+}
+
+#: Why the process exits with its code, beside the code itself.
+_EXIT_WHY: Final[Mapping[int, str]] = {
+    int(ExitCode.INTERNAL_ERROR): ui.PATCH_VERIFY_EXIT_INTERNAL_ERROR,
+    int(ExitCode.CONTRACT_ERROR): ui.PATCH_VERIFY_EXIT_UNAVAILABLE,
+    int(ExitCode.GATING_FAILURE): ui.PATCH_VERIFY_EXIT_VIOLATION,
+}
+
+
+def _exit_text(*, exit_code: int, violations: tuple[str, ...]) -> str:
+    why = _EXIT_WHY.get(exit_code)
+    if why is None and violations:
+        why = ui.PATCH_VERIFY_EXIT_ADVISORY
+    return f"{exit_code}" if why is None else f"{exit_code} ({why})"
+
+
+def _listed(values: tuple[str, ...]) -> str:
+    return f"[{', '.join(values)}]"
+
+
+def verdict_lines(
+    *,
+    status: str,
+    violations: tuple[str, ...],
+    unverified: tuple[str, ...],
+    internal: tuple[str, ...],
+    policy: tuple[str, ...],
+    exit_code: int,
+) -> tuple[str, ...]:
+    """Both facts, labelled, in every profile and both output modes: the
+    verdict, whether the verification was complete, the exit and why, what
+    was proven and what was not verified -- the measurements the policy
+    required and the run did not make, and the internal error with its
+    cause, when there are any.  Never a bare ``VIOLATED`` that reads as a
+    verification that ran to the end."""
+    complete = patch_complete(unverified=unverified, internal=internal, policy=policy)
+    lines = [
+        f"{ui.PATCH_VERIFY_LABEL_STATUS}: {_VERDICT_WORDS[status]}",
+        f"{ui.PATCH_VERIFY_LABEL_COMPLETENESS}: "
+        + (ui.PATCH_VERIFY_COMPLETE if complete else ui.PATCH_VERIFY_INCOMPLETE),
+        f"{ui.PATCH_VERIFY_LABEL_EXIT}: "
+        + _exit_text(exit_code=exit_code, violations=violations),
+        f"{ui.PATCH_VERIFY_CONTRACT_VIOLATIONS}: {_listed(violations)}",
+        f"{ui.PATCH_VERIFY_NOT_VERIFIED}: {_listed(unverified)}",
+    ]
+    if policy:
+        lines.append(f"{ui.PATCH_VERIFY_LABEL_POLICY_FAILURES}: {_listed(policy)}")
+    if internal:
+        lines.append(f"{ui.PATCH_VERIFY_LABEL_INTERNAL_ERROR}: {_listed(internal)}")
+    return tuple(lines)
+
+
+def _print_verdict_lines(console: PrinterLike, lines: tuple[str, ...]) -> None:
+    # One line per label, whatever the terminal width: the bracketed lists
+    # are data -- never console markup (``markup=False``), never wrapped onto
+    # a second line a reader of the labelled line would miss (``soft_wrap``).
+    for line in lines:
+        console.print(f"  {line}", markup=False, soft_wrap=True)
 
 
 def render_patch_verify(
@@ -176,39 +468,52 @@ def render_patch_verify(
         return int(ExitCode.CONTRACT_ERROR)
 
     if not baseline_state.trusted_for_diff:
-        console.print(
-            ui.fmt_contract_error(
-                "Patch verify requires a trusted baseline. "
-                "Run codeclone . --update-baseline first."
-            )
-        )
-        return int(ExitCode.CONTRACT_ERROR)
+        console.print(ui.fmt_contract_error(ui.PATCH_VERIFY_BASELINE_UNTRUSTED))
 
     gate_result = _gate_result_from_report_document(report_document)
-    violations = _contract_violations(
+    violations = contract_violations(diff_context=diff_context, gate_result=gate_result)
+    unverified = not_verified(
         diff_context=diff_context,
         gate_result=gate_result,
+        baseline_state=baseline_state,
+        report_document=report_document,
     )
-    status = "violated" if violations else "accepted"
-    exit_code = (
-        int(ExitCode.GATING_FAILURE)
-        if violations and validated_strictness != "relaxed"
-        else int(ExitCode.SUCCESS)
+    internal = internal_errors(gate_result)
+    policy = policy_failures(gate_result)
+    status = patch_status(
+        violations=violations, unverified=unverified, internal=internal, policy=policy
+    )
+    exit_code = patch_exit_code(
+        violations=violations,
+        unverified=unverified,
+        internal=internal,
+        policy=policy,
+        strictness=validated_strictness,
+    )
+    lines = verdict_lines(
+        status=status,
+        violations=violations,
+        unverified=unverified,
+        internal=internal,
+        policy=policy,
+        exit_code=exit_code,
     )
     health_after = _health_after(analysis)
     health_delta = _health_delta(diff_context)
+    regressions = _regressions(diff_context)
     gate_status = _gate_status(gate_result)
 
     if quiet:
         console.print(
-            ui.fmt_patch_verify_compact(
+            _compact_line(
                 status=status,
                 health_after=health_after,
                 health_delta=health_delta,
-                regressions=diff_context.new_clones_count,
+                regressions=regressions,
                 gate_status=gate_status,
             )
         )
+        _print_verdict_lines(console, lines)
         return exit_code
 
     from rich.rule import Rule
@@ -218,46 +523,45 @@ def render_patch_verify(
         Rule(title=ui.PATCH_VERIFY_TITLE, style=ui.STYLE_META, characters=ui.GLYPH_RULE)
     )
     console.print(f"  {ui.PATCH_VERIFY_LABEL_STRICTNESS:<{_L}}{validated_strictness}")
-    console.print(f"  {ui.PATCH_VERIFY_LABEL_STATUS:<{_L}}{_status_text(status)}")
     health_text = ui.fmt_patch_verify_health(
         health_after=health_after, health_delta=health_delta
     )
     console.print(f"  {ui.PATCH_VERIFY_LABEL_HEALTH:<{_L}}{health_text}")
-    console.print(
-        f"  {ui.PATCH_VERIFY_LABEL_REGRESSIONS:<{_L}}"
-        f"{ui.n_of(diff_context.new_clones_count, 'new clone group')}"
+    regressions_text = (
+        comparison_text(None)
+        if regressions is None
+        else ui.n_of(regressions, "new clone group")
     )
+    console.print(f"  {ui.PATCH_VERIFY_LABEL_REGRESSIONS:<{_L}}{regressions_text}")
     console.print(
         f"  {ui.PATCH_VERIFY_LABEL_GATE_PREVIEW:<{_L}}{gate_status} "
         f"{ui.PATCH_VERIFY_GATE_EXIT.format(exit_code=gate_result.exit_code)}"
     )
     for reason in gate_result.reasons:
         console.print(f"    - {reason}")
-    # Only a run with violations lists them: "none" under a status that
-    # already says "accepted" answered nothing.
-    if violations:
-        console.print(f"  {ui.PATCH_VERIFY_CONTRACT_VIOLATIONS:<{_L}}")
-        for value in violations:
-            console.print(f"    - {value}")
+    _print_verdict_lines(console, lines)
     console.print()
-    if status == "accepted":
-        verdict_line = ui.styled(
-            f"{ui.GLYPH_OK} {ui.PATCH_VERIFY_ACCEPTED}", ui.STYLE_VERDICT_PASS_STRONG
-        )
-    elif validated_strictness == "relaxed":
-        verdict_line = ui.styled(
-            f"{ui.GLYPH_WARN} {ui.PATCH_VERIFY_RELAXED_ADVISORY}", ui.STYLE_VERDICT_WARN
-        )
-    else:
-        verdict_line = ui.styled(
-            f"{ui.GLYPH_FAIL} {ui.PATCH_VERIFY_VIOLATED}", ui.STYLE_VERDICT_FAIL
-        )
+    verdict_line = _verdict_line(
+        status=status,
+        complete=patch_complete(
+            unverified=unverified, internal=internal, policy=policy
+        ),
+        exit_code=exit_code,
+    )
     console.print(f"  {verdict_line}")
     return exit_code
 
 
 __all__ = [
     "VALID_STRICTNESS_PROFILES",
+    "contract_violations",
+    "internal_errors",
+    "not_verified",
+    "patch_complete",
+    "patch_exit_code",
+    "patch_status",
+    "policy_failures",
     "render_patch_verify",
     "validate_strictness",
+    "verdict_lines",
 ]

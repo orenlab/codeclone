@@ -57,6 +57,10 @@ ERR_METRICS_BASELINE_TYPING_GATES: Final = (
     "Typing/docstring regression gates require a metrics baseline that includes "
     "coverage adoption data. Run codeclone <root> --update-baseline --baseline <path>."
 )
+#: No longer printed: a baseline without an API snapshot keeps its other
+#: metrics lanes, and an API gate over it is refused per lane by the gate
+#: evaluator (``lane:unavailable:api_surface``).  Kept so the public message
+#: surface does not move inside this fix.
 ERR_METRICS_BASELINE_API_GATES: Final = (
     "API break gating requires a metrics baseline with public API surface data. "
     "Run codeclone <root> --api-surface --update-baseline --baseline <path> first."
@@ -229,16 +233,54 @@ SESSION_STATS_SCOPE_FILES: Final = "files"
 # ── patch verify ────────────────────────────────────────────────────
 
 PATCH_VERIFY_LABEL_STRICTNESS: Final = "Strictness"
-PATCH_VERIFY_LABEL_STATUS: Final = "Status"
+#: The labelled verdict lines (ruling 2026-10-20 (13)), verbatim, printed in
+#: every profile and both output modes: ``Verdict``, ``Completeness``,
+#: ``Exit``, ``Proven violations``, ``Unverified lanes`` -- and ``Internal
+#: error`` with its cause when the gate crashed.
+PATCH_VERIFY_LABEL_STATUS: Final = "Verdict"
+PATCH_VERIFY_LABEL_COMPLETENESS: Final = "Completeness"
+PATCH_VERIFY_LABEL_EXIT: Final = "Exit"
+PATCH_VERIFY_LABEL_INTERNAL_ERROR: Final = "Internal error"
+#: The measurements the policy required and the run did not make: the gate's
+#: population refusals (ruling 2026-10-20 (17)) -- never a proven violation.
+PATCH_VERIFY_LABEL_POLICY_FAILURES: Final = "Policy failures (missing measurement)"
 PATCH_VERIFY_LABEL_HEALTH: Final = "Health"
 PATCH_VERIFY_LABEL_REGRESSIONS: Final = "Regressions"
 PATCH_VERIFY_LABEL_GATE_PREVIEW: Final = "Gate preview"
 PATCH_VERIFY_GATE_EXIT: Final = "(exit {exit_code})"
-PATCH_VERIFY_CONTRACT_VIOLATIONS: Final = "Violations"
+PATCH_VERIFY_CONTRACT_VIOLATIONS: Final = "Proven violations"
+#: The checks a patch verification needed and could not complete: a baseline
+#: this run cannot trust, a clone lane it did not compare, a gate that could
+#: not read its lane.  Never a violation, never an acceptance.
+PATCH_VERIFY_NOT_VERIFIED: Final = "Unverified lanes"
+#: The verdict words and the completeness words: verdict markers, so they
+#: shout (``tests/test_cli_design_system.py`` vocabulary).
+PATCH_VERIFY_VERDICT_ACCEPTED: Final = "ACCEPTED"
+PATCH_VERIFY_VERDICT_VIOLATED: Final = "VIOLATED"
+PATCH_VERIFY_VERDICT_UNVERIFIED: Final = "UNVERIFIED"
+PATCH_VERIFY_VERDICT_INTERNAL_ERROR: Final = "INTERNAL_ERROR"
+PATCH_VERIFY_COMPLETE: Final = "COMPLETE"
+PATCH_VERIFY_INCOMPLETE: Final = "INCOMPLETE"
+PATCH_VERIFY_EXIT_INTERNAL_ERROR: Final = "internal error"
+PATCH_VERIFY_EXIT_UNAVAILABLE: Final = "required verification unavailable"
+PATCH_VERIFY_EXIT_VIOLATION: Final = "proven violation"
+PATCH_VERIFY_EXIT_ADVISORY: Final = "relaxed: violations are advisory"
 PATCH_VERIFY_ACCEPTED: Final = "Patch contract accepted."
 PATCH_VERIFY_VIOLATED: Final = "Patch contract violated."
+PATCH_VERIFY_VIOLATED_INCOMPLETE: Final = (
+    "Patch contract violated; the verification is incomplete."
+)
+PATCH_VERIFY_UNVERIFIED: Final = (
+    "Patch contract not verified: a required check did not run."
+)
+PATCH_VERIFY_INTERNAL_ERROR: Final = (
+    "Patch contract not verified: the gate failed with an internal error."
+)
 PATCH_VERIFY_RELAXED_ADVISORY: Final = (
     "Patch contract has advisory violations but relaxed mode exits 0."
+)
+PATCH_VERIFY_BASELINE_UNTRUSTED: Final = (
+    "Patch verify requires a trusted baseline. Run codeclone . --update-baseline first."
 )
 
 # ── blast radius ────────────────────────────────────────────────────

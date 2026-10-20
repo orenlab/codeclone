@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import io
 import re
+import types
 from pathlib import Path
 from uuid import UUID
 
@@ -847,6 +848,14 @@ _ALLCAPS_RE = re.compile(r"\b[A-Z][A-Z0-9]{2,}\b")
 # Verdict markers, domain acronyms, and unit names that may shout.
 _ALLCAPS_VOCABULARY = frozenset(
     {
+        # The patch-verify verdict and completeness words (ruling 2026-10-20
+        # (17)): product statuses, registered here by name -- never shouted
+        # through ``.upper()`` where this guard cannot read them.
+        "ACCEPTED",
+        "COMPLETE",
+        "INCOMPLETE",
+        "UNVERIFIED",
+        "VIOLATED",
         "ANSI",
         "API",
         "AST",
@@ -884,20 +893,38 @@ _ALLCAPS_VOCABULARY = frozenset(
 )
 
 
-def test_allcaps_is_reserved_for_verdicts_and_acronyms() -> None:
-    from codeclone.ui_messages import controller, runtime
-    from codeclone.ui_messages import help as help_msgs
-
-    violations = sorted(
+def _unregistered_allcaps(modules: tuple[types.ModuleType, ...]) -> list[str]:
+    """Every ALL-CAPS token of the modules' public string constants that the
+    vocabulary does not register, as ``module.CONSTANT: TOKEN``."""
+    return sorted(
         {
             f"{module.__name__}.{const_name}: {token}"
-            for module in (runtime, controller, help_msgs)
+            for module in modules
             for const_name, value in _module_string_constants(module, prefix="")
             for token in _ALLCAPS_RE.findall(value)
             if token not in _ALLCAPS_VOCABULARY
         }
     )
+
+
+def test_allcaps_is_reserved_for_verdicts_and_acronyms() -> None:
+    from codeclone.ui_messages import controller, runtime
+    from codeclone.ui_messages import help as help_msgs
+
+    violations = _unregistered_allcaps((runtime, controller, help_msgs))
     assert violations == [], (
         "Unexpected ALL-CAPS token(s); extend the message or use sentence "
         "case: " + "\n".join(violations)
     )
+
+
+def test_the_allcaps_guard_still_refuses_an_unregistered_token() -> None:
+    """The positive control of the vocabulary: a registered verdict word
+    passes, a shouted word nobody registered is named -- the guard reads
+    the vocabulary, it does not wave every token through."""
+    probe = types.ModuleType("probe")
+    vars(probe).update(
+        PROBE_VERDICT="Verdict: VIOLATED; Completeness: INCOMPLETE",
+        PROBE_SHOUT="a ZORBLAX token beside ACCEPTED",
+    )
+    assert _unregistered_allcaps((probe,)) == ["probe.PROBE_SHOUT: ZORBLAX"]

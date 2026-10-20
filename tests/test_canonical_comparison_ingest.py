@@ -190,15 +190,22 @@ def test_a_foreign_container_leaves_every_lane_unavailable(
     comparison_runs: dict[str, ComparisonRun],
 ) -> None:
     """The container of another scope: every lane untrusted, every governed
-    finding unavailable, and no comparison stated against it.  The CLI still
-    calls the metrics baseline loaded (the witness is the CLI's), but a
-    comparison reads its lanes, and none is trusted: until 2026-10-05 the
-    producer stated the adoption and API deltas against the foreign
-    container (``compared`` beside every lane ``unavailable``)."""
+    finding unavailable, and no comparison stated against it.  The witness
+    is the CLI's, and the CLI refuses the foreign container for its metrics
+    lanes too -- not loaded, ``mismatch_scope_id``, as MCP answers the same
+    file -- whatever the gates read (audit 2026-10-19, item 5).  Until the
+    fix this row pinned the opposite: a CLI that called the foreign metrics
+    baseline loaded and ``ok`` because no active gate read its lanes.  And
+    until 2026-10-05 the producer stated the adoption and API deltas against
+    the foreign container (``compared`` beside every lane ``unavailable``)."""
     house = comparison_runs["foreign_scope"].stored.facts.comparison
     witness = house.baseline_witness
     assert witness is not None
-    assert (witness.state, witness.loaded, witness.status) == ("untrusted", True, "ok")
+    assert (witness.state, witness.loaded, witness.status) == (
+        "untrusted",
+        False,
+        "mismatch_scope_id",
+    )
     assert {(row.status, row.reason) for row in house.lane_trust} == {
         ("unavailable", "baseline_scope_id")
     }

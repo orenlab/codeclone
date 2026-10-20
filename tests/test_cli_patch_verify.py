@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,9 +24,11 @@ from codeclone.models import (
     HealthScore,
     LaneTrust,
     MetricsDiff,
+    ObservationLaneName,
     ProjectMetrics,
     TrustVector,
 )
+from codeclone.report.messages import gates as gate_msgs
 from codeclone.surfaces.cli.patch_verify import (
     patch_gate_config,
     render_patch_verify,
@@ -90,31 +93,43 @@ def _analysis(*, function_clones: int = 0) -> AnalysisResult:
     )
 
 
-def _diff_context(*, new_clones: int = 0) -> DiffContext:
+def _diff_context(
+    *, new_clones: int = 0, clone_novelty_available: bool = True
+) -> DiffContext:
     return DiffContext(
         new_func={f"func-{index}" for index in range(new_clones)},
         new_block=set(),
         new_clones_count=new_clones,
-        clone_novelty_available=True,
+        clone_novelty_available=clone_novelty_available,
         metrics_diff=None,
         coverage_adoption_diff_available=False,
         api_surface_diff_available=False,
     )
 
 
-def _baseline_state(*, trusted: bool = True) -> object:
-    return SimpleNamespace(trusted_for_diff=trusted)
+def _baseline_state(*, trusted: bool = True, status: str = "ok") -> object:
+    """The clone baseline state the verifier reads: whether it is trusted
+    for a diff, and its status (a ``BaselineStatus`` -- its ``value`` is
+    what the verifier names)."""
+    return SimpleNamespace(
+        trusted_for_diff=trusted, status=SimpleNamespace(value=status)
+    )
+
+
+#: The clone lanes a baseline of another algorithm revision leaves opaque.
+_OPAQUE_CLONE_LANES = frozenset({"clones.functions", "clones.blocks"})
 
 
 def _report_document(
     *,
     gate_exit_code: int = 0,
     gate_reasons: tuple[str, ...] = (),
+    opaque_lanes: frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     trust = TrustVector(
         root_verified=True,
         lanes=tuple(
-            LaneTrust(name=lane, status="trusted", reason="compatible")
+            _lane_trust(lane, opaque=lane in opaque_lanes)
             for lane in TEST_OBSERVATION_BUNDLE.contract.enabled_lanes
         ),
     )
@@ -125,6 +140,33 @@ def _report_document(
         baseline_trust=trust,
         gate_exit_code=gate_exit_code,
         gate_reasons=gate_reasons,
+    )
+
+
+def _lane_trust(lane: ObservationLaneName, *, opaque: bool) -> LaneTrust:
+    if opaque:
+        return LaneTrust(name=lane, status="unavailable", reason="algorithm_revision")
+    return LaneTrust(name=lane, status="trusted", reason="compatible")
+
+
+#: The labelled lines of a patch verdict (ruling 2026-10-20 (13)), verbatim.
+_VERDICT_LABELS = (
+    "Verdict:",
+    "Completeness:",
+    "Exit:",
+    "Proven violations:",
+    "Unverified lanes:",
+    "Policy failures (missing measurement):",
+    "Internal error:",
+)
+
+
+def _verdict_block(text: str) -> tuple[str, ...]:
+    """Every labelled verdict line the output holds, in order."""
+    return tuple(
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith(_VERDICT_LABELS)
     )
 
 
@@ -145,7 +187,12 @@ def test_patch_verify_accepts_clean_patch_quiet() -> None:
     assert exit_code == int(ExitCode.SUCCESS)
     assert printer.text == (
         "patch-verify: accepted | health=0 delta=n/a (not compared) "
-        "regressions=0 gates=pass"
+        "regressions=0 gates=pass\n"
+        "  Verdict: ACCEPTED\n"
+        "  Completeness: COMPLETE\n"
+        "  Exit: 0\n"
+        "  Proven violations: []\n"
+        "  Unverified lanes: []"
     )
 
 
@@ -156,13 +203,23 @@ def test_patch_verify_accepts_clean_patch_quiet() -> None:
             "ci",
             int(ExitCode.GATING_FAILURE),
             "patch-verify: violated | health=0 delta=n/a (not compared) "
-            "regressions=1 gates=FAIL",
+            "regressions=1 gates=FAIL\n"
+            "  Verdict: VIOLATED\n"
+            "  Completeness: COMPLETE\n"
+            "  Exit: 3 (proven violation)\n"
+            "  Proven violations: [structural_regressions, gate_failures]\n"
+            "  Unverified lanes: []",
         ),
         (
             "relaxed",
             int(ExitCode.SUCCESS),
             "patch-verify: violated | health=0 delta=n/a (not compared) "
-            "regressions=1 gates=pass",
+            "regressions=1 gates=pass\n"
+            "  Verdict: VIOLATED\n"
+            "  Completeness: COMPLETE\n"
+            "  Exit: 0 (relaxed: violations are advisory)\n"
+            "  Proven violations: [structural_regressions]\n"
+            "  Unverified lanes: []",
         ),
     ],
 )
@@ -194,22 +251,43 @@ def test_patch_verify_reports_clone_regressions_by_strictness(
     assert printer.text == expected_text
 
 
-def test_patch_verify_requires_trusted_baseline() -> None:
+@pytest.mark.parametrize("strictness", ["ci", "strict", "relaxed"])
+def test_patch_verify_requires_trusted_baseline(strictness: str) -> None:
+    """A baseline this run cannot trust compared nothing: ``unverified`` with
+    the contract-error code under every profile, and the reason named --
+    never ``accepted``, never the code of a proven violation."""
     printer = _RecordingPrinter()
 
     exit_code = render_patch_verify(
         console=printer,
         args=cast(Any, _args()),
-        strictness="ci",
+        strictness=strictness,
         report_document=_report_document(),
         analysis=_analysis(),
-        diff_context=_diff_context(),
-        baseline_state=cast(Any, _baseline_state(trusted=False)),
+        diff_context=_diff_context(clone_novelty_available=False),
+        baseline_state=cast(
+            Any,
+            _baseline_state(trusted=False, status="mismatch_scope_id"),
+        ),
         quiet=True,
     )
 
     assert exit_code == int(ExitCode.CONTRACT_ERROR)
-    assert "Patch verify requires a trusted baseline" in printer.text
+    assert (
+        "Patch verify requires a trusted baseline" in printer.text,
+        "\npatch-verify: unverified |" in printer.text,
+        _verdict_block(printer.text),
+    ) == (
+        True,
+        True,
+        (
+            "Verdict: UNVERIFIED",
+            "Completeness: INCOMPLETE",
+            "Exit: 2 (required verification unavailable)",
+            "Proven violations: []",
+            "Unverified lanes: [baseline:mismatch_scope_id, clones:not_compared]",
+        ),
+    ), printer.text
 
 
 def test_patch_verify_validates_strictness_values() -> None:
@@ -335,6 +413,9 @@ def test_patch_verify_renders_canonical_gate_reasons() -> None:
 
 
 def test_patch_verify_missing_canonical_evaluation_fails_closed() -> None:
+    """No evaluation in the document: the gate did not run, so the patch is
+    not verified -- the contract-error code, never ``accepted`` and never
+    the code of a violation nobody proved."""
     printer = _RecordingPrinter()
 
     exit_code = render_patch_verify(
@@ -348,8 +429,416 @@ def test_patch_verify_missing_canonical_evaluation_fails_closed() -> None:
         quiet=True,
     )
 
-    assert exit_code == int(ExitCode.GATING_FAILURE)
-    assert "gates=FAIL" in printer.text
+    assert exit_code == int(ExitCode.CONTRACT_ERROR)
+    assert (printer.lines[0], _verdict_block(printer.text)) == (
+        "patch-verify: unverified | health=0 delta=n/a (not compared) "
+        "regressions=0 gates=FAIL",
+        (
+            "Verdict: UNVERIFIED",
+            "Completeness: INCOMPLETE",
+            "Exit: 2 (required verification unavailable)",
+            "Proven violations: []",
+            "Unverified lanes: [report:evaluation:missing]",
+        ),
+    ), printer.text
+
+
+# -- not verified: a required check that did not run ----------------------------
+#
+# ``violated`` is a proven failure; ``unverified`` is a check that did not run
+# completely.  Two claims, two statuses, two texts; the code of a proven
+# violation (3) is never spent on what was not compared, and what was not
+# compared is never ``accepted``.  ``unverified`` exits with the contract-error
+# code (2) the gate itself uses for an unavailable lane, under every profile.
+
+_NOT_COMPARED_COMPACT = "regressions=n/a (not compared)"
+
+
+def _render(
+    *,
+    strictness: str,
+    report_document: dict[str, object],
+    diff_context: DiffContext,
+    quiet: bool,
+    function_clones: int = 0,
+) -> tuple[int, str]:
+    printer = _RecordingPrinter()
+    exit_code = render_patch_verify(
+        console=printer,
+        args=cast(Any, _args()),
+        strictness=strictness,
+        report_document=report_document,
+        analysis=_analysis(function_clones=function_clones),
+        diff_context=diff_context,
+        baseline_state=cast(Any, _baseline_state()),
+        quiet=quiet,
+    )
+    return exit_code, printer.text
+
+
+def _opaque_clone_gate(strictness: str) -> dict[str, object]:
+    """The document an opaque-clone-lane run states: the gate reads the
+    clone lanes under ``ci`` and ``strict`` (``fail_on_new``) and cannot."""
+    if strictness == "relaxed":
+        return _report_document(opaque_lanes=_OPAQUE_CLONE_LANES)
+    return _report_document(
+        gate_exit_code=int(ExitCode.CONTRACT_ERROR),
+        gate_reasons=(
+            "lane:unavailable:clones.blocks",
+            "lane:unavailable:clones.functions",
+        ),
+        opaque_lanes=_OPAQUE_CLONE_LANES,
+    )
+
+
+@pytest.mark.parametrize("strictness", ["relaxed", "ci", "strict"])
+def test_uncompared_clone_lanes_are_unverified_not_accepted_or_violated(
+    strictness: str,
+) -> None:
+    exit_code, text = _render(
+        strictness=strictness,
+        report_document=_opaque_clone_gate(strictness),
+        diff_context=_diff_context(clone_novelty_available=False),
+        quiet=True,
+    )
+    assert exit_code == int(ExitCode.CONTRACT_ERROR), text
+    assert text.startswith("patch-verify: unverified |"), text
+    assert _NOT_COMPARED_COMPACT in text
+    assert "regressions=0" not in text
+    assert "clones.blocks:algorithm_revision" in text
+    assert "clones.functions:algorithm_revision" in text
+
+
+def test_the_uncompared_regressions_row_is_never_a_measured_zero() -> None:
+    exit_code, text = _render(
+        strictness="ci",
+        report_document=_opaque_clone_gate("ci"),
+        diff_context=_diff_context(clone_novelty_available=False),
+        quiet=False,
+    )
+    assert exit_code == int(ExitCode.CONTRACT_ERROR)
+    row = next(line for line in text.splitlines() if "Regressions" in line)
+    assert row.split("Regressions", 1)[1].strip() == "not compared", row
+    assert "Verdict: UNVERIFIED" in _verdict_block(text)
+    assert "Patch contract not verified" in text
+    assert "Patch contract violated" not in text
+    assert "gate_failures" not in text
+
+
+def test_a_gate_that_could_not_read_its_lane_is_unverified() -> None:
+    """The clone lanes compared and nothing new, but the requested API gate
+    reads a lane the baseline does not hold: the lane and its reason are
+    named, and the patch is not verified."""
+    exit_code, text = _render(
+        strictness="ci",
+        report_document=_report_document(
+            gate_exit_code=int(ExitCode.CONTRACT_ERROR),
+            gate_reasons=("lane:unavailable:api_surface",),
+        ),
+        diff_context=_diff_context(),
+        quiet=False,
+    )
+    assert exit_code == int(ExitCode.CONTRACT_ERROR)
+    assert "0 new clone groups" in text
+    assert _verdict_block(text) == (
+        "Verdict: UNVERIFIED",
+        "Completeness: INCOMPLETE",
+        "Exit: 2 (required verification unavailable)",
+        "Proven violations: []",
+        "Unverified lanes: [lane:unavailable:api_surface]",
+    )
+
+
+# -- both facts: a proven violation beside a check that did not run --------------
+#
+# Ruling 2026-10-20 (13): the verdict is VIOLATED -- the uncertainty of one
+# fact never hides the proven failure of another -- and the verification is
+# INCOMPLETE, so the exit is the contract-error code the gate itself returns
+# for an unavailable lane before it evaluates any failure (2), under every
+# profile.  Printing VIOLATED alone would read as a completed verification.
+
+_BOTH_FACTS = (
+    "Verdict: VIOLATED",
+    "Completeness: INCOMPLETE",
+    "Exit: 2 (required verification unavailable)",
+    "Proven violations: [structural_regressions]",
+    "Unverified lanes: [lane:unavailable:api_surface]",
+)
+_BOTH_FACTS_SENTENCE = "Patch contract violated; the verification is incomplete."
+
+
+@pytest.mark.parametrize("quiet", [False, True], ids=["full", "quiet"])
+@pytest.mark.parametrize("strictness", ["relaxed", "ci", "strict"])
+def test_a_proven_violation_beside_an_unavailable_lane_states_both_facts(
+    strictness: str, quiet: bool
+) -> None:
+    exit_code, text = _render(
+        strictness=strictness,
+        report_document=_report_document(
+            gate_exit_code=int(ExitCode.CONTRACT_ERROR),
+            gate_reasons=("lane:unavailable:api_surface",),
+        ),
+        diff_context=_diff_context(new_clones=1),
+        function_clones=1,
+        quiet=quiet,
+    )
+    assert exit_code == int(ExitCode.CONTRACT_ERROR), text
+    assert _verdict_block(text) == _BOTH_FACTS, text
+    # The closing sentence says both facts too, never a bare "violated".
+    assert quiet or _BOTH_FACTS_SENTENCE in text.splitlines()[-1], text
+
+
+# -- an internal error of the gate: a crash, never an abstention -----------------
+#
+# Ruling 2026-10-20 (13): INTERNAL_ERROR -> the verification is incomplete ->
+# never ACCEPTED -> exit 5, the cause kept in the output.  It is not folded into
+# an unavailable lane (2, UNVERIFIED): a crash is not an analytical abstention.
+# A proven violation beside it still reads VIOLATED.
+
+_GATE_CRASH = "gate:evaluator raised KeyError: 'api_surface'"
+
+
+@pytest.mark.parametrize("quiet", [False, True], ids=["full", "quiet"])
+@pytest.mark.parametrize("strictness", ["relaxed", "ci", "strict"])
+@pytest.mark.parametrize(
+    ("new_clones", "verdict", "violations"),
+    [
+        pytest.param(0, "INTERNAL_ERROR", "", id="alone"),
+        pytest.param(1, "VIOLATED", "structural_regressions", id="beside-violation"),
+    ],
+)
+def test_an_internal_gate_error_exits_5_and_keeps_its_cause(
+    strictness: str, quiet: bool, new_clones: int, verdict: str, violations: str
+) -> None:
+    exit_code, text = _render(
+        strictness=strictness,
+        report_document=_report_document(
+            gate_exit_code=int(ExitCode.INTERNAL_ERROR),
+            gate_reasons=(_GATE_CRASH,),
+        ),
+        diff_context=_diff_context(new_clones=new_clones),
+        function_clones=new_clones,
+        quiet=quiet,
+    )
+    assert exit_code == int(ExitCode.INTERNAL_ERROR), text
+    assert _verdict_block(text) == (
+        f"Verdict: {verdict}",
+        "Completeness: INCOMPLETE",
+        "Exit: 5 (internal error)",
+        f"Proven violations: [{violations}]",
+        "Unverified lanes: []",
+        f"Internal error: [gate:exit:5, {_GATE_CRASH}]",
+    ), text
+    assert "Patch contract accepted" not in text
+
+
+#: A gate exit outside the closed contract (0, 2, 3, 5), as the document
+#: carries it.
+_OUT_OF_CONTRACT = (1, 4, 7, -2)
+
+
+@pytest.mark.parametrize("code", _OUT_OF_CONTRACT)
+def test_a_gate_exit_outside_the_contract_is_a_protocol_error(code: int) -> None:
+    """Ruling 2026-10-20 (17): an exit the gate contract does not define is
+    a protocol error of the evaluation, not a check that did not run -- exit
+    5, never ``UNVERIFIED`` / 2 -- and the code the document carried and the
+    gate's own reasons are kept."""
+    exit_code, text = _render(
+        strictness="ci",
+        report_document=_report_document(
+            gate_exit_code=code, gate_reasons=("gate:said something",)
+        ),
+        diff_context=_diff_context(),
+        quiet=True,
+    )
+    assert (exit_code, _verdict_block(text)) == (
+        int(ExitCode.INTERNAL_ERROR),
+        (
+            "Verdict: INTERNAL_ERROR",
+            "Completeness: INCOMPLETE",
+            "Exit: 5 (internal error)",
+            "Proven violations: []",
+            "Unverified lanes: []",
+            f"Internal error: [gate:protocol_error:exit:{code}, gate:said something]",
+        ),
+    ), text
+
+
+# -- relaxed changes the sanction, never the completeness ---------------------
+#
+# Ruling 2026-10-20 (17): a clone lane relaxed did not compare is a check that
+# did not run, whatever the other lane compared; a proven violation relaxed
+# lets pass is still a violation -- exit 0, stated as non-blocking, never
+# "accepted".
+
+
+@pytest.mark.parametrize("quiet", [False, True], ids=["full", "quiet"])
+@pytest.mark.parametrize(
+    ("new_clones", "verdict", "violations"),
+    [
+        pytest.param(0, "UNVERIFIED", "", id="alone"),
+        pytest.param(1, "VIOLATED", "structural_regressions", id="beside-violation"),
+    ],
+)
+def test_one_opaque_clone_lane_beside_a_compared_one_is_unverified_in_relaxed(
+    quiet: bool, new_clones: int, verdict: str, violations: str
+) -> None:
+    exit_code, text = _render(
+        strictness="relaxed",
+        report_document=_report_document(opaque_lanes=frozenset({"clones.blocks"})),
+        diff_context=_diff_context(new_clones=new_clones),
+        function_clones=new_clones,
+        quiet=quiet,
+    )
+    assert (exit_code, _verdict_block(text)) == (
+        int(ExitCode.CONTRACT_ERROR),
+        (
+            f"Verdict: {verdict}",
+            "Completeness: INCOMPLETE",
+            "Exit: 2 (required verification unavailable)",
+            f"Proven violations: [{violations}]",
+            "Unverified lanes: [clones.blocks:algorithm_revision]",
+        ),
+    ), text
+
+
+_RELAXED_SENTENCE = "Patch contract has advisory violations but relaxed mode exits 0."
+
+
+@pytest.mark.parametrize("quiet", [False, True], ids=["full", "quiet"])
+def test_relaxed_states_a_proven_violation_as_non_blocking_never_accepted(
+    quiet: bool,
+) -> None:
+    exit_code, text = _render(
+        strictness="relaxed",
+        report_document=_report_document(),
+        diff_context=_diff_context(new_clones=1),
+        function_clones=1,
+        quiet=quiet,
+    )
+    assert (exit_code, _verdict_block(text), "accepted" in text.lower()) == (
+        int(ExitCode.SUCCESS),
+        (
+            "Verdict: VIOLATED",
+            "Completeness: COMPLETE",
+            "Exit: 0 (relaxed: violations are advisory)",
+            "Proven violations: [structural_regressions]",
+            "Unverified lanes: []",
+        ),
+        False,
+    ), text
+    assert quiet or _RELAXED_SENTENCE in text.splitlines()[-1], text
+
+
+# -- a population the gate refuses to answer over -----------------------------
+#
+# Ruling 2026-10-20 (17): the gate's population refusal (``unmeasured``,
+# ``complete_empty``; the gate's exit 3) is a measurement the policy required
+# and the run did not make -- a policy failure, INCOMPLETE, exit 2, never a
+# proven violation.  A violation proven on another lane still reads VIOLATED.
+
+_REFUSALS = {
+    "unmeasured": f"metric:{gate_msgs.GATE_REASON_UNMEASURED_POPULATION}",
+    "complete_empty": f"metric:{gate_msgs.GATE_REASON_EMPTY_ANALYSIS_SCOPE}",
+}
+
+
+@pytest.mark.parametrize("quiet", [False, True], ids=["full", "quiet"])
+@pytest.mark.parametrize("strictness", ["ci", "strict"])
+@pytest.mark.parametrize("refusal", sorted(_REFUSALS))
+@pytest.mark.parametrize(
+    ("new_clones", "verdict", "violations"),
+    [
+        pytest.param(0, "UNVERIFIED", "", id="alone"),
+        pytest.param(1, "VIOLATED", "structural_regressions", id="beside-violation"),
+    ],
+)
+def test_a_population_refusal_is_a_policy_failure_not_a_proven_violation(
+    quiet: bool,
+    strictness: str,
+    refusal: str,
+    new_clones: int,
+    verdict: str,
+    violations: str,
+) -> None:
+    exit_code, text = _render(
+        strictness=strictness,
+        report_document=_report_document(
+            gate_exit_code=int(ExitCode.GATING_FAILURE),
+            gate_reasons=(_REFUSALS[refusal],),
+        ),
+        diff_context=_diff_context(new_clones=new_clones),
+        function_clones=new_clones,
+        quiet=quiet,
+    )
+    assert (exit_code, _verdict_block(text)) == (
+        int(ExitCode.CONTRACT_ERROR),
+        (
+            f"Verdict: {verdict}",
+            "Completeness: INCOMPLETE",
+            "Exit: 2 (required verification unavailable)",
+            f"Proven violations: [{violations}]",
+            "Unverified lanes: []",
+            f"Policy failures (missing measurement): [{_REFUSALS[refusal]}]",
+        ),
+    ), text
+
+
+def test_a_gate_failure_on_a_fact_beside_the_refusal_words_stays_proven() -> None:
+    """The control on the boundary: a gate that failed on a measured fact
+    (``clone:new``) is a proven violation; only the refusal is a policy
+    failure."""
+    exit_code, text = _render(
+        strictness="ci",
+        report_document=_report_document(
+            gate_exit_code=int(ExitCode.GATING_FAILURE),
+            gate_reasons=("clone:new",),
+        ),
+        diff_context=_diff_context(new_clones=1),
+        function_clones=1,
+        quiet=True,
+    )
+    assert (exit_code, _verdict_block(text)) == (
+        int(ExitCode.GATING_FAILURE),
+        (
+            "Verdict: VIOLATED",
+            "Completeness: COMPLETE",
+            "Exit: 3 (proven violation)",
+            "Proven violations: [structural_regressions, gate_failures]",
+            "Unverified lanes: []",
+        ),
+    ), text
+
+
+def test_a_crash_inside_the_gate_ends_the_cli_in_exit_5_with_its_cause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The chain as the CLI runs it today: the evaluator itself never writes
+    5 into a document -- an exception inside the gate leaves the CLI through
+    its internal-error envelope.  The cause is printed, the exit is 5, and no
+    verdict is stated over the crash.  (A characterization of the existing
+    chain, not of this module.)"""
+
+    def _crash(**_kwargs: object) -> object:
+        raise RuntimeError("gate evaluator exploded")
+
+    root = tmp_path / "crash"
+    package = root / "pkg"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('"""pkg."""\n', "utf-8")
+    (package / "util.py").write_text("def helper(x):\n    return x + 1\n", "utf-8")
+    monkeypatch.setattr(cli_workflow, "gate_with_config", _crash)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+        code = corpora._run_codeclone_cli_exit(
+            [str(root), "--no-progress", "--no-color", "--patch-verify"], {}
+        )
+    text = out.getvalue()
+    assert code == int(ExitCode.INTERNAL_ERROR), text
+    assert "INTERNAL ERROR" in text
+    assert "RuntimeError: gate evaluator exploded" in text
+    assert "Verdict:" not in text
+    assert "Patch contract accepted" not in text
 
 
 def test_patch_verify_verbose_relaxed_advisory() -> None:
@@ -717,7 +1206,7 @@ def test_the_compact_health_line_is_the_states_health_comparison(
 #: the health line each population prints, rich and compact.  ``compared``
 #: compares health (+4); with dead code and dependencies skipped two of the
 #: lanes health reads were never observed; against a baseline of another
-#: scope every lane is untrusted -- both state no health comparison.
+#: scope nothing is trusted -- both state no health comparison.
 CLI_HEALTH_LINES: dict[tuple[str, bool], str] = {
     ("compared", False): "66 → 70 (+4)",
     ("compared", True): "| health=66->70 regressions=",
@@ -734,12 +1223,12 @@ _CLI_FLAGS: dict[str, tuple[str, ...]] = {
 
 
 @pytest.fixture(scope="module")
-def cli_patch_verify_text(
+def cli_patch_verify_runs(
     tmp_path_factory: pytest.TempPathFactory,
-) -> dict[tuple[str, bool], str]:
+) -> dict[tuple[str, bool], tuple[str, int | str | None]]:
     base = tmp_path_factory.mktemp("patch_verify_health").resolve()
     baseline = corpora._comparison_baseline(base)
-    texts: dict[tuple[str, bool], str] = {}
+    runs: dict[tuple[str, bool], tuple[str, int | str | None]] = {}
     for population, quiet in CLI_HEALTH_LINES:
         root = base / f"{population}{'-quiet' if quiet else ''}"
         corpora.materialize_comparison_corpus(root, stage_b=True)
@@ -747,7 +1236,7 @@ def cli_patch_verify_text(
             corpora._rewrite_scope_as_foreign(root)
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            corpora._run_codeclone_cli_exit(
+            code = corpora._run_codeclone_cli_exit(
                 [
                     str(root),
                     "--no-progress",
@@ -759,15 +1248,48 @@ def cli_patch_verify_text(
                 ],
                 {},
             )
-        texts[(population, quiet)] = out.getvalue()
-    return texts
+        runs[(population, quiet)] = (out.getvalue(), code)
+    return runs
 
 
 @pytest.mark.parametrize(("population", "quiet"), list(CLI_HEALTH_LINES))
 def test_the_cli_patch_verify_health_line_reads_the_runs_state(
-    cli_patch_verify_text: dict[tuple[str, bool], str],
+    cli_patch_verify_runs: dict[tuple[str, bool], tuple[str, int | str | None]],
     population: str,
     quiet: bool,
 ) -> None:
-    text = cli_patch_verify_text[(population, quiet)]
+    text, _code = cli_patch_verify_runs[(population, quiet)]
     assert CLI_HEALTH_LINES[(population, quiet)] in text, text
+
+
+@pytest.mark.parametrize("quiet", [False, True])
+def test_a_baseline_of_another_scope_is_never_trusted_without_gates(
+    cli_patch_verify_runs: dict[tuple[str, bool], tuple[str, int | str | None]],
+    quiet: bool,
+) -> None:
+    """``foreign_scope`` requests no gate: a container of another scope still
+    describes nothing about this run, so the patch is not verified -- the
+    baseline's refusal named, the contract-error code -- and the clone
+    regressions are not compared, never zero.  The first cycle pinned the
+    opposite here: the CLI trusted the foreign container because no active
+    gate read its lanes (audit 2026-10-19, item 5)."""
+    text, code = cli_patch_verify_runs[("foreign_scope", quiet)]
+    assert code == int(ExitCode.CONTRACT_ERROR), text
+    assert "baseline:mismatch_scope_id" in text
+    if quiet:
+        assert "patch-verify: unverified |" in text
+        assert "regressions=n/a (not compared)" in text
+    else:
+        assert re.search(r"Regressions\s+not compared", text), text
+    assert "Verdict: UNVERIFIED" in _verdict_block(text), text
+    assert "Completeness: INCOMPLETE" in _verdict_block(text), text
+
+
+def test_the_compared_population_is_verified(
+    cli_patch_verify_runs: dict[tuple[str, bool], tuple[str, int | str | None]],
+) -> None:
+    """The control on the same corpus and baseline: the run of this scope
+    is compared and gets a verdict of its own, never ``unverified``."""
+    text, code = cli_patch_verify_runs[("compared", True)]
+    assert "patch-verify: unverified" not in text, text
+    assert code in (None, int(ExitCode.SUCCESS), int(ExitCode.GATING_FAILURE))

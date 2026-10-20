@@ -744,6 +744,8 @@ _CONSUMER_PATHS: dict[str, tuple[str, ...]] = {
         "metrics.families.dependencies.items",
     ),
     "codeclone/surfaces/cli/patch_verify.py": (
+        "baseline",
+        "baseline.sorted_lane_trust",
         "evaluation",
         "evaluation.outcome",
         "evaluation.outcome.exit_code",
