@@ -32,6 +32,22 @@ BEFORE_RUN_EVICTED: Final = (
 
 PROMOTE_STILL_BLOCKED: Final = "Intent is still blocked by active workspace intents."
 
+#: ``renew`` past the hard ceiling (declaration + TTL): a lease never moves it.
+RENEW_INTENT_EXPIRED_TTL: Final = (
+    "Intent expired (TTL): its hard ceiling expires_at_utc has passed, and a "
+    "lease renewal does not extend it. Declare a new intent before editing."
+)
+
+#: ``renew`` when the registry holds no live row for the intent: a row past
+#: its ceiling is closed by the first lookup that sees it, so this is the
+#: usual answer after expiry -- but the row says nothing more, so neither does
+#: this message.
+RENEW_INTENT_NOT_REGISTERED: Final = (
+    "The workspace registry holds no live row for this intent (expired by TTL, "
+    "collected or cleared), so its lease cannot be renewed. Declare a new "
+    "intent before editing."
+)
+
 PROMOTED_RECHECK: Final = (
     "Queued intent promoted. Re-check blast radius and patch budget before editing."
 )

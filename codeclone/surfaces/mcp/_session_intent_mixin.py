@@ -1139,6 +1139,13 @@ class _MCPSessionIntentMixin:
             run_id=None,
             intent_id=intent_id,
         )
+        # Read before renewing: a row past its ceiling is closed by the
+        # renewal's own lookup, and its ceiling would go with it.
+        ceiling_record = find_workspace_intent(
+            root=record.root,
+            intent_id=active_intent.intent_id,
+            apply_lazy_close=False,
+        )
         renewed = renew_workspace_intent_lease(
             root=record.root,
             pid=self._agent_pid,
@@ -1174,6 +1181,14 @@ class _MCPSessionIntentMixin:
                 "default_seconds": DEFAULT_LEASE_SECONDS,
                 "max_seconds": MAX_LEASE_SECONDS,
             },
+            **_ttl_ceiling_fields(
+                ceiling_record,
+                lease_expires_at_utc=(
+                    self._lease_expired_at_utc(latest_record)
+                    if latest_record is not None
+                    else None
+                ),
+            ),
         }
         self._audit_emit(
             root=record.root,
@@ -2654,6 +2669,41 @@ def _parse_utc(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         return None
     return parsed.astimezone(timezone.utc)
+
+
+def _ttl_ceiling_fields(
+    record: WorkspaceIntentRecord | None,
+    *,
+    lease_expires_at_utc: str | None,
+) -> dict[str, object]:
+    """The hard ceiling a renewal never moves, said beside the lease it moved."""
+    if record is None:
+        return {
+            "expires_at_utc": None,
+            "ttl_remaining_seconds": None,
+            "lease_beyond_ttl": None,
+            "reason": "intent_not_registered",
+            "message": intent_msgs.RENEW_INTENT_NOT_REGISTERED,
+        }
+    # An unreadable ceiling is a passed one, as the staleness rule reads it.
+    ceiling = _parse_utc(record.expires_at_utc)
+    remaining = (
+        0 if ceiling is None else max(0, int((ceiling - utc_now()).total_seconds()))
+    )
+    lease_end = (
+        None if lease_expires_at_utc is None else _parse_utc(lease_expires_at_utc)
+    )
+    fields: dict[str, object] = {
+        "expires_at_utc": record.expires_at_utc,
+        "ttl_remaining_seconds": remaining,
+        "lease_beyond_ttl": (
+            lease_end is not None and ceiling is not None and lease_end > ceiling
+        ),
+    }
+    if remaining == 0:
+        fields["reason"] = "intent_expired_ttl"
+        fields["message"] = intent_msgs.RENEW_INTENT_EXPIRED_TTL
+    return fields
 
 
 def _declare_conflict_next_step(
