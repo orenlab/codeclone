@@ -61,10 +61,9 @@ def _semantic_reason(
         return "algorithm_revision"
     if actual.canonicalization_version != expected.canonicalization_version:
         return "canonicalization_version"
-    expected_contracts = dict(expected.required_contracts)
-    if any(
-        expected_contracts.get(key) != value for key, value in actual.required_contracts
-    ):
+    # Both directions: a contract the runtime now requires and the lane never
+    # recorded proves no conformance, any more than a stored one that differs.
+    if dict(actual.required_contracts) != dict(expected.required_contracts):
         return "required_contract"
     return "compatible"
 

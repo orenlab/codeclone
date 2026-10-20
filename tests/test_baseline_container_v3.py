@@ -1200,6 +1200,37 @@ def test_trust_is_reader_side_and_lane_local(
     assert all(item.reason == "root_digest_mismatch" for item in invalid.lanes)
 
 
+def test_lane_trust_refuses_a_runtime_requirement_the_lane_never_declared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both directions: a contract the runtime requires and the lane lacks."""
+
+    container = _container(monkeypatch)
+    api_descriptor = container.lanes["api_surface"].descriptor
+    widened = replace(
+        api_descriptor,
+        required_contracts=tuple(
+            sorted((*api_descriptor.required_contracts, ("ZZ_FUTURE_CONTRACT", "1")))
+        ),
+    )
+    runtime = RuntimeContracts(
+        python_tag="cp314",
+        baseline_scope_id=_SCOPE_ID,
+        lane_descriptors=tuple(
+            widened if item.name == "api_surface" else item
+            for item in container.observation_contract.descriptors
+        ),
+    )
+
+    verdicts = {
+        item.name: (item.status, item.reason)
+        for item in evaluate_lane_trust(container, runtime).lanes
+    }
+
+    assert verdicts.pop("api_surface") == ("unavailable", "required_contract")
+    assert set(verdicts.values()) == {("trusted", "compatible")}
+
+
 def test_lane_trust_projects_each_compatibility_reason_independently(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
