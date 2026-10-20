@@ -69,7 +69,7 @@ that moves onto the store next declares its own the same way.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, cast, get_args
@@ -121,6 +121,7 @@ from codeclone.canonical.identity import (
     UnresolvedTarget,
 )
 from codeclone.canonical.model import (
+    AnalysisFacts,
     CanonicalModel,
     ImportObservationRow,
     RelationshipObservationRow,
@@ -733,12 +734,22 @@ _IMPORT_CYCLE: Final = "import_cycle"
 _DEFAULT_POPULATION: Final = "complete_nonempty"
 
 
+#: One measured declaration of one patch metric family: its
+#: ``(path, glued qualname)`` key, its ``(start_line, end_line)`` span (``None``
+#: where the store keeps none) and its value.
+PatchMetricElement = tuple[tuple[str, str], tuple[int, int] | None, int]
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ServedPatchRun:
     """The facts one run lends the patch contract, read out of the store.
 
     ``metric_items`` maps each of :data:`PATCH_METRIC_DIMENSIONS` to the
-    run's ``(path, glued qualname) -> value`` index; ``findings`` maps each
+    run's whole population of :data:`PatchMetricElement` elements, sorted:
+    one element per measured declaration, so two declarations that share a
+    key are two elements.  Nothing here maps a key to one value --
+    which of two candidates a key names is the verifier's question, and its
+    answer is that it names neither; ``findings`` maps each
     tracked family (the document's key) to its groups, each carrying the
     severity the run's evaluation stated; ``gate_state`` with ``lane_trust``
     and ``enabled_lanes`` is everything the one gate evaluator needs to
@@ -749,7 +760,7 @@ class ServedPatchRun:
     run_id: str
     analysis_mode: str
     health_score: int | None
-    metric_items: Mapping[str, Mapping[tuple[str, str], int]]
+    metric_items: Mapping[str, tuple[PatchMetricElement, ...]]
     dependency_cycles: int
     clone_groups: int
     dead_code_high_confidence: int
@@ -764,9 +775,20 @@ class ServedPatchRun:
 
 def _patch_metric_items(
     model: CanonicalModel, heads: _Heads
-) -> dict[str, dict[tuple[str, str], int]]:
-    """Each metric family's per-symbol index, in the document's spelling.
+) -> dict[str, tuple[PatchMetricElement, ...]]:
+    """Each metric family's per-declaration population, in the document's
+    spelling, sorted.
 
+    A risk row is one declaration (its key carries the start line), so two
+    ``def _calc`` in one module are two complexity elements under one
+    ``(path, symbol)``.  A dict comprehension here once kept whichever of
+    them a ``frozenset`` yielded last: 1 or 4 by ``PYTHONHASHSEED`` on
+    ``cxdup`` (measured 2026-10-19).  Its span is the declaration's own:
+    the start line its risk row is keyed by and the end line of the unit
+    span stored under the same ``(SYMBOL, start_line)`` -- ``None`` when no
+    such unit span is stored, never a guessed end.  A class row is keyed by
+    its symbol, so a class key holds one element here by the lane's own
+    law, and the class lane stores no span: its elements carry ``None``.
     The class lane drops a zero row, so a dimension a MEASURED class (one
     the lane holds any row for) does not carry is its measured zero -- the
     rule ``summary_projection.design_maxima`` states for the maxima, applied
@@ -777,21 +799,48 @@ def _patch_metric_items(
     def key(symbol: SymbolId) -> tuple[str, str]:
         return symbol.file.path, heads.glued(symbol)
 
-    complexity = {
-        key(row.symbol): row.numerator
-        for row in facts.risk_observations
-        if row.dimension == PATCH_METRIC_DIMENSIONS["complexity"]
-    }
     measured = {key(row.symbol) for row in facts.coupling_cohesion_observations}
-    items: dict[str, dict[tuple[str, str], int]] = {"complexity": complexity}
+    items: dict[str, tuple[PatchMetricElement, ...]] = {
+        "complexity": _complexity_elements(facts, key)
+    }
     for family in ("coupling", "cohesion"):
         values = {
             key(row.symbol): row.numerator
             for row in facts.coupling_cohesion_observations
             if row.dimension == PATCH_METRIC_DIMENSIONS[family]
         }
-        items[family] = {symbol: values.get(symbol, 0) for symbol in measured}
+        items[family] = tuple(
+            (symbol, None, values.get(symbol, 0)) for symbol in sorted(measured)
+        )
     return items
+
+
+def _complexity_elements(
+    facts: AnalysisFacts, key: Callable[[SymbolId], tuple[str, str]]
+) -> tuple[PatchMetricElement, ...]:
+    """One complexity element per risk row, sorted by key and start line,
+    each with the span of the unit stored under its ``(SYMBOL, start_line)``."""
+    ends = {(row.symbol, row.start_line): row.end_line for row in facts.unit_spans}
+    rows = sorted(
+        (
+            row
+            for row in facts.risk_observations
+            if row.dimension == PATCH_METRIC_DIMENSIONS["complexity"]
+        ),
+        key=lambda row: (key(row.symbol), row.start_line),
+    )
+    return tuple(
+        (
+            key(row.symbol),
+            _unit_span(row.start_line, ends.get((row.symbol, row.start_line))),
+            row.numerator,
+        )
+        for row in rows
+    )
+
+
+def _unit_span(start_line: int, end_line: int | None) -> tuple[int, int] | None:
+    return None if end_line is None else (start_line, end_line)
 
 
 def _patch_findings(
@@ -919,7 +968,9 @@ def _patch_run(model: CanonicalModel, *, run_id: str) -> ServedPatchRun:
 #: index and the complexity maximum are read off them on every run.  The
 #: disabled capabilities joined the unconditional families (2026-10-05)
 #: when the gate's comparison inputs moved onto the stored comparison
-#: state, which names a reason off them.
+#: state, which names a reason off them.  The unit spans joined them
+#: (2026-10-20): a complexity element carries its declaration's end line,
+#: which the positional narrowing of an ambiguous key compares.
 PATCH_CONTRACT_FAMILIES: Final = (
     FAMILY_ADOPTION_COUNT,
     FAMILY_ADOPTION_DELTA,
@@ -951,6 +1002,7 @@ PATCH_CONTRACT_FAMILIES: Final = (
     FAMILY_RISK_OBSERVATION,
     FAMILY_STRUCTURAL_GROUP,
     FAMILY_SUPPRESSED_CLONE_GROUP,
+    FAMILY_UNIT_SPAN,
     FAMILY_UNREACHABLE_STATEMENT_GROUP,
     FAMILY_VIOLATION,
 )
@@ -1054,6 +1106,7 @@ __all__ += [
     "PATCH_CONTRACT_FAMILIES",
     "PATCH_CONTRACT_READ_WHEN",
     "PATCH_METRIC_DIMENSIONS",
+    "PatchMetricElement",
     "ServedPatchRun",
     "patch_run_from_model",
     "read_served_patch_run",

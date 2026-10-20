@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 NEXT_STEP_HINTS: Final[dict[str, str]] = {
@@ -37,6 +37,16 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
         "-- and finish against that intent_id. If no such run exists, commit "
         "or stash the work in progress, run analyze_repository to record the "
         "pre-change state, restore the work and analyse again."
+    ),
+    "ambiguous_declaration_identity": (
+        "Stop and hand the decision to the user. Name every entry of "
+        "verification.unresolved whose population is 'differs': each listed "
+        "path and symbol names more than one declaration in a run, and the "
+        "positions or measured metrics of those declarations changed, so "
+        "CodeClone could not tie a before value to an after value there and "
+        "did not verify it. Finishing again with the same evidence answers "
+        "the same. Once the user has decided, release the intent with "
+        "manage_change_intent(action='clear', intent_id=<intent_id>)."
     ),
     "after_run_required_for_governance": (
         "Governance config changes require a post-edit analysis."
@@ -196,6 +206,54 @@ def change_predates_declaration_limitation(paths: Sequence[str]) -> str:
         f"Already dirty when the intent was declared: {rendered}. The "
         "before-run analysed these bytes, so a structural delta against it "
         "would compare the post-change tree with itself."
+    )
+
+
+# ── ambiguous declaration identity ───────────────────────────────────
+# Two declarations under one ``(path, symbol)`` key -- two ``def _calc``, two
+# ``class C`` -- give the per-symbol comparison two candidates on a side, and
+# no rule may pick one of them (ruling 2026-10-19: no first, no last).  The
+# key is reported unresolved instead of compared.  When the declarations
+# under the key hold the same measured metrics at the same positions on both
+# sides (``no_measured_change``), the key binds nothing; otherwise, when the
+# patch's own checks read it -- its path changed, or lies in the intent's
+# scope -- the verdict is unverified: a change is not accepted on a check
+# whose essential part could not be tied to one declaration.  A position is
+# not a declaration's identity, so ``no_measured_change`` speaks of the
+# measured metrics of those positions only, and no other check reads it.
+AMBIGUOUS_DECLARATION_IDENTITY_REASON: Final = "ambiguous_declaration_identity"
+#: ``population`` of an unresolved key whose declarations hold the same
+#: measured metrics at the same positions on both sides.
+UNRESOLVED_NO_MEASURED_CHANGE: Final = "no_measured_change"
+#: ``population`` of every other unresolved key.
+UNRESOLVED_POPULATIONS_DIFFER: Final = "differs"
+#: ``comparison`` of a key whose declarations exist on one side only.
+UNPAIRED_NO_COMPARABLE_PAIR: Final = "no_comparable_pair"
+
+AMBIGUOUS_DECLARATION_IDENTITY_MESSAGE: Final = (
+    "Patch contract unverified: a declaration this patch's checks read shares "
+    "its path and name with another declaration, and the positions or "
+    "measured metrics under that name changed, so its metric change could "
+    "not be tied to one declaration and was not verified. The user decides."
+)
+
+
+def ambiguous_declaration_identity_limitation(
+    unresolved: Sequence[Mapping[str, object]],
+) -> str:
+    """Name the keys the patch's checks could not compare, with how many
+    declarations each holds on each side."""
+
+    rendered = "; ".join(
+        f"{item['family']} {item['symbol']} in {item['path']} "
+        f"({item['before_count']} before, {item['after_count']} after)"
+        for item in unresolved
+    )
+    return (
+        f"Not compared, by declaration identity: {rendered}. Each key names "
+        "more than one declaration in a run and the positions or measured "
+        "metrics under it changed, so no value was chosen for it and neither "
+        "a growth nor an improvement there is known."
     )
 
 

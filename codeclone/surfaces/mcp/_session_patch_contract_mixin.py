@@ -35,9 +35,9 @@ from . import _session_helpers as _helpers
 from ._analyzer_invariance import observation_evidence
 from ._intent import IntentCheckResult, IntentRecord, IntentScope, IntentStatus
 from ._patch_contract_runs import (
-    METRIC_VALUE_KEYS,
     PatchRun,
     PatchSession,
+    metric_item_changes,
     serve_held_patch_answer,
 )
 from ._run_store_serving import PATCH_BUDGET_RUN
@@ -96,6 +96,65 @@ def _witnessable(path: str, *records: MCPHeldRun) -> bool:
         if normalized in _run_dirty_paths(record):
             return True
     return False
+
+
+def ambiguity_verdict(status: str, mandatory: Sequence[object]) -> str:
+    """The verdict once the unresolved keys the patch's own checks read are
+    known.  One outcome per row:
+
+    ==============================================  ==========  ============
+    status of the comparison                        mandatory   verdict
+    ==============================================  ==========  ============
+    violated                                        any         violated
+    accepted / accepted_with_external_changes       none        unchanged
+    accepted / accepted_with_external_changes       one or more unverified
+    ==============================================  ==========  ============
+
+    A proven violation is never hidden behind what could not be compared;
+    an acceptance is never granted over it.
+    """
+
+    if mandatory and status != PatchContractStatus.VIOLATED.value:
+        return PatchContractStatus.UNVERIFIED.value
+    return status
+
+
+def ambiguity_outcome(
+    status: str, mandatory: Sequence[Mapping[str, object]]
+) -> dict[str, object]:
+    """The fields an ``ambiguous_declaration_identity`` verdict states over
+    the structural answer it keeps -- nothing for any other verdict."""
+
+    if status != PatchContractStatus.UNVERIFIED.value:
+        return {}
+    from .messages import patch_contract as patch_msgs
+
+    reason = patch_msgs.AMBIGUOUS_DECLARATION_IDENTITY_REASON
+    return {
+        "reason": reason,
+        "checks_not_performed": [CHECK_WORSENED_SYMBOLS],
+        "limitations": [
+            patch_msgs.ambiguous_declaration_identity_limitation(mandatory)
+        ],
+        "next_step": patch_msgs.next_step_hint(reason),
+        "message": patch_msgs.AMBIGUOUS_DECLARATION_IDENTITY_MESSAGE,
+    }
+
+
+def _key_order(item: Mapping[str, object]) -> tuple[str, str, str]:
+    return (
+        str(item.get("family", "")),
+        str(item.get("path", "")),
+        str(item.get("symbol", "")),
+    )
+
+
+def _verify_event_severity(status: str, blocking_violations: Sequence[str]) -> str:
+    """A blocking violation and an unverified verdict warn; the rest inform."""
+
+    if blocking_violations or status == PatchContractStatus.UNVERIFIED.value:
+        return "warn"
+    return "info"
 
 
 def _run_dirty_paths(record: MCPHeldRun) -> frozenset[str]:
@@ -1451,10 +1510,21 @@ class _MCPSessionPatchContractMixin:
             regressions=regressions,
             intent=intent,
         )
-        worsened = self._worsened_symbols(before=before, after=after)
+        worsened, unresolved, unpaired = self._metric_item_changes(
+            before=before, after=after
+        )
         intent_worsened, external_worsened = self._partition_worsened(
             worsened=worsened,
             intent=intent,
+        )
+        intent_unresolved, external_unresolved = self._partition_worsened(
+            worsened=unresolved,
+            intent=intent,
+        )
+        mandatory_unresolved = self._mandatory_unresolved(
+            unresolved=unresolved,
+            intent=intent,
+            changed_files=actual_changed_files,
         )
         before_gate_fails = bool(before_gate["would_fail"])
         after_gate_fails = bool(after_gate["would_fail"])
@@ -1494,6 +1564,7 @@ class _MCPSessionPatchContractMixin:
             status = PatchContractStatus.ACCEPTED_EXTERNAL.value
         else:
             status = PatchContractStatus.ACCEPTED.value
+        status = ambiguity_verdict(status, mandatory_unresolved)
         profile_payload = classification.to_payload()
         violated = status == PatchContractStatus.VIOLATED.value
         health_delta_value = structural_delta.get("health_delta")
@@ -1527,6 +1598,10 @@ class _MCPSessionPatchContractMixin:
             "worsened": worsened,
             "intent_worsened": intent_worsened,
             "external_worsened": external_worsened,
+            "unresolved": unresolved,
+            "intent_unresolved": intent_unresolved,
+            "external_unresolved": external_unresolved,
+            "unpaired": unpaired,
             "scope_check": scope_check,
             "before_gate": before_gate,
             "gate_preview": after_gate,
@@ -1547,6 +1622,7 @@ class _MCPSessionPatchContractMixin:
         }
         if health_regression_advisory is not None:
             payload["health_regression_advisory"] = health_regression_advisory
+        payload.update(ambiguity_outcome(status, mandatory_unresolved))
         event_type = (
             EVENT_PATCH_VIOLATED
             if status == PatchContractStatus.VIOLATED.value
@@ -1556,7 +1632,7 @@ class _MCPSessionPatchContractMixin:
         audit_sequence = self._emit_patch_event(
             run=after,
             event_type=event_type,
-            severity="warn" if blocking_violations else "info",
+            severity=_verify_event_severity(status, blocking_violations),
             intent_id=intent_id,
             status=status,
             payload=payload,
@@ -1772,39 +1848,68 @@ class _MCPSessionPatchContractMixin:
             "verdict": str(compare_payload.get("verdict", "")),
         }
 
-    def _worsened_symbols(
+    def _metric_item_changes(
         self,
         *,
         before: PatchRun,
         after: PatchRun,
-    ) -> list[dict[str, object]]:
-        worsened: list[dict[str, object]] = []
-        for family in METRIC_VALUE_KEYS:
-            before_items = before.metric_item_index(family)
-            after_items = after.metric_item_index(family)
-            for key, after_value in after_items.items():
-                before_value = before_items.get(key)
-                if before_value is not None and after_value > before_value:
-                    path, symbol = key
-                    worsened.append(
-                        {
-                            "family": family,
-                            "path": path,
-                            "symbol": symbol,
-                            "before": before_value,
-                            "after": after_value,
-                            "delta": after_value - before_value,
-                        }
-                    )
-        return sorted(
-            worsened,
-            key=lambda item: (
-                -_coerce_int(item.get("delta")),
-                str(item.get("family", "")),
-                str(item.get("path", "")),
-                str(item.get("symbol", "")),
-            ),
-        )[:MAX_WORSENED_ITEMS]
+    ) -> tuple[
+        list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]
+    ]:
+        """The worsened symbols, largest growth first and bounded, then every
+        unresolved and every unpaired key in (family, path, symbol) order --
+        the one order the records are ever given in, whatever order a seed
+        laid the sets out."""
+        worsened, unresolved, unpaired = metric_item_changes(before, after)
+        return (
+            sorted(
+                worsened,
+                key=lambda item: (
+                    -_coerce_int(item.get("delta")),
+                    str(item.get("family", "")),
+                    str(item.get("path", "")),
+                    str(item.get("symbol", "")),
+                ),
+            )[:MAX_WORSENED_ITEMS],
+            sorted(unresolved, key=_key_order),
+            sorted(unpaired, key=_key_order),
+        )
+
+    def _mandatory_unresolved(
+        self,
+        *,
+        unresolved: Sequence[Mapping[str, object]],
+        intent: IntentRecord | None,
+        changed_files: Sequence[str],
+    ) -> list[Mapping[str, object]]:
+        """The unresolved keys that leave the patch's own check incomplete:
+        their declarations' positions or measured metrics changed, and the
+        patch's checks read them -- a changed file, or inside the intent's
+        scope.  A key whose population shows no measured change binds
+        nothing, wherever it is; a key nowhere near the patch is reported,
+        not counted; a key without a path cannot be shown outside it, so it
+        counts."""
+        from .messages.patch_contract import UNRESOLVED_NO_MEASURED_CHANGE
+
+        changed = {self._normalized_report_path(path) for path in changed_files}
+        return [
+            item
+            for item in unresolved
+            if item.get("population") != UNRESOLVED_NO_MEASURED_CHANGE
+            and self._reads_unresolved(item, intent=intent, changed=changed)
+        ]
+
+    def _reads_unresolved(
+        self,
+        item: Mapping[str, object],
+        *,
+        intent: IntentRecord | None,
+        changed: set[str],
+    ) -> bool:
+        path = self._normalized_report_path(item.get("path"))
+        if not path or path in changed:
+            return True
+        return intent is not None and self._path_in_scope(path=path, scope=intent.scope)
 
     def _threshold_headroom(self, *, budget: int, current: int) -> int | None:
         return budget - current if budget >= 0 else None

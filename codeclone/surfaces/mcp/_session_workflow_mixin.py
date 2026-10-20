@@ -79,6 +79,7 @@ from ._workspace_intents import (
 )
 from .messages import errors as err_msgs
 from .messages import workflow as workflow_msgs
+from .messages.patch_contract import AMBIGUOUS_DECLARATION_IDENTITY_REASON
 from .messages.run_payload import PAYLOAD_EVICTED
 
 TRANSITIVE_SUMMARY_LIMIT: Final[int] = 10
@@ -836,8 +837,7 @@ class _MCPSessionWorkflowMixin:
                         review_text_present=bool(review_text),
                         claims_text_present=bool(claims_text),
                     ),
-                    "user_action_required": verify_status
-                    == PatchContractStatus.VIOLATED.value,
+                    "user_action_required": _verify_requires_user(verify_payload),
                     "next_step": verify_payload.get("next_step"),
                     "message": str(verify_payload.get("message", "")),
                 }
@@ -1615,6 +1615,17 @@ def _unverified_paths_advisory(paths: Sequence[str]) -> dict[str, object]:
         "reason": "outside_declared_scope",
         "structural_verification": "not_performed",
     }
+
+
+def _verify_requires_user(verify_payload: Mapping[str, object]) -> bool:
+    """Whether a finish that did not accept leaves the next act to the user:
+    a proven violation, or a verdict over declarations CodeClone could not
+    tie to one declaration each -- no agent call makes either acceptable."""
+
+    return (
+        verify_payload.get("status") == PatchContractStatus.VIOLATED.value
+        or verify_payload.get("reason") == AMBIGUOUS_DECLARATION_IDENTITY_REASON
+    )
 
 
 def _finish_summary(

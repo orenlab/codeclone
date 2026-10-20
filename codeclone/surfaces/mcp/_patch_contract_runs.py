@@ -30,6 +30,7 @@ Nothing here decides which answer is served; that is
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Protocol
 
@@ -62,6 +63,12 @@ from ._session_shared import (
     MetricGateConfig,
     _evaluate_gate_state,
 )
+from .messages.patch_contract import (
+    AMBIGUOUS_DECLARATION_IDENTITY_REASON,
+    UNPAIRED_NO_COMPARABLE_PAIR,
+    UNRESOLVED_NO_MEASURED_CHANGE,
+    UNRESOLVED_POPULATIONS_DIFFER,
+)
 
 #: The value keys the verifier reads off each metric family's items, in the
 #: order it tries them.
@@ -70,6 +77,19 @@ METRIC_VALUE_KEYS: Mapping[str, tuple[str, ...]] = {
     "coupling": ("cbo", "coupling", "value"),
     "cohesion": ("lcom4", "cohesion", "value"),
 }
+#: One declaration's place in a run's metric index: ``(path, glued qualname)``.
+MetricItemKey = tuple[str, str]
+#: Where one measured declaration sits in its file: ``(start_line,
+#: end_line)``, or ``None`` where the road that read the run does not carry
+#: it (the store's class lane keeps no span).  A position is evidence, not
+#: identity: it says where a measurement was taken, never which declaration
+#: it belongs to across two runs.
+DeclarationSpan = tuple[int, int] | None
+#: One measured declaration of one family: its key, its span, its value.
+MetricElement = tuple[MetricItemKey, DeclarationSpan, int]
+#: A run's metric population for one family: every measured declaration as
+#: one element, two declarations under one key as two elements.
+MetricPopulation = tuple[MetricElement, ...]
 #: The comparison card's fields, picked off the summary card of a finding
 #: (``_session_finding_mixin._comparison_finding_card``).
 COMPARISON_CARD_KEYS: tuple[str, ...] = ("id", "kind", "severity")
@@ -181,7 +201,7 @@ class PatchRun(ComparisonFacts, Protocol):
 
     def finding_path_index(self) -> dict[str, frozenset[str]]: ...
 
-    def metric_item_index(self, family: str) -> dict[tuple[str, str], int]: ...
+    def metric_population(self, family: str) -> MetricPopulation: ...
 
     def baseline_status(self) -> str: ...
 
@@ -230,43 +250,48 @@ class PatchSession(Protocol):
 
 def record_current_state(record: MCPRunRecord) -> dict[str, object]:
     served_report = record.served_report
+    # Each family by name: the consumer inventory reads which metric families
+    # a consumer reads off its literal ``family=`` arguments
+    # (``tests/test_projection_equivalence.py``).
+    populations = {
+        "complexity": record_metric_population(served_report, family="complexity"),
+        "coupling": record_metric_population(served_report, family="coupling"),
+        "cohesion": record_metric_population(served_report, family="cohesion"),
+    }
     return {
         "health_score": _helpers._summary_health_score(record.summary),
-        "complexity_max": _family_max(
-            served_report,
-            family="complexity",
-            keys=("cyclomatic_complexity", "complexity", "value"),
-        ),
-        "coupling_max": _family_max(
-            served_report,
-            family="coupling",
-            keys=("cbo", "coupling", "value"),
-        ),
-        "cohesion_max": _family_max(
-            served_report,
-            family="cohesion",
-            keys=("lcom4", "cohesion", "value"),
-        ),
+        **population_maxima(populations.__getitem__),
         "dependency_cycles": len(_dependency_cycles(served_report)),
         "clone_groups": record.func_clones_count + record.block_clones_count,
         "dead_code_high_confidence": _dead_code_high_confidence(served_report),
     }
 
 
-def record_metric_item_index(
-    document: Mapping[str, object],
-    *,
-    family: str,
-    value_keys: Sequence[str],
-) -> dict[tuple[str, str], int]:
-    result: dict[tuple[str, str], int] = {}
-    for item in _metric_family_items(document, family=family):
-        path = _item_path(item)
-        symbol = _item_symbol(item)
-        value = _first_int(item, keys=value_keys)
-        if path or symbol:
-            result[(path, symbol)] = value
-    return result
+def record_metric_population(
+    document: Mapping[str, object], *, family: str
+) -> MetricPopulation:
+    """The document's population of one family: every item, in document
+    order, keyed by its path and symbol, with its span -- two items under
+    one key are two elements, and nothing here decides which of them the
+    key names."""
+    value_keys = METRIC_VALUE_KEYS[family]
+    return tuple(
+        (
+            (_item_path(item), _item_symbol(item)),
+            _item_span(item),
+            _first_int(item, keys=value_keys),
+        )
+        for item in _metric_family_items(document, family=family)
+    )
+
+
+def _item_span(item: Mapping[str, object]) -> DeclarationSpan:
+    """The item's ``(start_line, end_line)``, or ``None`` when the item
+    states no usable span (a missing or non-positive line, an end before
+    its start): an unknown position is never spelled as a position."""
+    start = _coerce_int(item.get("start_line"))
+    end = _coerce_int(item.get("end_line"))
+    return (start, end) if 0 < start <= end else None
 
 
 def _metric_family_items(
@@ -280,19 +305,6 @@ def _metric_family_items(
     return tuple(
         _as_mapping(item) for item in _as_sequence(family_payload.get("items"))
     )
-
-
-def _family_max(
-    document: Mapping[str, object],
-    *,
-    family: str,
-    keys: Sequence[str],
-) -> int:
-    values = [
-        _first_int(item, keys=keys)
-        for item in _metric_family_items(document, family=family)
-    ]
-    return max(values, default=0)
 
 
 def _dead_code_high_confidence(document: Mapping[str, object]) -> int:
@@ -335,6 +347,271 @@ def _item_symbol(item: Mapping[str, object]) -> str:
     return ""
 
 
+# -- the per-declaration index: one rule for both roads -----------------------
+
+
+def metric_item_index(
+    population: Iterable[MetricElement],
+) -> tuple[dict[MetricItemKey, int], dict[MetricItemKey, int]]:
+    """``(resolved, counts)`` of one run's population of one family -- the
+    store road's rows and the record road's document items alike, so the two
+    roads cannot hold two rules.
+
+    ``counts`` says how many declarations each key names, counted BEFORE any
+    key is mapped to a value; ``resolved`` maps only the keys that name
+    exactly one declaration, to its value.  A key that names two or more has
+    no value at all: no element is chosen for it, first or last.  An element
+    whose key names neither a path nor a symbol identifies no declaration
+    and is counted nowhere (it still counts toward the population maximum).
+    """
+    elements = tuple(population)
+    counts = Counter(key for key, _span, _value in elements if any(key))
+    return (
+        {key: value for key, _span, value in elements if counts[key] == 1},
+        dict(counts),
+    )
+
+
+def population_maximum(population: Iterable[MetricElement]) -> int:
+    """The largest value of the whole population: every declaration counts
+    toward it, however its key resolves."""
+    return max((value for _key, _span, value in population), default=0)
+
+
+def population_maxima(
+    population_of: Callable[[str], MetricPopulation],
+) -> dict[str, int]:
+    """``complexity_max`` / ``coupling_max`` / ``cohesion_max`` of one run,
+    each over its family's whole population."""
+    return {
+        f"{family}_max": population_maximum(population_of(family))
+        for family in METRIC_VALUE_KEYS
+    }
+
+
+def _ambiguous(counts: Mapping[MetricItemKey, int]) -> set[MetricItemKey]:
+    return {key for key, count in counts.items() if count > 1}
+
+
+def _key_record(family: str, key: MetricItemKey) -> dict[str, object]:
+    return {"family": family, "path": key[0], "symbol": key[1]}
+
+
+def compare_metric_items(
+    family: str, *, before: MetricPopulation, after: MetricPopulation
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    """One family's worsened symbols, unresolved keys and unpaired keys
+    between two runs' populations, by the decision table below -- one
+    outcome per pair of per-side states of a key (absent: 0 declarations,
+    resolved: 1, ambiguous: 2 or more):
+
+    ============  ============  ==============================================
+    before        after         outcome
+    ============  ============  ==============================================
+    resolved      resolved      compared: ``worsened`` when the value grew
+    ambiguous     resolved      ``unresolved``
+    resolved      ambiguous     ``unresolved``
+    ambiguous     ambiguous     ``unresolved``
+    absent        ambiguous     ``unpaired``, ``added``
+    ambiguous     absent        ``unpaired``, ``removed``
+    absent        resolved      not compared (no before value exists)
+    resolved      absent        not compared (no after value exists)
+    ============  ============  ==============================================
+
+    An ambiguous key present on one side only has no counterpart to match,
+    so nothing of it is compared -- but the declarations it gained or lost
+    are a structural fact, never dropped: ``unpaired`` names the key, the
+    direction and both counts.  A unique key that appears or disappears is
+    the ordinary new or removed declaration and is not listed.  Which
+    unresolved keys still bind the patch is :func:`narrowed_unresolved`'s
+    question, not this table's.
+    """
+    before_values, before_counts = metric_item_index(before)
+    after_values, after_counts = metric_item_index(after)
+    worsened: list[dict[str, object]] = [
+        {
+            **_key_record(family, key),
+            "before": before_values[key],
+            "after": value,
+            "delta": value - before_values[key],
+        }
+        for key, value in after_values.items()
+        if key in before_values and value > before_values[key]
+    ]
+    ambiguous = _ambiguous(before_counts) | _ambiguous(after_counts)
+    unresolved: list[dict[str, object]] = [
+        {
+            **_key_record(family, key),
+            "reason": AMBIGUOUS_DECLARATION_IDENTITY_REASON,
+            "before_count": before_counts[key],
+            "after_count": after_counts[key],
+        }
+        for key in ambiguous
+        if key in before_counts and key in after_counts
+    ]
+    unpaired: list[dict[str, object]] = [
+        {
+            **_key_record(family, key),
+            "direction": "removed" if key in before_counts else "added",
+            "before_count": before_counts.get(key, 0),
+            "after_count": after_counts.get(key, 0),
+            "comparison": UNPAIRED_NO_COMPARABLE_PAIR,
+        }
+        for key in ambiguous
+        if (key in before_counts) != (key in after_counts)
+    ]
+    return worsened, unresolved, unpaired
+
+
+# -- positional narrowing: which unresolved keys still bind the patch ---------
+
+#: One position a key's declarations occupy on one side, with the value of
+#: every family the key is measured in there (``None``: that family measured
+#: nothing at that position).
+MeasuredSite = tuple[tuple[int, int], tuple[int | None, ...]]
+_ElementsByKey = dict[MetricItemKey, list[tuple[DeclarationSpan, int]]]
+
+
+def _elements_by_key(population: MetricPopulation) -> _ElementsByKey:
+    grouped: _ElementsByKey = {}
+    for key, span, value in population:
+        grouped.setdefault(key, []).append((span, value))
+    return grouped
+
+
+def measured_sites(
+    families: Sequence[str],
+    elements: Mapping[str, Sequence[tuple[DeclarationSpan, int]]],
+) -> tuple[MeasuredSite, ...] | None:
+    """The multiset of ``(span, full vector)`` one key holds on one side:
+    each position its declarations occupy, with the value of EVERY family in
+    ``families`` measured there -- a class's coupling and cohesion together,
+    a function's complexity -- in position order.
+
+    ``None`` when the side holds no comparable sites: an element without a
+    span (a position the road does not carry is not a position), or one
+    position holding two elements of one family -- two identical
+    declarations are two, never folded into one, and no vector can be
+    paired to either of them.
+    """
+    sites: dict[tuple[int, int], dict[str, int]] = {}
+    for family in families:
+        for span, value in elements.get(family, ()):
+            if span is None:
+                return None
+            measured = sites.setdefault(span, {})
+            if family in measured:
+                return None
+            measured[family] = value
+    return tuple(
+        sorted(
+            (
+                (span, tuple(measured.get(family) for family in families))
+                for span, measured in sites.items()
+            ),
+            key=lambda site: site[0],
+        )
+    )
+
+
+def _key_populations_match(
+    key: MetricItemKey,
+    *,
+    before: Mapping[str, _ElementsByKey],
+    after: Mapping[str, _ElementsByKey],
+) -> bool:
+    """Whether the key's declarations hold the same measured metrics at the
+    same positions on both sides: equal multisets of ``(span, vector)``
+    over every family the key is measured in on either side."""
+    families = tuple(
+        family
+        for family in METRIC_VALUE_KEYS
+        if key in before[family] or key in after[family]
+    )
+    before_sites = measured_sites(
+        families, {family: before[family].get(key, ()) for family in families}
+    )
+    after_sites = measured_sites(
+        families, {family: after[family].get(key, ()) for family in families}
+    )
+    return before_sites is not None and before_sites == after_sites
+
+
+def narrowed_unresolved(
+    unresolved: Iterable[Mapping[str, object]],
+    *,
+    before: Mapping[str, MetricPopulation],
+    after: Mapping[str, MetricPopulation],
+) -> list[dict[str, object]]:
+    """Each unresolved record with the ``population`` its key holds:
+
+    ==============================================  ======================
+    the key's ``(span, vector)`` multisets          ``population``
+    ==============================================  ======================
+    equal (cardinality, positions, every metric)    ``no_measured_change``
+    different, or a side without comparable sites   ``differs``
+    ==============================================  ======================
+
+    ``no_measured_change`` says the measured metrics of these positions did
+    not change -- nothing more: a position is not a declaration's identity,
+    so it never says the same declarations are there, and no check but the
+    worsened-symbols one reads it (API, behaviour, contracts and structural
+    findings are judged as if it did not exist).  A shifted line is a
+    different position and ``differs``, by design, until declarations carry
+    an identity of their own.
+    """
+    before_by_key = {
+        family: _elements_by_key(population) for family, population in before.items()
+    }
+    after_by_key = {
+        family: _elements_by_key(population) for family, population in after.items()
+    }
+    verdicts: dict[MetricItemKey, str] = {}
+    narrowed: list[dict[str, object]] = []
+    for item in unresolved:
+        key = (str(item["path"]), str(item["symbol"]))
+        if key not in verdicts:
+            verdicts[key] = (
+                UNRESOLVED_NO_MEASURED_CHANGE
+                if _key_populations_match(key, before=before_by_key, after=after_by_key)
+                else UNRESOLVED_POPULATIONS_DIFFER
+            )
+        narrowed.append({**item, "population": verdicts[key]})
+    return narrowed
+
+
+def metric_item_changes(
+    before: PatchRun, after: PatchRun
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    """Every family's worsened symbols, narrowed unresolved keys and unpaired
+    keys between two runs, unordered (the verifier orders them)."""
+    before_populations = {
+        family: before.metric_population(family) for family in METRIC_VALUE_KEYS
+    }
+    after_populations = {
+        family: after.metric_population(family) for family in METRIC_VALUE_KEYS
+    }
+    worsened: list[dict[str, object]] = []
+    unresolved: list[dict[str, object]] = []
+    unpaired: list[dict[str, object]] = []
+    for family in METRIC_VALUE_KEYS:
+        family_worsened, family_unresolved, family_unpaired = compare_metric_items(
+            family,
+            before=before_populations[family],
+            after=after_populations[family],
+        )
+        worsened.extend(family_worsened)
+        unresolved.extend(family_unresolved)
+        unpaired.extend(family_unpaired)
+    return (
+        worsened,
+        narrowed_unresolved(
+            unresolved, before=before_populations, after=after_populations
+        ),
+        unpaired,
+    )
+
+
 class RecordPatchRun:
     """One run's facts as the in-memory record holds them -- the verifier's
     own reads, unchanged."""
@@ -367,12 +644,8 @@ class RecordPatchRun:
     def finding_path_index(self) -> dict[str, frozenset[str]]:
         return self._session._finding_path_index(self._record)
 
-    def metric_item_index(self, family: str) -> dict[tuple[str, str], int]:
-        return record_metric_item_index(
-            self._record.served_report,
-            family=family,
-            value_keys=METRIC_VALUE_KEYS[family],
-        )
+    def metric_population(self, family: str) -> MetricPopulation:
+        return record_metric_population(self._record.served_report, family=family)
 
     def baseline_status(self) -> str:
         return baseline_status(self._record.served_report)
@@ -415,12 +688,9 @@ class StorePatchRun:
         return self._served.health_score
 
     def current_state(self) -> dict[str, object]:
-        items = self._served.metric_items
         return {
             "health_score": self._served.health_score,
-            "complexity_max": max(items["complexity"].values(), default=0),
-            "coupling_max": max(items["coupling"].values(), default=0),
-            "cohesion_max": max(items["cohesion"].values(), default=0),
+            **population_maxima(self.metric_population),
             "dependency_cycles": self._served.dependency_cycles,
             "clone_groups": self._served.clone_groups,
             "dead_code_high_confidence": self._served.dead_code_high_confidence,
@@ -459,8 +729,8 @@ class StorePatchRun:
             self._findings, canonical_to_short=self._canonical_to_short
         )
 
-    def metric_item_index(self, family: str) -> dict[tuple[str, str], int]:
-        return dict(self._served.metric_items[family])
+    def metric_population(self, family: str) -> MetricPopulation:
+        return self._served.metric_items[family]
 
     def baseline_status(self) -> str:
         return self._served.baseline_status
@@ -584,16 +854,28 @@ __all__ = [
     "COMPARISON_CARD_KEYS",
     "METRIC_VALUE_KEYS",
     "ComparisonFacts",
+    "DeclarationSpan",
+    "MeasuredSite",
+    "MetricElement",
+    "MetricItemKey",
+    "MetricPopulation",
     "PatchRun",
     "PatchSession",
     "RecordPatchRun",
     "StorePatchRun",
+    "compare_metric_items",
     "focus_is_analyzed",
     "focused_comparison_index",
     "gate_config",
+    "measured_sites",
+    "metric_item_changes",
+    "metric_item_index",
+    "narrowed_unresolved",
     "payload_evicted_serving_block",
+    "population_maxima",
+    "population_maximum",
     "record_current_state",
-    "record_metric_item_index",
+    "record_metric_population",
     "require_gate_coverage",
     "serve_held_patch_answer",
     "serve_patch_answer",

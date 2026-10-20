@@ -918,21 +918,37 @@ def document_gate_state(record: MCPRunRecord) -> dict[str, object]:
     return dataclasses.asdict(state)
 
 
+#: One measured declaration as both roads spell it: key, span, value.
+MetricElement = tuple[tuple[str, str], tuple[int, int] | None, int]
+
+
+def element_order(
+    element: MetricElement,
+) -> tuple[tuple[str, str], tuple[int, int], int]:
+    """A total order over population elements that never compares a
+    missing span with a span."""
+    key, span, value = element
+    return key, span or (0, 0), value
+
+
 def document_metric_items(
     record: MCPRunRecord,
-) -> dict[str, dict[tuple[str, str], int]]:
-    """The per-symbol metric index the memory side reads off the document,
-    for each family the verifier compares."""
+) -> dict[str, tuple[MetricElement, ...]]:
+    """The per-declaration metric population the memory side reads off the
+    document, sorted, for each family the verifier compares."""
     from codeclone.surfaces.mcp._patch_contract_runs import (
         METRIC_VALUE_KEYS,
-        record_metric_item_index,
+        record_metric_population,
     )
 
     return {
-        family: record_metric_item_index(
-            record.served_report, family=family, value_keys=keys
+        family: tuple(
+            sorted(
+                record_metric_population(record.served_report, family=family),
+                key=element_order,
+            )
         )
-        for family, keys in METRIC_VALUE_KEYS.items()
+        for family in METRIC_VALUE_KEYS
     }
 
 
@@ -976,12 +992,14 @@ __all__ = [
     "CYCLE_BUILDERS",
     "PATCH_ROW_PERTURBATIONS",
     "PATCH_STORE_REFUSAL",
+    "MetricElement",
     "PatchCycle",
     "PatchCycles",
     "RecordingAuditWriter",
     "document_gate_state",
     "document_lane_trust",
     "document_metric_items",
+    "element_order",
     "shared_cycles",
     "stored_patch_run",
 ]

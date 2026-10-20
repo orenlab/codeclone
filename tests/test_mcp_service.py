@@ -8150,14 +8150,14 @@ def test_mcp_patch_contract_helper_edges(
     assert mcp_patch_runs_mod._item_path({"file": "pkg\\a.py"}) == "pkg/a.py"
     assert mcp_patch_runs_mod._item_path({}) == ""
     assert mcp_patch_runs_mod._item_symbol({"class_name": "Widget"}) == "Widget"
-    assert (
-        mcp_patch_runs_mod.record_metric_item_index(
-            {"metrics": {"families": {"complexity": {"items": [{"value": 10}]}}}},
-            family="complexity",
-            value_keys=("value",),
-        )
-        == {}
+    keyless = mcp_patch_runs_mod.record_metric_population(
+        {"metrics": {"families": {"complexity": {"items": [{"value": 10}]}}}},
+        family="complexity",
     )
+    assert (
+        mcp_patch_runs_mod.metric_item_index(keyless),
+        mcp_patch_runs_mod.population_maximum(keyless),
+    ) == (({}, {}), 10)
     assert service._threshold_headroom(budget=-1, current=10) is None
     assert service._verify_message(status="violated", violations=("x", "y")) == (
         "Patch contract violated: x, y"

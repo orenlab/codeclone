@@ -47,9 +47,11 @@ from codeclone.canonical.store import RunStore, UnreadFamilyError, read_named_fa
 from codeclone.report.gates.evaluator import GateState
 from tests._patch_contract_serving import (
     CYCLE_BUILDERS,
+    MetricElement,
     document_gate_state,
     document_lane_trust,
     document_metric_items,
+    element_order,
     shared_cycles,
 )
 from tests._run_summary_serving import SUMMARY_POPULATIONS, shared_populations
@@ -67,6 +69,25 @@ from tests.test_run_summary_declared_families import (
 __all__ = ["decoded", "scanned"]
 
 
+_Population = tuple[MetricElement, ...]
+#: The families whose stored elements carry the declaration's span: the
+#: risk lane's start line with the unit span's end line.  The class lane
+#: stores no span, so a stored class element's span is ``None``.
+_STORED_SPAN_FAMILIES = frozenset({"complexity"})
+
+
+def _values(population: _Population) -> set[int]:
+    return {value for _key, _span, value in population}
+
+
+def _as_the_store_states_it(population: _Population, family: str) -> _Population:
+    """The document's population with the spans the store does not carry
+    left unknown -- every other part of each element kept."""
+    if family in _STORED_SPAN_FAMILIES:
+        return population
+    return tuple((key, None, value) for key, _span, value in population)
+
+
 @dataclass(frozen=True, slots=True)
 class _GateInputs:
     name: str
@@ -74,8 +95,9 @@ class _GateInputs:
     stored: dict[str, object]
     document_lanes: tuple[dict[str, str], tuple[str, ...]]
     stored_lanes: tuple[dict[str, str], tuple[str, ...]]
-    document_items: dict[str, dict[tuple[str, str], int]]
-    stored_items: dict[str, dict[tuple[str, str], int]]
+    #: Per family, the sorted per-declaration population.
+    document_items: dict[str, _Population]
+    stored_items: dict[str, _Population]
 
 
 @pytest.fixture(scope="module")
@@ -111,7 +133,8 @@ def gate_inputs(tmp_path_factory: pytest.TempPathFactory) -> list[_GateInputs]:
                 stored_lanes=(dict(served.lane_trust), served.enabled_lanes),
                 document_items=document_metric_items(record),
                 stored_items={
-                    family: dict(items) for family, items in served.metric_items.items()
+                    family: tuple(sorted(population, key=element_order))
+                    for family, population in served.metric_items.items()
                 },
             )
         )
@@ -171,17 +194,37 @@ def test_the_stored_lanes_are_the_documents_on_every_run(
 def test_each_stored_metric_index_is_the_documents_on_every_run(
     gate_inputs: list[_GateInputs], family: str
 ) -> None:
-    """``worsened`` per family: the stored per-symbol index -- a measured
-    class without a row of the dimension is its measured zero -- is the
-    document's on every run.  The population holds a zero coupling to read;
-    cohesion has none to hold (a measured class has one component at least,
-    so the zero rule is vacuous there by definition)."""
+    """``worsened`` per family: the stored per-declaration population -- a
+    measured class without a row of the dimension is its measured zero --
+    is the document's, element for element and span for span where the
+    store keeps spans, on every run.  The document carries every span; the
+    store carries a function's and no class's.  The population holds a
+    zero coupling to read; cohesion has none to hold (a measured class has
+    one component at least, so the zero rule is vacuous there by
+    definition)."""
     assert [inputs.stored_items[family] for inputs in gate_inputs] == [
-        inputs.document_items[family] for inputs in gate_inputs
+        _as_the_store_states_it(inputs.document_items[family], family)
+        for inputs in gate_inputs
     ]
     assert any(inputs.document_items[family] for inputs in gate_inputs)
-    zeros = any(0 in inputs.document_items[family].values() for inputs in gate_inputs)
-    assert zeros is (family == "coupling")
+    zeros = any(0 in _values(inputs.document_items[family]) for inputs in gate_inputs)
+    assert (_span_presence(gate_inputs, family), zeros) == (
+        {"document": {True}, "stored": {family in _STORED_SPAN_FAMILIES}},
+        family == "coupling",
+    )
+
+
+def _span_presence(gate_inputs: list[_GateInputs], family: str) -> dict[str, set[bool]]:
+    """Whether each side's elements of ``family`` carry a span, over every
+    run: ``{True}`` all do, ``{False}`` none does."""
+    return {
+        side: {
+            span is not None
+            for inputs in gate_inputs
+            for _key, span, _value in getattr(inputs, f"{side}_items")[family]
+        }
+        for side in ("document", "stored")
+    }
 
 
 @pytest.fixture(scope="module")
@@ -327,7 +370,7 @@ def test_a_corrupt_member_outside_the_declaration_is_never_read(
     run = next(item for item in stored if item.name == "trusted")
     with RunStore(run.path, create=False) as store:
         expected = read_served_patch_run(store, run.run_id)
-    undeclared = _tampered_copy(run, tmp_path, "unit_span")
+    undeclared = _tampered_copy(run, tmp_path, "candidate")
     with RunStore(undeclared, create=False) as store:
         assert read_served_patch_run(store, run.run_id) == expected
         with pytest.raises(StoreIntegrityError, match="content address"):

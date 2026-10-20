@@ -52,6 +52,7 @@ from tests._patch_contract_serving import (
     PATCH_STORE_REFUSAL,
     PatchCycles,
     RecordingAuditWriter,
+    element_order,
     shared_cycles,
     stored_patch_run,
 )
@@ -658,10 +659,12 @@ def test_an_evicted_before_run_is_found_again_in_the_store(
 _SENTINEL_ITEM = ("pkg/sentinel.py", "pkg.sentinel:sentinel")
 
 
-def _altered_items(served: object) -> dict[str, dict[tuple[str, str], int]]:
+def _altered_items(
+    served: object,
+) -> dict[str, tuple[tuple[tuple[str, str], tuple[int, int] | None, int], ...]]:
     return {
-        family: {**items, _SENTINEL_ITEM: 900 + index}
-        for index, (family, items) in enumerate(
+        family: (*population, (_SENTINEL_ITEM, None, 900 + index))
+        for index, (family, population) in enumerate(
             sorted(served.metric_items.items())  # type: ignore[attr-defined]
         )
     }
@@ -710,9 +713,19 @@ _FACTS: dict[str, Callable[[StorePatchRun, RecordPatchRun], tuple[object, object
         store.current_state()["dead_code_high_confidence"],
         memory.current_state()["dead_code_high_confidence"],
     ),
-    "metric_item_index": lambda store, memory: (
-        store.metric_item_index("coupling"),
-        memory.metric_item_index("coupling"),
+    # Both roads carry a function's span; the store carries no class span,
+    # so a class population is compared by key and value.
+    "metric_population": lambda store, memory: (
+        sorted(store.metric_population("complexity"), key=element_order),
+        sorted(memory.metric_population("complexity"), key=element_order),
+    ),
+    "metric_population.coupling": lambda store, memory: (
+        sorted(
+            (key, value) for key, _span, value in store.metric_population("coupling")
+        ),
+        sorted(
+            (key, value) for key, _span, value in memory.metric_population("coupling")
+        ),
     ),
     "baseline_status": lambda store, memory: (
         store.baseline_status(),

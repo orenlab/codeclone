@@ -1067,6 +1067,38 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "state, restore the work and analyse again."
             ),
             (
+                "ambiguous_declaration_identity means a path and symbol the "
+                "patch's checks read (a changed file, or the intent's scope) "
+                "names two or more declarations in a run and its population "
+                "is 'differs', so no before value could be tied to an after "
+                "value there. It is unverified, never accepted, and "
+                "user_action_required is true: stop and name those entries of "
+                "verification.unresolved to the user. Every key is listed in "
+                "unresolved; intent_unresolved and external_unresolved split it "
+                "as worsened is split, and one outside the patch is reported "
+                "without blocking."
+            ),
+            (
+                "An unresolved key's population is 'no_measured_change' when "
+                "its declarations hold the same measured metrics (every family "
+                "the key is checked in: a class's coupling and cohesion "
+                "together, a function's complexity) at the same start and end "
+                "lines, as many on each side: such a key binds nothing. It says "
+                "only that the measured metrics of those positions did not "
+                "change -- not that they are the same declarations, and nothing "
+                "about API, behaviour, contracts or structural findings, which "
+                "are checked as usual. A shifted line is 'differs', by design."
+            ),
+            (
+                "unpaired lists keys that name two or more declarations on one "
+                "side only: direction 'removed' (before_count, after_count 0) "
+                "or 'added', comparison 'no_comparable_pair'. Nothing of them "
+                "is compared, but the declarations gained or lost are a "
+                "structural fact; it does not block, and it says nothing about "
+                "API safety -- removing a public name is judged by the API "
+                "comparison."
+            ),
+            (
                 "accepted means patch contract passed for scope — not unchanged "
                 "health or repo-wide cleanliness."
             ),
