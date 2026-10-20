@@ -69,6 +69,17 @@ def _process_start(pid: int) -> str | None:
     return value or None
 
 
+def _pid_may_be_alive(pid: int) -> bool:
+    """Fail closed: only a definite "no such process" reads as gone."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 def _new_lock() -> BaselinePublishLock:
     pid = os.getpid()
     process_start = _process_start(pid)
@@ -354,8 +365,14 @@ def publish_baseline(
                         digest=legacy_digest,
                     )
                 _replace_target(target, payload)
-            finally:
-                _release_lock(target, lock)
+            except BaseException as primary:
+                try:
+                    _release_lock(target, lock)
+                except (BaselinePublicationError, OSError):
+                    # Chained as context; the primary error stays the answer.
+                    raise primary  # noqa: B904
+                raise
+            _release_lock(target, lock)
             publish_span.set_counter("baseline_publish_bytes", len(payload))
             publish_span.set_counter("baseline_publish_lanes", len(container.lanes))
             publish_span.set_counter("baseline_publish_fsyncs", 2)
@@ -406,6 +423,17 @@ def recover_publish_lock(
         active = local and actual_start == lock.process_start
         if active:
             raise BaselinePublicationError("active_lock", "Lock owner is still active.")
+        # No ``ps`` now, or none when the lock was written: the owner's
+        # identity is unprovable, so only a pid that is definitely gone is dead.
+        unproven = local and (
+            actual_start is None or lock.process_start.startswith("unavailable:")
+        )
+        if unproven and not force and _pid_may_be_alive(lock.pid):
+            raise BaselinePublicationError(
+                "active_lock",
+                "Lock owner may still be active; its process identity cannot "
+                "be verified.",
+            )
         if not local and not force:
             raise BaselinePublicationError(
                 "foreign_lock",

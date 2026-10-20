@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import os
+import socket
+import subprocess
 import sys
 from argparse import Namespace
 from pathlib import Path
@@ -14,9 +17,11 @@ from typing import Any, cast
 
 import pytest
 
+import codeclone.baseline.publish as publish_mod
 import codeclone.surfaces.cli.controller_queries as controller_queries
 import codeclone.surfaces.cli.subcommands as subcommands
 from codeclone import ui_messages
+from codeclone.models import BaselinePublishLock
 from codeclone.surfaces.cli.types import CLIArgsLike, StatusConsole
 from tests._import_graph import _iter_local_imports
 
@@ -240,6 +245,84 @@ def test_baseline_recover_lock_surfaces_typed_failure(
 
     assert caught.value.code == 2
     assert "foreign lock" in capsys.readouterr().out
+
+
+def test_baseline_recover_lock_failure_is_rendered_not_printed_raw(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The operator reads the refusal, not the console's tags, and one full stop."""
+
+    target = tmp_path / "baseline.json"
+    lock = BaselinePublishLock(
+        token="operator-token",
+        pid=os.getpid(),
+        hostname=socket.gethostname(),
+        process_start=publish_mod._process_start(os.getpid())
+        or f"unavailable:{os.getpid()}",
+        created_at="2026-10-20T00:00:00Z",
+    )
+    target.with_name(f"{target.name}.publish.lock").write_bytes(
+        publish_mod._lock_bytes(lock)
+    )
+
+    with pytest.raises(SystemExit) as caught:
+        subcommands.dispatch_subcommand(
+            [
+                "codeclone",
+                "baseline",
+                "recover-lock",
+                "--path",
+                str(target),
+                "--expected-token",
+                "operator-token",
+            ]
+        )
+
+    out = capsys.readouterr().out
+    assert caught.value.code == 2
+    assert "Lock owner" in out
+    assert "[error]" not in out
+    assert "[/dim]" not in out
+    assert ".." not in out
+
+
+def test_baseline_recover_lock_success_keeps_brackets_in_the_path(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A rendered message escapes the path: a bracket in it is never a tag."""
+
+    child = subprocess.Popen((sys.executable, "-c", "pass"))
+    child.wait()
+    target = tmp_path / "[bold]" / "baseline.json"
+    target.parent.mkdir()
+    lock = BaselinePublishLock(
+        token="operator-token",
+        pid=child.pid,
+        hostname=socket.gethostname(),
+        process_start=f"unavailable:{child.pid}",
+        created_at="2026-10-20T00:00:00Z",
+    )
+    target.with_name(f"{target.name}.publish.lock").write_bytes(
+        publish_mod._lock_bytes(lock)
+    )
+
+    with pytest.raises(SystemExit) as caught:
+        subcommands.dispatch_subcommand(
+            [
+                "codeclone",
+                "baseline",
+                "recover-lock",
+                "--path",
+                str(target),
+                "--expected-token",
+                "operator-token",
+            ]
+        )
+
+    assert caught.value.code == 0
+    assert "[bold]" in capsys.readouterr().out
 
 
 def test_routing_modules_have_one_way_cli_owned_dependencies() -> None:

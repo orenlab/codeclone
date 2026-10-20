@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import socket
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -979,3 +980,155 @@ def test_publication_proceeds_when_every_file_was_read(tmp_path: Path) -> None:
 
     assert receipt.outcome == "published"
     assert target.exists()
+
+
+def _dead_pid() -> int:
+    child = subprocess.Popen((sys.executable, "-c", "pass"))
+    child.wait()
+    return child.pid
+
+
+def _local_lock(*, token: str, pid: int, process_start: str) -> BaselinePublishLock:
+    return BaselinePublishLock(
+        token=token,
+        pid=pid,
+        hostname=socket.gethostname(),
+        process_start=process_start,
+        created_at="2026-10-20T00:00:00Z",
+    )
+
+
+def _without_ps(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("ps")),
+    )
+
+
+def test_recovery_without_ps_refuses_a_live_owner_unless_forced(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No ``ps`` at recovery proves nothing about the owner: unknown is not dead."""
+
+    target = tmp_path / "baseline.json"
+    started = publish_mod._process_start(os.getpid())
+    assert started is not None
+    lock_path = _write_lock(
+        target, _local_lock(token="live", pid=os.getpid(), process_start=started)
+    )
+    _without_ps(monkeypatch)
+
+    with pytest.raises(BaselinePublicationError) as refused:
+        recover_publish_lock(target=target, expected_token="live")
+    assert refused.value.reason == "active_lock"
+    assert lock_path.exists()
+
+    recover_publish_lock(target=target, expected_token="live", force=True)
+    assert not lock_path.exists()
+
+
+def test_recovery_without_ps_recovers_an_owner_that_is_gone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "baseline.json"
+    lock_path = _write_lock(
+        target,
+        _local_lock(
+            token="gone", pid=_dead_pid(), process_start="Mon Oct 19 00:00:00 2026"
+        ),
+    )
+    _without_ps(monkeypatch)
+
+    receipt = recover_publish_lock(target=target, expected_token="gone")
+
+    assert receipt.outcome == "recovered"
+    assert not lock_path.exists()
+
+
+def test_lock_written_without_ps_is_not_recovered_while_its_owner_lives(
+    tmp_path: Path,
+) -> None:
+    """A lock that recorded no process start cannot be matched by a later ``ps``."""
+
+    target = tmp_path / "baseline.json"
+    lock_path = _write_lock(
+        target,
+        _local_lock(
+            token="live",
+            pid=os.getpid(),
+            process_start=f"unavailable:{os.getpid()}",
+        ),
+    )
+
+    with pytest.raises(BaselinePublicationError) as refused:
+        recover_publish_lock(target=target, expected_token="live")
+
+    assert refused.value.reason == "active_lock"
+    assert lock_path.exists()
+
+
+def test_lock_written_without_ps_is_recovered_once_its_owner_is_gone(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "baseline.json"
+    pid = _dead_pid()
+    lock_path = _write_lock(
+        target,
+        _local_lock(token="gone", pid=pid, process_start=f"unavailable:{pid}"),
+    )
+
+    receipt = recover_publish_lock(target=target, expected_token="gone")
+
+    assert receipt.outcome == "recovered"
+    assert not lock_path.exists()
+
+
+def test_lock_of_a_pid_this_user_cannot_signal_is_not_recovered(
+    tmp_path: Path,
+) -> None:
+    """``EPERM`` says the process exists; only ``ESRCH`` says it is gone."""
+
+    target = tmp_path / "baseline.json"
+    lock_path = _write_lock(
+        target, _local_lock(token="init", pid=1, process_start="unavailable:1")
+    )
+
+    with pytest.raises(BaselinePublicationError) as refused:
+        recover_publish_lock(target=target, expected_token="init")
+
+    assert refused.value.reason == "active_lock"
+    assert lock_path.exists()
+
+
+def test_failed_publication_keeps_its_own_error_when_release_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The release failure is chained to the primary error, never put in its place."""
+
+    target = tmp_path / "baseline.json"
+    lock_path = target.with_name(f"{target.name}.publish.lock")
+
+    def _lock_taken_over_then_disk_full(_target: Path, _payload: bytes) -> None:
+        held = publish_mod._parse_lock(lock_path.read_bytes())
+        lock_path.write_bytes(publish_mod._lock_bytes(replace(held, token="next")))
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(publish_mod, "_replace_target", _lock_taken_over_then_disk_full)
+
+    with pytest.raises(OSError) as failed:
+        publish_baseline(
+            target=target,
+            bundle=_bundle(),
+            scope_id=_SCOPE_ID,
+            max_size_bytes=5_000_000,
+        )
+
+    assert failed.value.errno == 28
+    release_failure = failed.value.__context__
+    assert isinstance(release_failure, BaselinePublicationError)
+    assert release_failure.reason == "cas_conflict"
+    assert publish_mod._parse_lock(lock_path.read_bytes()).token == "next"

@@ -1206,11 +1206,14 @@ def fmt_memory_root_not_found(*, path: object) -> str:
 
 
 def fmt_baseline_lock_recovery_failed(*, path: Path, reason: str) -> str:
-    return ERR_BASELINE_LOCK_RECOVERY_FAILED.format(path=esc(path), reason=esc(reason))
+    # The template ends the sentence; a reason's own full stop would double it.
+    return ERR_BASELINE_LOCK_RECOVERY_FAILED.format(
+        path=esc(path), reason=esc(reason.rstrip("."))
+    )
 
 
 def fmt_baseline_lock_recovered(*, path: Path) -> str:
-    return SUCCESS_BASELINE_LOCK_RECOVERED.format(path=path)
+    return SUCCESS_BASELINE_LOCK_RECOVERED.format(path=esc(path))
 
 
 def fmt_diagnosed_user_error(error: DiagnosedUserError) -> str:

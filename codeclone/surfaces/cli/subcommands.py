@@ -41,6 +41,7 @@ def _run_observability(argv: list[str]) -> int:
 
 def _run_baseline(argv: list[str]) -> int:
     from .baseline_state import recover_baseline_publish_lock
+    from .console import make_query_console
 
     parser = argparse.ArgumentParser(
         prog="codeclone baseline",
@@ -73,10 +74,12 @@ def _run_baseline(argv: list[str]) -> int:
         expected_token=args.expected_token,
         force=args.force,
     )
+    # The messages carry console markup: rendered, never printed raw.
+    console = make_query_console()
     if failure is not None:
-        print(ui.fmt_baseline_lock_recovery_failed(path=target, reason=failure))
+        console.print(ui.fmt_baseline_lock_recovery_failed(path=target, reason=failure))
         return int(ExitCode.CONTRACT_ERROR)
-    print(ui.fmt_baseline_lock_recovered(path=target))
+    console.print(ui.fmt_baseline_lock_recovered(path=target))
     return int(ExitCode.SUCCESS)
 
 
