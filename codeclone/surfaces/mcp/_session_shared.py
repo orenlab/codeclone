@@ -920,13 +920,20 @@ class CodeCloneMCPRunStore:
                     self._latest_by_key.pop(previous_key, None)
                 self._executions[event_id] = record
                 self._key_of[event_id] = key
+                # Registered by this session's own analysis: no longer a run
+                # found again in the store, so it can be the session's latest.
+                self._restored.discard(event_id)
             else:
                 self._executions[event_id] = record
                 self._key_of[event_id] = key
                 self._registration_seq += 1
                 self._registrations[event_id] = self._registration_seq
-            self._latest_by_key[key] = event_id
-            self._latest_execution_id = event_id
+            # Newest by registration order, never by this call: re-registering
+            # A after B keeps B the newest (A, B, A is A, B).
+            self._latest_by_key[key] = [
+                held for held, held_key in self._key_of.items() if held_key == key
+            ][-1]
+            self._latest_execution_id = self._newest_session_execution_locked()
             self._prune_unpinned_locked()
             retained = len(self._executions)
             register_span.set_counter("run_store_runs_retained", retained)
@@ -1084,6 +1091,11 @@ class CodeCloneMCPRunStore:
             held = self._executions.get(event_id)
             if held is not None:
                 return held
+            # A report already held answers by its newest execution; one
+            # inserted behind it would be pruned at once and answered unheld.
+            occupant = self._latest_by_key.get(key)
+            if occupant is not None:
+                return self._executions[occupant]
             self._executions[event_id] = identity
             self._key_of[event_id] = key
             self._registration_seq += 1

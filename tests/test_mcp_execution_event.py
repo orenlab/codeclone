@@ -35,6 +35,7 @@ from pathlib import Path
 import pytest
 
 from codeclone.surfaces.mcp._analyzer_invariance import observation_evidence
+from codeclone.surfaces.mcp._run_residence import resident_identity
 from codeclone.surfaces.mcp._session_shared import (
     CodeCloneMCPRunStore,
     ExecutionEvent,
@@ -461,3 +462,62 @@ def test_one_execution_registered_twice_stays_one_execution(tmp_path: Path) -> N
     assert len(store.records()) == 1
     assert store.execution_ordinal(record.execution.execution_event_id) == 1
     assert store.records()[0].summary == {"run_id": "run1", "refreshed": True}
+
+
+def test_a_reregistered_execution_keeps_its_place(tmp_path: Path) -> None:
+    """Re-registration is idempotent: ``A, B, A`` is ``A, B``, B the newest."""
+
+    store = CodeCloneMCPRunStore(history_limit=4)
+    first = store.register(_record(tmp_path, "run1"))
+    second = store.register(_record(tmp_path, "run2"))
+    store.register(first)
+
+    assert store.records() == (first, second)
+    assert store.execution_ordinal(first.execution.execution_event_id) == 1
+    assert store.resolve_any_root(None) is second
+    assert store.get_for_root(None, root=tmp_path) is second
+
+
+def test_a_reregistered_execution_does_not_take_its_report_back(
+    tmp_path: Path,
+) -> None:
+    store = CodeCloneMCPRunStore(history_limit=4)
+    first = store.register(_record(tmp_path, "run1"))
+    store.pin_execution(first.execution.execution_event_id)
+    second = store.register(_record(tmp_path, "run1"))
+    store.register(first)
+
+    assert store.get_for_root("run1", root=tmp_path) is second
+
+
+def test_a_restored_execution_registered_by_its_analysis_is_the_latest(
+    tmp_path: Path,
+) -> None:
+    """A lookup that restored the run before its analysis registered it
+    leaves no restored mark behind: the session's newest run is this one."""
+
+    store = CodeCloneMCPRunStore(history_limit=4)
+    record = _record(tmp_path, "run1")
+    event = record.execution.execution_event_id
+    store.restore(resident_identity(record))
+    store.register(record)
+
+    assert store.is_latest_execution(event, root=tmp_path)
+    assert store.get_for_root(None, root=tmp_path) is record
+
+
+def test_restore_answers_the_execution_already_holding_the_report(
+    tmp_path: Path,
+) -> None:
+    """Restored into an occupied key, a run would be pruned on arrival and
+    answered while not held; the occupant is the answer instead."""
+
+    store = CodeCloneMCPRunStore(history_limit=4)
+    held = store.register(_record(tmp_path, "run1"))
+    older = resident_identity(_record(tmp_path, "run1"))
+
+    answered = store.restore(older)
+
+    assert answered is held
+    assert store.holds_execution(answered.execution.execution_event_id)
+    assert not store.holds_execution(older.execution.execution_event_id)
