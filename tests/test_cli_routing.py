@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -17,11 +18,9 @@ from typing import Any, cast
 
 import pytest
 
-import codeclone.baseline.publish as publish_mod
 import codeclone.surfaces.cli.controller_queries as controller_queries
 import codeclone.surfaces.cli.subcommands as subcommands
 from codeclone import ui_messages
-from codeclone.models import BaselinePublishLock
 from codeclone.surfaces.cli.types import CLIArgsLike, StatusConsole
 from tests._import_graph import _iter_local_imports
 
@@ -247,6 +246,24 @@ def test_baseline_recover_lock_surfaces_typed_failure(
     assert "foreign lock" in capsys.readouterr().out
 
 
+def _write_publish_lock(target: Path, *, pid: int) -> None:
+    """A local publication lock that recorded no process start, as JSON on disk:
+    this CLI-ring test reads the lock's wire form, not the publisher's types."""
+    target.with_name(f"{target.name}.publish.lock").write_text(
+        json.dumps(
+            {
+                "created_at": "2026-10-20T00:00:00Z",
+                "hostname": socket.gethostname(),
+                "pid": pid,
+                "process_start": f"unavailable:{pid}",
+                "token": "operator-token",
+            },
+            sort_keys=True,
+        ),
+        "utf-8",
+    )
+
+
 def test_baseline_recover_lock_failure_is_rendered_not_printed_raw(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -254,17 +271,7 @@ def test_baseline_recover_lock_failure_is_rendered_not_printed_raw(
     """The operator reads the refusal, not the console's tags, and one full stop."""
 
     target = tmp_path / "baseline.json"
-    lock = BaselinePublishLock(
-        token="operator-token",
-        pid=os.getpid(),
-        hostname=socket.gethostname(),
-        process_start=publish_mod._process_start(os.getpid())
-        or f"unavailable:{os.getpid()}",
-        created_at="2026-10-20T00:00:00Z",
-    )
-    target.with_name(f"{target.name}.publish.lock").write_bytes(
-        publish_mod._lock_bytes(lock)
-    )
+    _write_publish_lock(target, pid=os.getpid())
 
     with pytest.raises(SystemExit) as caught:
         subcommands.dispatch_subcommand(
@@ -297,16 +304,7 @@ def test_baseline_recover_lock_success_keeps_brackets_in_the_path(
     child.wait()
     target = tmp_path / "[bold]" / "baseline.json"
     target.parent.mkdir()
-    lock = BaselinePublishLock(
-        token="operator-token",
-        pid=child.pid,
-        hostname=socket.gethostname(),
-        process_start=f"unavailable:{child.pid}",
-        created_at="2026-10-20T00:00:00Z",
-    )
-    target.with_name(f"{target.name}.publish.lock").write_bytes(
-        publish_mod._lock_bytes(lock)
-    )
+    _write_publish_lock(target, pid=child.pid)
 
     with pytest.raises(SystemExit) as caught:
         subcommands.dispatch_subcommand(
