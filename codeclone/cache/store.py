@@ -697,6 +697,12 @@ class Cache:
                     activate_span.set_counter(
                         "cache_backend_entries", backend.entry_count()
                     )
+                # The register of what exists, read back from what was just
+                # written: a new or rewritten row is known by its new bytes.
+                self._reload_identity(backend)
+            # The rows on disk are this instance's generation now: a later
+            # save adds to them instead of clearing them again.
+            self._discard_store = False
             self._enforce_budget(generation=generation)
             self._generation = generation
             self._dirty = False
@@ -821,10 +827,11 @@ class Cache:
         if collected:
             self._canonical_runtime_paths.clear()
             self._canonical_runtime_paths.update(self.data["files"])
-            for runtime_path in tuple(self._identity):
-                if runtime_path not in self.data["files"]:
-                    self._identity.pop(runtime_path, None)
         with CacheBackend(self.path) as backend:
+            if collected:
+                # Exactly the rows the collector took leave the register; a
+                # row it kept stays known even when it is not in memory.
+                self._reload_identity(backend)
             remaining = backend.payload_bytes()
         if remaining > self.max_size_bytes:
             self._set_load_warning(
@@ -832,6 +839,11 @@ class Cache:
                 f"{self.max_size_bytes}-byte budget, and nothing evictable "
                 "remains; the cache stays usable and the next run stays warm."
             )
+
+    def _reload_identity(self, backend: CacheBackend) -> None:
+        self._identity, self._refused_rows = _identity_register(
+            scan_identities(backend, self._CACHE_VERSION), root=self.root
+        )
 
     def release_loaded_entries(self, *, allow_dirty: bool = False) -> int:
         if self._dirty and not allow_dirty:
@@ -842,7 +854,16 @@ class Cache:
             # rows stay on disk and a later save must not read this as a
             # deletion of every one of them.
             self._close_reader()
+            dropped = tracked_files(self.data)
             self.data["files"] = new_tracked_files()
+            if dropped is not None:
+                # Deletions are keys and outlive the drop; unsaved entries are
+                # content and do not, so a release that dropped some closes
+                # this instance's writes rather than publish half a generation.
+                for runtime_path in dropped.deleted:
+                    _mark_deleted(self.data, runtime_path)
+                if self._dirty and dropped.dirty:
+                    self._write_enabled = False
             # Identity stays. Releasing frees the lanes, which is where the
             # memory is; forgetting which rows exist would turn the next
             # lookup into a miss and the next save into a deletion.
