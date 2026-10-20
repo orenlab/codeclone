@@ -19,11 +19,15 @@ _UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS = frozenset(
 )
 
 
-def write_text_atomically(path: Path, text: str) -> None:
-    """Write text via temp file + ``os.replace``."""
+def write_text_atomically(path: Path, text: str, *, mode: int | None = None) -> None:
+    """Write text via temp file + ``os.replace``.
+
+    ``mode`` is the file's mode, whatever was there; left out, the file keeps
+    the mode it had, or a new one takes the umask's.
+    """
 
     validate_atomic_target(path)
-    target_mode = _target_write_mode(path)
+    target_mode = _target_write_mode(path) if mode is None else mode
     fd_num, tmp_name = tempfile.mkstemp(
         dir=path.parent,
         suffix=".tmp",

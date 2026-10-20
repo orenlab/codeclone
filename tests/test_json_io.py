@@ -6,10 +6,14 @@
 
 from __future__ import annotations
 
+import os
+import stat
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from codeclone.surfaces.cli import tips as tips_mod
 from codeclone.utils.json_io import (
     BoundedReadError,
     read_bounded_bytes,
@@ -101,3 +105,79 @@ def test_write_json_document_atomically_rejects_symlink_parent(
         write_json_document_atomically(link_dir / "payload.json", {"ok": True})
 
     assert not (real_dir / "payload.json").exists()
+
+
+@pytest.fixture
+def permissive_umask() -> Iterator[None]:
+    previous = os.umask(0o022)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
+def _mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+@pytest.mark.usefixtures("permissive_umask")
+def test_a_new_written_file_takes_the_umask_mode(tmp_path: Path) -> None:
+    path = tmp_path / "report.json"
+
+    write_json_document_atomically(path, {"ok": True})
+
+    assert _mode(path) == 0o644
+
+
+@pytest.mark.usefixtures("permissive_umask")
+def test_rewriting_a_file_keeps_the_mode_it_had(tmp_path: Path) -> None:
+    path = tmp_path / "report.json"
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0o640)
+
+    write_json_document_atomically(path, {"ok": True})
+
+    assert _mode(path) == 0o640
+
+
+@pytest.mark.usefixtures("permissive_umask")
+def test_an_explicit_mode_is_the_mode_whatever_was_there(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0o644)
+
+    write_json_document_atomically(path, {"ok": True}, mode=0o600)
+
+    assert _mode(path) == 0o600
+
+
+def test_the_replacement_is_made_durable_in_its_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    synced_directories: list[bool] = []
+    real_fsync = os.fsync
+
+    def _spy(fd: int) -> None:
+        synced_directories.append(stat.S_ISDIR(os.fstat(fd).st_mode))
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", _spy)
+
+    write_json_document_atomically(tmp_path / "report.json", {"ok": True})
+
+    assert synced_directories == [False, True]
+
+
+@pytest.mark.usefixtures("permissive_umask")
+def test_tip_state_stays_owner_only(tmp_path: Path) -> None:
+    path = tmp_path / "tips.json"
+
+    tips_mod._remember_tip_shown(path=path, state={}, tip_key="a")
+    assert _mode(path) == 0o600
+    path.chmod(0o644)
+    tips_mod._remember_tip_version(
+        path=path, state={}, tip_key="b", codeclone_version="0"
+    )
+
+    assert _mode(path) == 0o600

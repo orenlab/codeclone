@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 from typing import TypeGuard
 
 import orjson
+
+from .atomic_write import write_text_atomically
 
 DEFAULT_MAX_JSON_BYTES = 64 * 1024 * 1024
 
@@ -85,22 +85,12 @@ def _validate_atomic_target(path: Path) -> None:
         raise OSError(f"Refusing to write through symlink directory: {parent}")
 
 
-def write_json_text_atomically(path: Path, text: str) -> None:
-    _validate_atomic_target(path)
-    fd_num, tmp_name = tempfile.mkstemp(
-        dir=path.parent,
-        suffix=".tmp",
-    )
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd_num, "wb") as fd:
-            fd.write(text.encode("utf-8"))
-            fd.flush()
-            os.fsync(fd.fileno())
-        os.replace(tmp_path, path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+def write_json_text_atomically(
+    path: Path, text: str, *, mode: int | None = None
+) -> None:
+    # The one atomic writer: file fsync, replace, directory fsync, and the
+    # mode policy (``mode``, else the replaced file's, else the umask's).
+    write_text_atomically(path, text, mode=mode)
 
 
 def write_json_document_atomically(
@@ -110,6 +100,7 @@ def write_json_document_atomically(
     sort_keys: bool = False,
     indent: bool = False,
     trailing_newline: bool = False,
+    mode: int | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     _validate_atomic_target(path)
@@ -121,6 +112,7 @@ def write_json_document_atomically(
             indent=indent,
             trailing_newline=trailing_newline,
         ),
+        mode=mode,
     )
 
 

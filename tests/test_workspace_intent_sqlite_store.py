@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -415,6 +417,32 @@ def test_file_store_write_returns_false_on_os_error(
 
     monkeypatch.setattr(intent_store_mod, "write_json_document_atomically", _fail)
     assert store.write(record) is False
+
+
+def test_file_store_writes_intents_owner_only_whatever_the_umask(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CODECLONE_INTENT_REGISTRY_BACKEND", raising=False)
+    clear_workspace_intent_store_cache()
+    store = get_workspace_intent_store(tmp_path)
+    record = _record()
+    path = intent_path(
+        root=tmp_path,
+        pid=record.agent_pid,
+        start_epoch=record.agent_start_epoch,
+        intent_id=record.intent_id,
+    )
+    previous = os.umask(0o022)
+    try:
+        assert store.write(record) is True
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        path.chmod(0o644)
+        assert store.write(record) is True
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_file_store_gc_removes_corrupted_payload(

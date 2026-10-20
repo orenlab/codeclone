@@ -141,6 +141,8 @@ class FileWorkspaceIntentStore:
                 document=signed_payload_dict_from_record(record),
                 sort_keys=True,
                 trailing_newline=True,
+                # Coordination state: owner-only, whatever the umask.
+                mode=0o600,
             )
         except OSError:
             return False

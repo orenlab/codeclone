@@ -193,6 +193,7 @@ def _remember_tip_version(
         sort_keys=True,
         indent=True,
         trailing_newline=True,
+        mode=0o600,
     )
 
 
@@ -214,6 +215,7 @@ def _remember_tip_shown(
         sort_keys=True,
         indent=True,
         trailing_newline=True,
+        mode=0o600,
     )
 
 
