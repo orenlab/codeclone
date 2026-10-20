@@ -665,6 +665,16 @@ def test_round_trip_duplicate_invalid_and_size_taxonomy(
     _assert_read_failure(invalid, "invalid_json")
 
 
+def test_reader_refuses_json_nested_past_the_decoder_stack_as_invalid_json() -> None:
+    """Nesting the decoder cannot hold is malformed input, not an internal error."""
+
+    raw = b"[" * 100_000 + b"]" * 100_000
+
+    result = read_container_v3_bytes(raw, limit_bytes=len(raw))
+
+    _assert_read_failure(result, "invalid_json")
+
+
 def test_private_conversion_rejects_noncanonical_format(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

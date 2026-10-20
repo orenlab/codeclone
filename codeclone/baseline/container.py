@@ -370,6 +370,9 @@ def _validated_input(raw: bytes) -> BaselineContainerV3Input | ContainerReadFail
         return _read_failure("invalid_json", str(exc))
     except json.JSONDecodeError as exc:
         return _read_failure("invalid_json", str(exc))
+    except RecursionError as exc:
+        # Nesting deeper than the decoder's stack: malformed input, typed.
+        return _read_failure("invalid_json", str(exc))
     except ValueError as exc:
         return _read_failure("invalid_container", str(exc))
 
