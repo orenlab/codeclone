@@ -43,6 +43,13 @@ _TOOLCHAIN_GATE_SCRIPT = Path(shlex.split(_TOOLCHAIN_GATE)[1])
 _VSCODE_BUILD = "npm run check"
 _CHECKOUT_ACTION = "actions/checkout@"
 _READ_ONLY_TOKEN = {"contents": "read"}
+_SETUP_NODE_ACTION = "actions/setup-node@"
+#: Node 20 left the GitHub-hosted runners on 2026-09-23, and JavaScript actions
+#: run on Node 24 since then.  Node 20 is past its end of life and receives no
+#: further root-store update, such as dropping emSign ECC Root CA - G3 after the
+#: eMudhra key compromise of October 2026, so the npm toolchain follows the
+#: runner's maintained runtime major.
+_NODE_MAJOR = "24"
 
 # npm subcommands that install packages or rerun their lifecycle scripts, with
 # every alias npm accepts for them.  Over-matching only fails loudly.
@@ -259,3 +266,21 @@ def test_workflow_token_is_read_only() -> None:
 
 def test_workflow_never_runs_on_pull_request_target() -> None:
     assert "pull_request_target" not in _trigger_events(_workflow())
+
+
+def test_every_setup_node_step_runs_the_maintained_runner_node_major() -> None:
+    jobs = _jobs(_workflow())
+    versions = sorted(
+        (
+            str(name),
+            str(
+                _mapping(step.get("with", {}), "setup-node inputs").get("node-version")
+            ),
+        )
+        for name in jobs
+        for step in _steps(jobs, name)
+        if str(step.get("uses", "")).startswith(_SETUP_NODE_ACTION)
+    )
+    assert {job for job, _version in versions} >= set(_NPM_JOBS), versions
+
+    assert [(job, version) for job, version in versions if version != _NODE_MAJOR] == []
