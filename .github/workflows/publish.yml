@@ -61,7 +61,7 @@ jobs:
           fi
 
       - name: Build distributions
-        run: uv run --with build==1.6.0 python -m build --sdist --wheel
+        run: uv run --with build==1.6.0 python -m build --installer uv --sdist --wheel
 
       - name: Validate distributions
         run: uv run --with twine==7.0.0 twine check dist/*
