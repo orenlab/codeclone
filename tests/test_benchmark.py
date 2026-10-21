@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
 import textwrap
 from pathlib import Path
@@ -645,3 +646,68 @@ def test_benchmark_runner_preserves_report_artifacts_on_contract_failure(
 
     assert report_path.exists()
     assert html_path.exists()
+
+
+_BENCHMARK_DOCKERFILE = (
+    Path(__file__).resolve().parents[1] / "benchmarks" / "Dockerfile"
+)
+#: SHA-256 of ``pip-26.2.2-py3-none-any.whl`` as PyPI serves it and as the
+#: python.org eMudhra/emSign incident notice of 2026-10-20 publishes it.
+_BOOTSTRAP_PIP_SHA256 = (
+    "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+)
+_BOOTSTRAP_PIP_WHEEL = "pip-26.2.2-py3-none-any.whl"
+
+
+def _dockerfile_instructions() -> list[str]:
+    """Logical Dockerfile instructions, continuation lines joined."""
+    instructions: list[str] = []
+    pending = ""
+    for raw in _BENCHMARK_DOCKERFILE.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not pending and (not line or line.startswith("#")):
+            continue
+        if line.endswith("\\"):
+            pending += line[:-1] + " "
+            continue
+        instructions.append(pending + line)
+        pending = ""
+    return instructions
+
+
+def test_benchmark_image_installs_codeclone_with_a_checksum_pinned_pip_only() -> None:
+    """No download in the image build trusts the eMudhra-compromised chains.
+
+    The base image's own pip vendored a certifi that still anchored emSign ECC
+    Root CA - G3, and its Debian ca-certificates (which pip >= 24.2 adds through
+    truststore) anchors both that root and the Sectigo AAA cross-certificates.
+    So pip 26.2.2 enters through a checksum-pinned ``ADD``, is installed from
+    that file with neither index nor dependencies, and installs CodeClone with
+    ``legacy-certs``: its own vendored certifi 2026.10.19 and nothing else.
+    """
+    instructions = _dockerfile_instructions()
+    adds = [
+        (index, shlex.split(text))
+        for index, text in enumerate(instructions)
+        if text.startswith("ADD ")
+        and shlex.split(text)[-2].endswith(f"/{_BOOTSTRAP_PIP_WHEEL}")
+    ]
+    assert len(adds) == 1, instructions
+    add_index, add = adds[0]
+    assert f"--checksum=sha256:{_BOOTSTRAP_PIP_SHA256}" in add
+    wheel_path = add[-1]
+
+    installs = [
+        (index, shlex.split(command))
+        for index, text in enumerate(instructions)
+        if text.startswith("RUN ")
+        for command in text[len("RUN ") :].split("&&")
+        if "-m pip install" in command
+    ]
+    assert len(installs) == 2, installs
+    (bootstrap_index, bootstrap), (_project_index, project) = installs
+    assert add_index < bootstrap_index
+    assert {"--no-index", "--no-deps"} <= set(bootstrap)
+    assert bootstrap[-1] == wheel_path
+    assert project[-1] == "."
+    assert "PIP_USE_DEPRECATED=legacy-certs" in project
