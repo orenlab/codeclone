@@ -6,14 +6,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import os
 import re
+import shlex
+import subprocess
 import sys
 from dataclasses import fields
 from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
 
+import pytest
 import yaml
 
 from codeclone.config.argparse_builder import build_parser
@@ -331,3 +336,118 @@ def test_action_maximal_invocation_is_accepted_by_the_cli_parser() -> None:
     )
 
     assert _unrecognized_cli_arguments(args) == []
+
+
+#: SHA-256 of ``pip-26.2.2-py3-none-any.whl`` as PyPI serves it and as the
+#: python.org eMudhra/emSign incident notice of 2026-10-20 publishes it: the
+#: first pip whose vendored certifi no longer anchors emSign ECC Root CA - G3.
+_PIP_BOOTSTRAP_SHA256 = (
+    "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70"
+)
+_PIP_BOOTSTRAP_WHEEL = "pip-26.2.2-py3-none-any.whl"
+_PIP_BOOTSTRAP_HOST = "https://files.pythonhosted.org/"
+_INSTALL_STEP = "Install CodeClone"
+_HEREDOC_OPENER = "python - <<'PY'"
+_HEREDOC_CLOSER = "PY"
+
+
+def _action_step(name: str) -> dict[str, Any]:
+    steps = cast(list[dict[str, Any]], _action_metadata()["runs"]["steps"])
+    matches = [step for step in steps if step.get("name") == name]
+    assert len(matches) == 1, f"action.yml must declare exactly one {name!r} step"
+    return matches[0]
+
+
+def _python_heredocs(script: str) -> list[tuple[int, str]]:
+    """``(opener line index, body)`` of every ``python - <<'PY'`` in a script."""
+    lines = script.splitlines()
+    found: list[tuple[int, str]] = []
+    index = 0
+    while index < len(lines):
+        if lines[index].rstrip().endswith(_HEREDOC_OPENER):
+            end = lines.index(_HEREDOC_CLOSER, index + 1)
+            found.append((index, "\n".join(lines[index + 1 : end])))
+            index = end
+        index += 1
+    return found
+
+
+def _pip_bootstrap_verifiers(script: str) -> list[tuple[int, str]]:
+    return [
+        (index, body)
+        for index, body in _python_heredocs(script)
+        if "PIP_BOOTSTRAP_SHA256" in body
+    ]
+
+
+def test_action_installs_a_hash_verified_pip_wheel_offline_before_codeclone() -> None:
+    """The runner's own pip never fetches anything for the Action.
+
+    ``python -m pip install --upgrade pip`` downloaded the next pip through the
+    runner's pip, whose vendored certifi still trusted the eMudhra chains
+    revoked for key compromise in October 2026.  The Action now fetches the
+    pip 26.2.2 wheel itself, checks its SHA-256 before pip sees it, installs it
+    from the local file with neither an index nor dependencies, and only then
+    installs CodeClone with the pip it just verified.
+    """
+    step = _action_step(_INSTALL_STEP)
+    env = cast(dict[str, str], step.get("env", {}))
+    script = cast(str, step["run"])
+    lines = script.splitlines()
+    pip_installs = [
+        index for index, line in enumerate(lines) if "-m pip install" in line
+    ]
+    verifiers = [index for index, _body in _pip_bootstrap_verifiers(script)]
+
+    assert env.get("PIP_BOOTSTRAP_SHA256") == _PIP_BOOTSTRAP_SHA256
+    url = env.get("PIP_BOOTSTRAP_URL", "")
+    assert url.startswith(_PIP_BOOTSTRAP_HOST)
+    assert url.endswith(f"/{_PIP_BOOTSTRAP_WHEEL}")
+    assert len(pip_installs) == 2, lines
+    assert len(verifiers) == 1, lines
+    assert verifiers[0] < pip_installs[0]
+
+    bootstrap = shlex.split(lines[pip_installs[0]])
+    arguments = bootstrap[bootstrap.index("install") + 1 :]
+    assert {"--no-index", "--no-deps"} <= set(arguments)
+    assert [token for token in arguments if not token.startswith("-")] == [
+        "${pip_wheel}"
+    ]
+    assert f'pip_wheel="${{RUNNER_TEMP}}/{_PIP_BOOTSTRAP_WHEEL}"' in lines
+    assert shlex.split(lines[pip_installs[1]])[-1] == "${INSTALL_SPEC}"
+
+
+@pytest.mark.parametrize(
+    ("digest_matches", "expected_returncode"),
+    [(True, 0), (False, 1)],
+    ids=["matching-digest-passes", "mismatching-digest-refused"],
+)
+def test_action_pip_bootstrap_verifier_refuses_a_wheel_with_another_digest(
+    tmp_path: Path,
+    digest_matches: bool,
+    expected_returncode: int,
+) -> None:
+    """Run the Action's own verification code against a wheel it must refuse."""
+    verifiers = _pip_bootstrap_verifiers(cast(str, _action_step(_INSTALL_STEP)["run"]))
+    assert len(verifiers) == 1
+    wheel = tmp_path / _PIP_BOOTSTRAP_WHEEL
+    wheel.write_bytes(b"these bytes are not the published pip wheel")
+    actual = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    expected = actual if digest_matches else _PIP_BOOTSTRAP_SHA256
+
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", verifiers[0][1]],
+        env={
+            **os.environ,
+            "PIP_BOOTSTRAP_WHEEL": str(wheel),
+            "PIP_BOOTSTRAP_SHA256": expected,
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == expected_returncode, result.stderr
+    if not digest_matches:
+        assert expected in result.stderr
+        assert actual in result.stderr
