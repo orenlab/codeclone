@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import fields
 from pathlib import Path
 from types import ModuleType
@@ -417,14 +420,43 @@ def test_action_installs_a_hash_verified_pip_wheel_offline_before_codeclone() ->
     assert shlex.split(lines[pip_installs[1]])[-1] == "${INSTALL_SPEC}"
 
 
+def _other_hex_digit(digit: str) -> str:
+    return format((int(digit, 16) + 1) % 16, "x")
+
+
+#: How each case derives the digest the verifier is told to expect from the
+#: digest the wheel actually has.  A near miss differs in one hex digit at
+#: either end, so a check that compares only a prefix or only a suffix of the
+#: digest -- a forgery matching a 32-bit prefix takes minutes -- lets one of
+#: them through.
+_EXPECTED_DIGESTS: dict[str, Callable[[str], str]] = {
+    "matching-digest-passes": lambda actual: actual,
+    "mismatching-digest-refused": lambda _actual: _PIP_BOOTSTRAP_SHA256,
+    "last-hex-digit-differs-refused": lambda actual: (
+        actual[:-1] + _other_hex_digit(actual[-1])
+    ),
+    "first-hex-digit-differs-refused": lambda actual: (
+        _other_hex_digit(actual[0]) + actual[1:]
+    ),
+}
+
+
 @pytest.mark.parametrize(
-    ("digest_matches", "expected_returncode"),
-    [(True, 0), (False, 1)],
-    ids=["matching-digest-passes", "mismatching-digest-refused"],
+    ("case", "expected_returncode"),
+    [
+        pytest.param("matching-digest-passes", 0, id="matching-digest-passes"),
+        pytest.param("mismatching-digest-refused", 1, id="mismatching-digest-refused"),
+        pytest.param(
+            "last-hex-digit-differs-refused", 1, id="last-hex-digit-differs-refused"
+        ),
+        pytest.param(
+            "first-hex-digit-differs-refused", 1, id="first-hex-digit-differs-refused"
+        ),
+    ],
 )
 def test_action_pip_bootstrap_verifier_refuses_a_wheel_with_another_digest(
     tmp_path: Path,
-    digest_matches: bool,
+    case: str,
     expected_returncode: int,
 ) -> None:
     """Run the Action's own verification code against a wheel it must refuse."""
@@ -433,7 +465,7 @@ def test_action_pip_bootstrap_verifier_refuses_a_wheel_with_another_digest(
     wheel = tmp_path / _PIP_BOOTSTRAP_WHEEL
     wheel.write_bytes(b"these bytes are not the published pip wheel")
     actual = hashlib.sha256(wheel.read_bytes()).hexdigest()
-    expected = actual if digest_matches else _PIP_BOOTSTRAP_SHA256
+    expected = _EXPECTED_DIGESTS[case](actual)
 
     result = subprocess.run(
         [sys.executable, "-I", "-c", verifiers[0][1]],
@@ -448,6 +480,150 @@ def test_action_pip_bootstrap_verifier_refuses_a_wheel_with_another_digest(
     )
 
     assert result.returncode == expected_returncode, result.stderr
-    if not digest_matches:
+    if expected_returncode:
         assert expected in result.stderr
         assert actual in result.stderr
+
+
+#: GitHub runs a step whose ``shell`` is exactly ``bash`` -- that value and no
+#: other -- as ``bash --noprofile --norc -eo pipefail {0}``.  The step script
+#: never says ``set -e`` itself: a refusal inside it ends the step only because
+#: of this invocation, and a custom ``bash {0}`` gets no ``-e`` at all.
+_GITHUB_BASH_SHELL = "bash"
+_GITHUB_BASH_OPTIONS = ("--noprofile", "--norc", "-eo", "pipefail")
+_GITHUB_EXPRESSION_OPENER = "${{"
+_PROBE_INSTALL_SPEC = "codeclone==0.0.0+install-step-probe"
+_PROBE_INSTALL_SOURCE = "install-step-probe"
+_PROBE_DOWNLOAD = b"bytes the probe's curl serves in place of the pip wheel"
+
+#: ``curl`` stand-in: writes the probe's bytes to the path after ``--output``.
+_CURL_STUB_PROGRAM = """\
+import shutil
+import sys
+
+payload, *argv = sys.argv[1:]
+shutil.copyfile(payload, argv[argv.index("--output") + 1])
+"""
+
+#: ``python -m pip`` stand-in: appends the pip argv to a JSON-lines journal.
+_PIP_STUB_PROGRAM = """\
+import json
+import sys
+
+with open(sys.argv[1], "a", encoding="utf-8") as journal:
+    journal.write(json.dumps(sys.argv[2:]) + "\\n")
+"""
+
+
+def _write_executable(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _install_step_as_github_runs_it() -> tuple[str, dict[str, str]]:
+    """The Install CodeClone step's script and env, pinned to GitHub's bash."""
+    step = _action_step(_INSTALL_STEP)
+    assert step.get("shell") == _GITHUB_BASH_SHELL
+    script = cast(str, step["run"])
+    env = cast(dict[str, str], step["env"])
+    # The script is executed verbatim, so it must hold nothing GitHub would
+    # have substituted before bash ever saw it.
+    assert _GITHUB_EXPRESSION_OPENER not in script
+    for name in ("PIP_BOOTSTRAP_URL", "PIP_BOOTSTRAP_SHA256"):
+        assert _GITHUB_EXPRESSION_OPENER not in env[name]
+    return script, env
+
+
+def _write_stubs(runner_temp: Path) -> tuple[Path, Path]:
+    """``curl`` and ``python`` stand-ins; return their directory and pip journal."""
+    stubs, journal = runner_temp / "stub-bin", runner_temp / "pip-calls.jsonl"
+    payload = runner_temp / "download.bin"
+    payload.write_bytes(_PROBE_DOWNLOAD)
+    interpreter = shlex.quote(sys.executable)
+    _write_executable(
+        stubs / "curl",
+        f"#!/bin/sh\nexec {interpreter} -I -c {shlex.quote(_CURL_STUB_PROGRAM)} "
+        f'{shlex.quote(str(payload))} "$@"\n',
+    )
+    _write_executable(
+        stubs / "python",
+        '#!/bin/sh\nif [ "$1" = "-m" ] && [ "$2" = "pip" ]; then\n  shift 2\n'
+        f"  exec {interpreter} -I -c {shlex.quote(_PIP_STUB_PROGRAM)} "
+        f'{shlex.quote(str(journal))} "$@"\nfi\nexec {interpreter} "$@"\n',
+    )
+    return stubs, journal
+
+
+def _run_install_step(
+    runner_temp: Path, *, expected_sha256: str | None
+) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
+    """Run the whole step with stubbed ``curl`` and pip; return its pip calls.
+
+    ``expected_sha256=None`` keeps the digest the step itself declares.
+    """
+    script, step_env = _install_step_as_github_runs_it()
+    bash = shutil.which("bash")
+    assert bash is not None, "GitHub runs this step with bash; the probe needs it"
+    for directory in ("stub-bin", "home", "tmp"):
+        (runner_temp / directory).mkdir()
+    stubs, journal = _write_stubs(runner_temp)
+    script_path = runner_temp / "install-codeclone.sh"
+    script_path.write_text(script, encoding="utf-8")
+
+    result = subprocess.run(
+        [bash, *_GITHUB_BASH_OPTIONS, str(script_path)],
+        env={
+            "PATH": os.pathsep.join((str(stubs), os.defpath)),
+            "HOME": str(runner_temp / "home"),
+            "TMPDIR": str(runner_temp / "tmp"),
+            "RUNNER_TEMP": str(runner_temp),
+            "PIP_BOOTSTRAP_URL": step_env["PIP_BOOTSTRAP_URL"],
+            "PIP_BOOTSTRAP_SHA256": expected_sha256 or step_env["PIP_BOOTSTRAP_SHA256"],
+            "INSTALL_SPEC": _PROBE_INSTALL_SPEC,
+            "INSTALL_SOURCE": _PROBE_INSTALL_SOURCE,
+        },
+        cwd=runner_temp,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    calls = journal.read_text(encoding="utf-8").splitlines() if journal.exists() else []
+    return result, [cast(list[str], json.loads(call)) for call in calls]
+
+
+def test_action_install_step_stops_before_pip_when_the_download_is_foreign(
+    tmp_path: Path,
+) -> None:
+    """The whole step, run as GitHub runs it, refuses bytes that are not pip.
+
+    Running the verifier alone proves it exits 1; it does not prove the step
+    stops there.  Here the refusal must end the step before pip runs at all.
+    """
+    result, pip_calls = _run_install_step(tmp_path, expected_sha256=None)
+
+    assert result.returncode != 0, result.stdout
+    assert pip_calls == []
+    assert "Refusing to install pip" in result.stderr
+
+
+def test_action_install_step_installs_the_verified_pip_offline_then_codeclone(
+    tmp_path: Path,
+) -> None:
+    """Positive control: matching bytes carry the same step through both installs."""
+    result, pip_calls = _run_install_step(
+        tmp_path, expected_sha256=hashlib.sha256(_PROBE_DOWNLOAD).hexdigest()
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert pip_calls == [
+        [
+            "install",
+            "--no-index",
+            "--no-deps",
+            "--disable-pip-version-check",
+            f"{tmp_path}/{_PIP_BOOTSTRAP_WHEEL}",
+        ],
+        ["install", _PROBE_INSTALL_SPEC],
+    ]
