@@ -105,6 +105,7 @@ Return actionable remediation guidance for a single finding. Returns `status="no
 
 **`get_relevant_memory(root, scope, intent_id, ...)`**
 Return ranked, evidence-linked engineering memory for the declared edit scope. Read-only; does not mutate the memory database.
+Compact responses budget records, trajectories, experiences, and governance metadata together. A reduced lane with visible items has a digest-bound continuation at `continuation.lanes.<lane>.page.cursor`; the `_continuation` pointer names its `cursor_path` without copying the cursor. Static drill-down routes are available through `help(topic='engineering_memory')`, rather than in every governance envelope. If no memory item fits, the tool returns a contract error rather than an empty success.
 
 **`manage_engineering_memory(root, action, ...)`**
 Engineering memory governance for agents. Actions: `refresh_from_run`, `record_candidate`, `promote_experience`, `validate_claims`, `propose_from_receipt`, `rebuild_semantic_index`, `rebuild_trajectories`, `enqueue_projection_rebuild`, `projection_rebuild_status`, `run_projection_jobs_once`. Approve, reject, and archive are not available to agents.

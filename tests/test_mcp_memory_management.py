@@ -471,7 +471,7 @@ def test_mcp_get_relevant_memory_compact_enforces_response_budget(
     monkeypatch.setattr(
         mcp_memory_mixin_mod,
         "DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT",
-        1700,
+        1400,
     )
     with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
         for index in range(8):
@@ -506,6 +506,76 @@ def test_mcp_get_relevant_memory_compact_enforces_response_budget(
     assert record_count < 6
     assert records_omitted["reason"] == "response_budget"
     assert page["offset"] == record_count
+
+
+def test_mcp_budget_can_reduce_complete_lanes_and_remember_page_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.retrieval.continuation import (
+        memory_projection_request_digest,
+    )
+
+    request: dict[str, object] = {
+        "scope_paths": ["pkg/mod.py"],
+        "symbols": [],
+        "blast_dependents": [],
+        "scope_resolved_from": "explicit",
+        "include_stale": False,
+        "include_drafts": False,
+        "include_routine": False,
+        "detail_level": "compact",
+    }
+    records = [
+        {"id": f"rec-{index}", "statement": f"record {index}"} for index in range(7)
+    ]
+    experiences = [
+        {"id": f"exp-{index}", "summary": "context " * 200} for index in range(8)
+    ]
+
+    def get_complete_memory(
+        *_args: object,
+        project_id: str,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        return {
+            "project_id": project_id,
+            "scope_resolved_from": "explicit",
+            "records": records,
+            "record_count": len(records),
+            "trajectories": [],
+            "trajectory_count": 0,
+            "experiences": experiences,
+            "experience_count": len(experiences),
+            "truncated": False,
+            "trajectories_truncated": False,
+            "coverage": {},
+            "detail_level": "compact",
+            "retrieval_policy": {},
+            "_memory_projection_request": request,
+        }
+
+    monkeypatch.setattr(
+        mcp_memory_mixin_mod,
+        "get_relevant_memory",
+        get_complete_memory,
+    )
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        payload = service.get_relevant_memory(
+            root=str(root.resolve()),
+            scope=["pkg/mod.py"],
+            max_records=20,
+        )
+
+    assert 0 < cast("int", payload["experience_count"]) < len(experiences)
+    experience_lane = _nested_dict(payload, "continuation", "lanes", "experiences")
+    page = cast("dict[str, object]", experience_lane["page"])
+    cursor = str(page["cursor"])
+    digest = memory_projection_request_digest(request)
+    key = f"{project.id}:{digest['value']}"
+    assert service._memory_continuation_requests[key] == request
+    assert cursor
 
 
 def _nested_dict(payload: dict[str, object], *keys: str) -> dict[str, object]:

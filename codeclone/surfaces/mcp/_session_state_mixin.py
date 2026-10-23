@@ -9,7 +9,10 @@ from __future__ import annotations
 from ...baseline.metrics_baseline import probe_metrics_baseline_section
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
-from ._context_governance import attach_passive_context_governance
+from ._context_governance import (
+    attach_passive_context_governance,
+    passive_drill_down_reachability,
+)
 from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
 from ._report_section import (
@@ -1212,6 +1215,8 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 {"title": title, "url": url} for title, url in spec.doc_links
             ],
         }
+        if validated_topic == "engineering_memory":
+            payload["drill_down"] = passive_drill_down_reachability()
         if spec.anti_patterns:
             payload["anti_patterns"] = list(spec.anti_patterns)
         if validated_detail == "normal" and spec.warnings:

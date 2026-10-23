@@ -683,6 +683,7 @@ def get_relevant_memory(
     include_drafts: bool = False,
     include_routine: bool = False,
     detail_level: str = "compact",
+    _include_projection_request: bool = False,
 ) -> dict[str, object]:
     normalized_detail = _normalize_detail_level(detail_level)
     raw_scope = scope_paths or ()
@@ -827,6 +828,7 @@ def get_relevant_memory(
     )
     if continuation:
         payload["continuation"] = continuation
+    if continuation or _include_projection_request:
         payload["_memory_projection_request"] = projection_request
     return payload
 

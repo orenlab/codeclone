@@ -770,6 +770,10 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "get_memory_projection_page cursors."
             ),
             (
+                "Static drill-down reachability is returned in this topic's "
+                "drill_down field, not copied into each context_governance envelope."
+            ),
+            (
                 "Semantic (off by default): enable sidecar, rebuild_semantic_index, "
                 "then search with semantic=true."
             ),

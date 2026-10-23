@@ -36,6 +36,7 @@ from ...memory.retrieval import (
     query_engineering_memory,
 )
 from ...memory.retrieval.continuation import (
+    build_memory_continuation_cursor,
     memory_projection_request_digest,
     rebase_memory_continuation_cursor,
 )
@@ -128,16 +129,31 @@ class _MCPSessionMemoryMixin:
                 include_drafts=effective_include_drafts,
                 include_routine=include_routine,
                 detail_level=detail_level,
+                _include_projection_request=True,
             )
             if memory_sync is not None:
                 result = dict(result)
                 result["memory_sync"] = memory_sync
+            continuation_request = result.get("_memory_projection_request")
             result = self._publish_memory_continuation_request(result)
-            return _attach_budgeted_memory_retrieval_context(
+            governed = _attach_budgeted_memory_retrieval_context(
                 result,
                 detail_level=detail_level,
                 max_records=max_records,
+                continuation_request=(
+                    continuation_request
+                    if is_record_mapping(continuation_request)
+                    else None
+                ),
             )
+            if is_record_mapping(continuation_request) and _memory_continuation_lanes(
+                governed
+            ):
+                self._remember_memory_continuation_request(
+                    governed.get("project_id"),
+                    continuation_request,
+                )
+            return governed
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
         finally:
@@ -764,17 +780,22 @@ class _MCPSessionMemoryMixin:
         payload: Mapping[str, object],
     ) -> dict[str, object]:
         published = dict(payload)
-        internal = published.pop("_memory_projection_request", None)
-        project_id = published.get("project_id")
-        if isinstance(project_id, str) and is_record_mapping(internal):
-            internal_mapping = internal
-            digest = memory_projection_request_digest(internal_mapping)
-            digest_value = digest.get("value")
-            if isinstance(digest_value, str) and is_payload_dict(internal_mapping):
-                self._memory_continuation_requests[
-                    self._memory_continuation_request_key(project_id, digest_value)
-                ] = dict(internal_mapping)
+        published.pop("_memory_projection_request", None)
         return published
+
+    def _remember_memory_continuation_request(
+        self,
+        project_id: object,
+        request: Mapping[str, object],
+    ) -> None:
+        if not isinstance(project_id, str) or not is_payload_dict(request):
+            return
+        digest = memory_projection_request_digest(request)
+        digest_value = digest.get("value")
+        if isinstance(digest_value, str):
+            self._memory_continuation_requests[
+                self._memory_continuation_request_key(project_id, digest_value)
+            ] = dict(request)
 
     def _resolve_memory_continuation_request(
         self,
@@ -795,6 +816,7 @@ def _attach_budgeted_memory_retrieval_context(
     *,
     detail_level: str,
     max_records: int,
+    continuation_request: Mapping[str, object] | None = None,
     limit: int | None = None,
 ) -> dict[str, object]:
     effective_limit = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT if limit is None else limit
@@ -806,19 +828,29 @@ def _attach_budgeted_memory_retrieval_context(
             max_records=max_records,
             limit=effective_limit,
         )
+    had_memory_items = any(_memory_lane_items(payload).values())
     packed, omitted = _pack_compact_memory_response(
         payload,
         detail_level=detail_level,
         max_records=max_records,
         limit=effective_limit,
+        continuation_request=continuation_request,
     )
-    return attach_memory_retrieval_context_governance(
+    governed = attach_memory_retrieval_context_governance(
         packed,
         detail_level=detail_level,
         max_records=max_records,
         evidence_omitted=omitted,
         limit=effective_limit,
     )
+    if had_memory_items and not any(_memory_lane_items(packed).values()):
+        envelope = cast("dict[str, object]", governed["context_governance"])
+        raise MCPServiceContractError(
+            "get_relevant_memory could not fit any memory items in the response "
+            f"budget (empty-response estimate: {envelope['estimated']} units; "
+            f"limit: {effective_limit} units)."
+        )
+    return governed
 
 
 def _pack_compact_memory_response(
@@ -827,18 +859,24 @@ def _pack_compact_memory_response(
     detail_level: str,
     max_records: int,
     limit: int,
+    continuation_request: Mapping[str, object] | None = None,
 ) -> tuple[dict[str, object], dict[str, object] | None]:
     lane_items = _memory_lane_items(payload)
     totals = _memory_lane_totals(payload, lane_items)
     original_shown = {lane: len(items) for lane, items in lane_items.items()}
     shown = dict(original_shown)
     original_continuation = _memory_continuation_lanes(payload)
+    project_id = payload.get("project_id")
+    can_create_continuation = (
+        isinstance(project_id, str) and continuation_request is not None
+    )
     packed = _memory_response_with_shown_counts(
         payload,
         lane_items=lane_items,
         totals=totals,
         shown=shown,
         original_continuation=original_continuation,
+        continuation_request=continuation_request,
     )
     omitted = _memory_governance_omitted(packed, original_shown=original_shown)
     if (
@@ -858,6 +896,7 @@ def _pack_compact_memory_response(
                 shown,
                 floor=floor,
                 original_continuation=original_continuation,
+                allow_complete=can_create_continuation,
             )
             if lane is None:
                 break
@@ -868,6 +907,7 @@ def _pack_compact_memory_response(
                 totals=totals,
                 shown=shown,
                 original_continuation=original_continuation,
+                continuation_request=continuation_request,
             )
             omitted = _memory_governance_omitted(
                 packed,
@@ -940,6 +980,7 @@ def _memory_response_with_shown_counts(
     totals: Mapping[str, int],
     shown: Mapping[str, int],
     original_continuation: Mapping[str, Mapping[str, object]],
+    continuation_request: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     result = dict(payload)
     for lane, count_key in _MEMORY_RESPONSE_LANES:
@@ -948,10 +989,14 @@ def _memory_response_with_shown_counts(
         result[count_key] = shown_count
     result["truncated"] = totals["records"] > shown["records"]
     result["trajectories_truncated"] = totals["trajectories"] > shown["trajectories"]
+    result["experiences_truncated"] = totals["experiences"] > shown["experiences"]
     continuation = _rebuilt_memory_continuation(
+        project_id=payload.get("project_id"),
+        lane_items=lane_items,
         totals=totals,
         shown=shown,
         original_continuation=original_continuation,
+        continuation_request=continuation_request,
     )
     if continuation:
         result["continuation"] = continuation
@@ -962,9 +1007,12 @@ def _memory_response_with_shown_counts(
 
 def _rebuilt_memory_continuation(
     *,
+    project_id: object,
+    lane_items: Mapping[str, Sequence[Mapping[str, object]]],
     totals: Mapping[str, int],
     shown: Mapping[str, int],
     original_continuation: Mapping[str, Mapping[str, object]],
+    continuation_request: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     lanes: dict[str, object] = {}
     for lane, _count_key in _MEMORY_RESPONSE_LANES:
@@ -972,11 +1020,25 @@ def _rebuilt_memory_continuation(
         total = totals[lane]
         omitted = max(0, total - shown_count)
         if omitted > 0:
+            if shown_count == 0:
+                continue
             page = _rebased_memory_lane_page(
                 lane,
                 offset=shown_count,
                 original_continuation=original_continuation,
             )
+            if (
+                page is None
+                and isinstance(project_id, str)
+                and continuation_request is not None
+            ):
+                page = build_memory_continuation_cursor(
+                    project_id=project_id,
+                    lane=lane,
+                    request=continuation_request,
+                    items=lane_items[lane],
+                    offset=shown_count,
+                )
             if page is not None:
                 lanes[lane] = {
                     "status": "available",
@@ -1062,9 +1124,10 @@ def _next_reducible_memory_lane(
     *,
     floor: int,
     original_continuation: Mapping[str, Mapping[str, object]],
+    allow_complete: bool = False,
 ) -> str | None:
     for lane in _MEMORY_RESPONSE_REDUCTION_ORDER:
-        if shown[lane] > floor and lane in original_continuation:
+        if shown[lane] > floor and (allow_complete or lane in original_continuation):
             return lane
     return None
 

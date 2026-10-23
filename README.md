@@ -327,6 +327,10 @@ codeclone memory search "baseline schema" --match all
 Retrieval is hybrid — FTS5/BM25 lexical search, optional LanceDB vector search, and Reciprocal Rank Fusion combining
 the two — with fully reproducible ranking.
 
+Compact MCP retrieval budgets the whole response across records, trajectories, and experiences. Reduced lanes with
+visible items keep a digest-bound continuation cursor; if no item fits, the tool returns a contract error instead of an
+empty success.
+
 Memory can guide an agent. It cannot authorize edits, override blast radius, change a gate, or replace canonical
 report facts.
 
