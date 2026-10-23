@@ -69,6 +69,11 @@ evidence, platform self-observability, and broader IDE/agent integration.
 - LCOM4 excludes Protocol methods and Pydantic validation/serialization hooks; `computed_field` remains included.
 - Repository coverage is enforced at **>=99%**.
 
+### Fixed
+
+- Compact MCP memory responses now reduce complete lanes before emptying a capped lane, preserve continuations for
+  partially reduced lanes, avoid duplicating page cursors, and keep static drill-down routes in the help topic.
+
 ### Performance
 
 - Relationship facts are collected during the primary module walk instead of a second traversal (cold-cache

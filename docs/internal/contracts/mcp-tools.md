@@ -73,6 +73,8 @@ Memory-aware tools require `get_relevant_memory` after `start_controlled_change`
 - Do not treat `draft`, `inferred`, or excluded stale records as established facts
 - If a `contradiction_note` exists for your scope, surface it before editing
 
+Compact memory retrieval budgets all lanes and governance metadata as one response. It may reduce complete lanes as well as lanes that already have a continuation; a reduced lane with visible items receives a digest-bound cursor, while an empty lane has no cursor. The `_continuation` pointer exposes the cursor path instead of copying the token. Static drill-down routes are available through `help(topic='engineering_memory')`, rather than in every governance envelope. If no memory item fits the limit, retrieval returns a contract error.
+
 ## Failure modes
 
 ### Concurrent intent collision

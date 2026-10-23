@@ -313,7 +313,6 @@ def _attach_context_governance(
         "enforcement": dict(enforcement),
         "enforcement_blocked": passive_enforcement_blockers(),
         "capabilities": passive_context_capabilities(),
-        "drill_down": passive_drill_down_reachability(),
     }
     _attach_omission_context(result, context_governance, evidence_omitted)
     context_governance.update(response_context)
@@ -416,11 +415,6 @@ def _continuation_lane(
                 "page_size",
             ),
         )
-        cursor_path = str(drill_down.get("cursor_path", "")).strip()
-        if cursor_path:
-            cursor = _resolve_dotted_path(payload, cursor_path)
-            if cursor not in (None, ""):
-                lane_payload["cursor"] = cursor
 
     return lane_payload
 
@@ -440,19 +434,6 @@ def _as_mapping_or_none(value: object) -> Mapping[str, object] | None:
     if is_record_mapping(value):
         return value
     return None
-
-
-def _resolve_dotted_path(payload: Mapping[str, object], dotted_path: str) -> object:
-    current: object = payload
-    for raw_part in dotted_path.split("."):
-        part = raw_part.strip()
-        if not part:
-            return None
-        if isinstance(current, Mapping):
-            current = current.get(part)
-            continue
-        return None
-    return current
 
 
 def attach_finish_context_governance(

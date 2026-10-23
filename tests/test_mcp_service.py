@@ -2790,9 +2790,10 @@ def test_mcp_context_governance_adds_top_level_continuation_pointer() -> None:
             "tool": "get_memory_projection_page",
             "cursor_path": "continuation.lanes.records.page.cursor",
             "snapshot_identity": "memory projection cursor",
-            "cursor": "cursor-records-1",
         }
     ]
+    governance = cast("dict[str, object]", payload["context_governance"])
+    assert "drill_down" not in governance
 
 
 def test_mcp_service_help_overview_returns_topic_index() -> None:
@@ -2943,6 +2944,10 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
         service.get_help(topic="baseline", detail="full")
 
     memory_help = service.get_help(topic="engineering_memory", detail="normal")
+    drill_down = cast("dict[str, dict[str, object]]", memory_help["drill_down"])
+    assert drill_down["memory_record"]["continuation_route"] == (
+        "get_memory_projection_page(cursor=...)"
+    )
     assert "get_relevant_memory" in cast(
         "list[str]",
         memory_help["recommended_tools"],
@@ -14483,6 +14488,140 @@ def test_pack_compact_memory_response_shrinks_lanes_to_fit_budget() -> None:
     assert cast("int", packed["record_count"]) < len(records)
 
 
+def test_pack_compact_memory_response_reduces_complete_lane_and_keeps_one_item() -> (
+    None
+):
+    import codeclone.surfaces.mcp._session_memory_mixin as mem_mod
+    from codeclone.memory.retrieval.continuation import (
+        build_memory_continuation_cursor,
+        decode_memory_continuation_cursor,
+    )
+
+    request: dict[str, object] = {
+        "scope_paths": ["pkg/service.py"],
+        "symbols": [],
+        "blast_dependents": [],
+        "scope_resolved_from": "explicit",
+        "include_stale": False,
+        "include_drafts": False,
+        "include_routine": False,
+        "detail_level": "compact",
+    }
+    records = [
+        {"id": f"rec-{index}", "statement": f"record {index}"} for index in range(7)
+    ]
+    experiences = [
+        {
+            "id": f"exp-{index}",
+            "summary": f"experience {index} " + "context " * 200,
+        }
+        for index in range(8)
+    ]
+    record_page = build_memory_continuation_cursor(
+        project_id="project-1",
+        lane="records",
+        request=request,
+        items=records,
+        offset=1,
+    )
+    payload: dict[str, object] = {
+        "project_id": "project-1",
+        "scope_resolved_from": "explicit",
+        "records": records[:1],
+        "record_count": 1,
+        "trajectories": [],
+        "trajectory_count": 0,
+        "experiences": experiences,
+        "experience_count": len(experiences),
+        "truncated": True,
+        "trajectories_truncated": False,
+        "coverage": {},
+        "detail_level": "compact",
+        "retrieval_policy": {},
+        "continuation": {
+            "projection_kind": "memory_retrieval_lane_projection_v1",
+            "ordering_version": "memory_retrieval_lane_order_v1",
+            "cursor_policy": "digest_bound_recompute_or_fail_closed",
+            "lanes": {
+                "records": {
+                    "status": "available",
+                    "total": len(records),
+                    "shown": 1,
+                    "omitted": len(records) - 1,
+                    "page": record_page,
+                }
+            },
+        },
+    }
+
+    packed, omitted = mem_mod._pack_compact_memory_response(
+        payload,
+        detail_level="compact",
+        max_records=1,
+        limit=2200,
+        continuation_request=request,
+    )
+    governed = mcp_context_governance_mod.attach_memory_retrieval_context_governance(
+        packed,
+        detail_level="compact",
+        max_records=1,
+        evidence_omitted=omitted,
+        limit=2200,
+    )
+    envelope = cast("dict[str, object]", governed["context_governance"])
+    continuation = cast("dict[str, object]", governed["continuation"])
+    experience_lane = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", continuation["lanes"])["experiences"],
+    )
+    page = cast("dict[str, object]", experience_lane["page"])
+    cursor = decode_memory_continuation_cursor(str(page["cursor"]))
+
+    assert governed["record_count"] == 1
+    assert 0 < cast("int", governed["experience_count"]) < len(experiences)
+    assert governed["experiences_truncated"] is True
+    estimate = envelope["estimated"]
+    limit_value = envelope["limit"]
+    assert isinstance(estimate, int) and isinstance(limit_value, int)
+    assert estimate <= limit_value
+    assert envelope["mandatory_overflow"] is False
+    assert cursor["lane"] == "experiences"
+    assert cursor["offset"] == governed["experience_count"]
+
+
+def test_compact_memory_budget_refuses_when_no_item_can_fit() -> None:
+    import codeclone.surfaces.mcp._session_memory_mixin as mem_mod
+
+    payload: dict[str, object] = {
+        "project_id": "project-1",
+        "records": [{"id": "rec-1", "statement": "one record"}],
+        "record_count": 1,
+        "trajectories": [],
+        "trajectory_count": 0,
+        "experiences": [],
+        "experience_count": 0,
+    }
+    request = {"scope_paths": ["pkg/service.py"]}
+    packed, _omitted = mem_mod._pack_compact_memory_response(
+        payload,
+        detail_level="compact",
+        max_records=1,
+        limit=0,
+        continuation_request=request,
+    )
+
+    assert packed["records"] == []
+    assert "continuation" not in packed
+    with pytest.raises(MCPServiceContractError, match="could not fit any memory items"):
+        mem_mod._attach_budgeted_memory_retrieval_context(
+            payload,
+            detail_level="compact",
+            max_records=1,
+            limit=0,
+            continuation_request=request,
+        )
+
+
 def test_memory_governed_estimate_rejects_non_integer_estimate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -14664,12 +14803,7 @@ def test_context_governance_helper_edges() -> None:
         },
     )
     assert lane is not None
-    assert lane["cursor"] == "lane-2"
-
-    assert mcp_context_governance_mod._resolve_dotted_path({}, "..bad") is None
-    assert (
-        mcp_context_governance_mod._resolve_dotted_path({"items": []}, "items.id")
-        is None
-    )
+    assert lane["cursor_path"] == "nested.cursor"
+    assert "cursor" not in lane
 
     assert mcp_context_governance_mod._continuation_payload({}, {}) is None

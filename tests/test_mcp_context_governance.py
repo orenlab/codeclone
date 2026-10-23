@@ -29,6 +29,7 @@ from codeclone.surfaces.mcp._context_governance import (
     attach_start_context_governance,
     context_governance_digest,
     estimate_response_context_units,
+    passive_drill_down_reachability,
 )
 
 
@@ -320,7 +321,8 @@ def test_implementation_context_governance_enforces_compact_budget() -> None:
 def test_context_governance_declares_drill_down_reachability() -> None:
     payload = attach_passive_context_governance({"status": "accepted"})
     envelope = cast("dict[str, object]", payload["context_governance"])
-    drill_down = cast("dict[str, dict[str, object]]", envelope["drill_down"])
+    assert "drill_down" not in envelope
+    drill_down = passive_drill_down_reachability()
 
     assert {
         "memory_record_lookup": drill_down["memory_record"]["object_lookup"],
