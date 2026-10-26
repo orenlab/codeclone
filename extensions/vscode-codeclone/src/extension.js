@@ -88,10 +88,10 @@ const {
 } = require("./providers");
 const {
     captureWorkspaceGitSnapshot,
-    looksLikeCodeCloneRepo,
     pathExists,
     readFileHead,
     resolveCoverageXmlPath,
+    resolveTrustedLaunchSpec,
     sameGitSnapshot,
 } = require("./runtime");
 const {
@@ -113,7 +113,6 @@ const {
     signedInteger,
     staleMessage,
     unsupportedVersionMessage,
-    workspaceLocalLauncherCandidates,
     logChannelMessage,
 } = require("./support");
 
@@ -637,58 +636,23 @@ class CodeCloneController {
     }
 
     async resolveLaunchSpec(folder) {
+        // Never a launcher from the workspace (.venv, venv, a repo-local
+        // `uv run`): the configured command or an absolute PATH entry only.
         const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
-        const configuredCommand = config.get("mcp.command", "auto");
-        const configuredArgs = config.get("mcp.args", []);
-        if (configuredCommand && configuredCommand !== "auto") {
-            return normalizedLaunchSpec({
-                command: configuredCommand,
-                args: Array.isArray(configuredArgs) ? configuredArgs : [],
+        return normalizedLaunchSpec(
+            await resolveTrustedLaunchSpec({
+                configuredCommand: config.get("mcp.command", "auto"),
+                configuredArgs: config.get("mcp.args", []),
                 cwd: folder.uri.fsPath,
-                source: "configured",
-            });
-        }
-        const candidates = workspaceLocalLauncherCandidates(folder.uri.fsPath);
-        const candidateChecks = await Promise.all(
-            candidates.map(async (candidate) => ({
-                candidate,
-                exists: await pathExists(candidate),
-            }))
-        );
-        const localLauncher = candidateChecks.find((entry) => entry.exists)?.candidate;
-        if (localLauncher) {
-            return normalizedLaunchSpec({
-                command: localLauncher,
-                args: Array.isArray(configuredArgs) ? configuredArgs : [],
-                cwd: folder.uri.fsPath,
-                source: "workspaceLocal",
-            });
-        }
-        const primary = /** @type {any} */ (normalizedLaunchSpec({
-            command: "codeclone-mcp",
-            args: Array.isArray(configuredArgs) ? configuredArgs : [],
-            cwd: folder.uri.fsPath,
-            source: "path",
-        }));
-        primary.fallback = (await looksLikeCodeCloneRepo(folder.uri.fsPath))
-            ? normalizedLaunchSpec({
-                command: "uv",
-                args: ["run", "codeclone-mcp"],
-                cwd: folder.uri.fsPath,
-                source: "uvFallback",
             })
-            : null;
-        return primary;
+        );
     }
 
     async ensureConnected(folder) {
         const launchSpec = await this.resolveLaunchSpec(folder);
         if (this.client.isConnected() && this.connectionInfo.launchSpec) {
             const activeLaunchSpec = this.connectionInfo.launchSpec;
-            if (
-                sameLaunchSpec(activeLaunchSpec, launchSpec) ||
-                sameLaunchSpec(activeLaunchSpec, launchSpec.fallback)
-            ) {
+            if (sameLaunchSpec(activeLaunchSpec, launchSpec)) {
                 const snapshot = this.client.getConnectionSnapshot();
                 this.connectionInfo.connected = snapshot.connected;
                 this.connectionInfo.serverInfo = snapshot.serverInfo;
@@ -697,23 +661,8 @@ class CodeCloneController {
                 return snapshot;
             }
         }
-        let effectiveLaunchSpec = launchSpec;
-        let connection;
-        try {
-            connection = await this.client.connect(launchSpec);
-        } catch (error) {
-            if (launchSpec.fallback) {
-                logChannelMessage(
-                    this.outputChannel,
-                    "warn",
-                    "[codeclone] primary MCP launch failed, trying fallback launcher."
-                );
-                effectiveLaunchSpec = launchSpec.fallback;
-                connection = await this.client.connect(effectiveLaunchSpec);
-            } else {
-                throw error;
-            }
-        }
+        const effectiveLaunchSpec = launchSpec;
+        const connection = await this.client.connect(launchSpec);
         this.connectionInfo.connected = true;
         this.connectionInfo.serverInfo = connection.serverInfo || null;
         this.connectionInfo.toolCount = connection.toolNames.length;
@@ -4159,7 +4108,8 @@ class CodeCloneController {
             text.includes("requires CodeClone >=") ||
             text.includes("not supported. It reported version") ||
             text.includes("spawn codeclone-mcp ENOENT") ||
-            text.includes("spawn uv ENOENT")
+            text.includes("CodeClone launcher not found") ||
+            text.includes("codeclone.mcp.command must be an absolute path")
         );
     }
 

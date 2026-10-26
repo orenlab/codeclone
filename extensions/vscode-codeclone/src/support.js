@@ -152,29 +152,6 @@ function resolveWorkspacePath(rootPath, relativePath) {
     return null;
 }
 
-function workspaceLocalLauncherCandidates(
-    rootPath,
-    platform = process.platform
-) {
-    const root = String(rootPath || "").trim();
-    if (!root) {
-        return [];
-    }
-    const platformPath = platform === "win32" ? path.win32 : path.posix;
-    if (platform === "win32") {
-        return [
-            platformPath.join(root, ".venv", "Scripts", "codeclone-mcp.exe"),
-            platformPath.join(root, ".venv", "Scripts", "codeclone-mcp.cmd"),
-            platformPath.join(root, "venv", "Scripts", "codeclone-mcp.exe"),
-            platformPath.join(root, "venv", "Scripts", "codeclone-mcp.cmd"),
-        ];
-    }
-    return [
-        platformPath.join(root, ".venv", "bin", "codeclone-mcp"),
-        platformPath.join(root, "venv", "bin", "codeclone-mcp"),
-    ];
-}
-
 function normalizeAnalysisProfile(value) {
     const profileId = String(value || "").trim();
     return ANALYSIS_PROFILE_IDS.has(profileId)
@@ -253,12 +230,8 @@ function launchSpecOrigin(spec) {
         : [];
     const renderedCommand = args.length > 0 ? `${command} ${args.join(" ")}` : command;
     switch (String(launchSpec.source || "").trim()) {
-        case "workspaceLocal":
-            return `workspace-local launcher (${renderedCommand})`;
         case "configured":
             return `configured launcher (${renderedCommand})`;
-        case "uvFallback":
-            return `repo-local uv fallback (${renderedCommand})`;
         case "path":
         default:
             return `PATH launcher (${renderedCommand})`;
@@ -411,5 +384,4 @@ module.exports = {
     staleMessage,
     trimTail,
     unsupportedVersionMessage,
-    workspaceLocalLauncherCandidates,
 };

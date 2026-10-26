@@ -140,8 +140,11 @@ The extension runs as a workspace extension and requires:
 - a local `codeclone-mcp` launcher, or an explicitly configured launcher
 - CodeClone `2.0.0` or newer
 
-In `auto` mode, launcher resolution prefers the current workspace virtualenv
-before `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
+In `auto` mode, the launcher is `codeclone-mcp` from an absolute `PATH`
+directory. A launcher from the opened workspace (`.venv`, `venv`, a
+repository-local `uv run`, a relative `PATH` entry) is never started; a
+configured `codeclone.mcp.command` must be an absolute path or a bare command
+name. Runtime and version-mismatch messages identify the resolved launcher source.
 
 Launcher override settings (`codeclone.mcp.command`, `codeclone.mcp.args`) are
 machine-scoped. Analysis-depth settings are resource-scoped so they can vary by

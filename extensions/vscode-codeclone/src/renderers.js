@@ -88,7 +88,7 @@ function renderSetupMarkdown() {
         "",
         "- Set `codeclone.mcp.command` to the launcher you want VS Code to use.",
         "- Set `codeclone.mcp.args` if that launcher needs extra arguments.",
-        "- In the CodeClone repository itself, the extension can also fall back to `uv run codeclone-mcp`.",
+        "- A launcher inside the workspace (`.venv`, `venv`) is never started automatically; to use one, set `codeclone.mcp.command` to its absolute path.",
         "",
         "## What the extension expects",
         "",

@@ -57,8 +57,10 @@ uv pip install "codeclone[mcp]"
 codeclone-mcp --help
 ```
 
-In `auto` mode the extension checks the current workspace virtualenv first,
-then falls back to `PATH`. Version-mismatch messages identify the resolved launcher source.
+In `auto` mode the extension starts `codeclone-mcp` from an absolute `PATH`
+directory and never a launcher from the opened workspace (`.venv`, `venv`). To use
+a project environment, set `codeclone.mcp.command` to the absolute path of its
+launcher. Version-mismatch messages identify the resolved launcher source.
 
 ---
 
@@ -104,7 +106,7 @@ and help topics. Reviewed markers are session-local and do not mutate the reposi
 
 | Setting                             | Default        | Scope    | Description                                                                                         |
 |-------------------------------------|----------------|----------|-----------------------------------------------------------------------------------------------------|
-| `codeclone.mcp.command`             | `auto`         | Machine  | Launcher used to start the local CodeClone server. `auto` checks workspace virtualenv, then `PATH`. |
+| `codeclone.mcp.command`             | `auto`         | Machine  | Launcher used to start the local CodeClone server. `auto` uses absolute `PATH` entries only.        |
 | `codeclone.mcp.args`                | `[]`           | Machine  | Extra arguments passed to the launcher.                                                             |
 | `codeclone.analysis.cachePolicy`    | —              | Resource | Default cache policy for analysis requests. Can differ per workspace or folder.                     |
 | `codeclone.analysis.changedDiffRef` | —              | Resource | Git revision used by **Review Changes**.                                                            |

@@ -30,8 +30,11 @@ The extension needs a local `codeclone-mcp` launcher.
 
 Minimum supported CodeClone version: `2.0.0`.
 
-In `auto` mode, it checks the current workspace virtualenv before falling back
-to `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.
+In `auto` mode, it starts `codeclone-mcp` from an absolute `PATH` directory. It
+never starts a launcher from the opened workspace (`.venv`, `venv`, a
+repository-local `uv run`, or a relative `PATH` entry): opening a workspace is
+not consent to run programs from it. Runtime and version-mismatch messages
+identify the resolved launcher source.
 
 Recommended install:
 
@@ -39,11 +42,9 @@ Recommended install:
 uv tool install "codeclone[mcp]"
 ```
 
-If you want the launcher inside the current environment instead:
-
-```bash
-uv pip install "codeclone[mcp]"
-```
+To use a launcher from a specific environment instead, set
+`codeclone.mcp.command` to its absolute path (a relative path is refused; a bare
+command name is looked up in absolute `PATH` directories only).
 
 Verify the launcher:
 

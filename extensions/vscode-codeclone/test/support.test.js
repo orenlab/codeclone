@@ -32,7 +32,6 @@ const {
     staleMessage,
     trimTail,
     unsupportedVersionMessage,
-    workspaceLocalLauncherCandidates,
 } = require("../src/support");
 
 test("signedInteger formats positive, zero, and negative values", () => {
@@ -126,33 +125,33 @@ test("normalizedLaunchSpec trims arguments and rejects empty command or cwd", ()
 test("launchSpecOrigin makes launcher provenance explicit", () => {
     assert.equal(
         launchSpecOrigin({
-            command: "/workspace/repo/.venv/bin/codeclone-mcp",
+            command: "/opt/tools/bin/codeclone-mcp",
             args: [],
             cwd: "/workspace/repo",
-            source: "workspaceLocal",
+            source: "configured",
         }),
-        "workspace-local launcher (/workspace/repo/.venv/bin/codeclone-mcp)"
+        "configured launcher (/opt/tools/bin/codeclone-mcp)"
     );
     assert.equal(
         launchSpecOrigin({
-            command: "uv",
-            args: ["run", "codeclone-mcp"],
+            command: "/home/user/.local/bin/codeclone-mcp",
+            args: [],
             cwd: "/workspace/repo",
-            source: "uvFallback",
+            source: "path",
         }),
-        "repo-local uv fallback (uv run codeclone-mcp)"
+        "PATH launcher (/home/user/.local/bin/codeclone-mcp)"
     );
 });
 
 test("unsupportedVersionMessage includes launcher provenance and next step", () => {
     assert.equal(
         unsupportedVersionMessage("1.27.0", "2.0.0", {
-            command: "/workspace/repo/.venv/bin/codeclone-mcp",
+            command: "/home/user/.local/bin/codeclone-mcp",
             args: [],
             cwd: "/workspace/repo",
-            source: "workspaceLocal",
+            source: "path",
         }),
-        "The local CodeClone MCP server is not supported. It reported version 1.27.0; this extension requires CodeClone >= 2.0.0. The extension resolved workspace-local launcher (/workspace/repo/.venv/bin/codeclone-mcp). Update that environment or set codeclone.mcp.command to a newer launcher."
+        "The local CodeClone MCP server is not supported. It reported version 1.27.0; this extension requires CodeClone >= 2.0.0. The extension resolved PATH launcher (/home/user/.local/bin/codeclone-mcp). Update that environment or set codeclone.mcp.command to a newer launcher."
     );
 });
 
@@ -194,19 +193,6 @@ test("logChannelMessage prefers structured log methods and falls back to appendL
     };
     logChannelMessage(plainChannel, "error", "plain fallback");
     assert.deepEqual(fallbackCalls, ["plain fallback"]);
-});
-
-test("workspaceLocalLauncherCandidates prefer workspace virtual environments", () => {
-    assert.deepEqual(workspaceLocalLauncherCandidates("/workspace/repo", "linux"), [
-        "/workspace/repo/.venv/bin/codeclone-mcp",
-        "/workspace/repo/venv/bin/codeclone-mcp",
-    ]);
-    assert.deepEqual(workspaceLocalLauncherCandidates("C:\\repo", "win32"), [
-        "C:\\repo\\.venv\\Scripts\\codeclone-mcp.exe",
-        "C:\\repo\\.venv\\Scripts\\codeclone-mcp.cmd",
-        "C:\\repo\\venv\\Scripts\\codeclone-mcp.exe",
-        "C:\\repo\\venv\\Scripts\\codeclone-mcp.cmd",
-    ]);
 });
 
 test("normalizeAnalysisProfile falls back to conservative defaults", () => {
