@@ -20,11 +20,11 @@ maintainers = [
 requires-python = ">=3.10"
 
 dependencies = [
-    "orjson>=3.11.9",
-    "packaging>=24.0",
-    "pygments>=2.20.0",
-    "rich>=15.0.0",
-    "tomli>=2.0.1; python_version < '3.11'",
+    "orjson>=3.11.9,<4",
+    "packaging>=24.0,<27",
+    "pygments>=2.20.0,<3",
+    "rich>=15.0.0,<16",
+    "tomli>=2.0.1,<3; python_version < '3.11'",
 ]
 
 keywords = [
@@ -64,7 +64,7 @@ Documentation = "https://github.com/orenlab/codeclone/tree/v2.0.3/docs"
 
 [project.optional-dependencies]
 mcp = [
-    "mcp>=1.27.0,<2",
+    "mcp>=1.30.0,<2",
     "httpx>=0.27.1,<1",
 ]
 dev = [
@@ -119,6 +119,19 @@ packages = [
 
 [tool.setuptools.package-data]
 codeclone = ["py.typed"]
+
+[tool.uv]
+# The lock takes only releases at least 14 days old at fixation time. A newer
+# release enters only as a reviewed security fix, by name, below.
+exclude-newer = "2026-10-12T00:00:00Z"
+# filelock 4.2.1 (the fix) needs Python 3.11; on 3.10 stay below 4.1, which
+# added three advisories of its own.
+constraint-dependencies = ["filelock<4.1; python_full_version < '3.11'"]
+
+[tool.uv.exclude-newer-package]
+certifi = "2026-10-20T03:00:00Z"
+filelock = "2026-10-17T17:00:00Z"
+virtualenv = "2026-10-22T21:00:00Z"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

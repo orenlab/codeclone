@@ -418,8 +418,7 @@ suppress the known false positive at the declaration site:
 
 ```python
 # codeclone: ignore[dead-code]
-def handle_exception(exc: Exception) -> None:
-    ...
+def handle_exception(exc: Exception) -> None: ...
 
 
 class Middleware:  # codeclone: ignore[dead-code]
