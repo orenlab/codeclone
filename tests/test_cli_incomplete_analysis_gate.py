@@ -724,3 +724,64 @@ def test_parse_error_that_is_neither_syntax_nor_timeout_stays_unknown(
     assert result.error_kind == "unexpected_error"
     assert result.error is not None
     assert "expected module AST root" in result.error
+
+
+@pytest.mark.skipif(os.name == "nt", reason="file names with a newline are POSIX-only")
+def test_sarif_names_the_exclusion_in_the_invocation_and_keeps_it_inert(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    repo = _repo(tmp_path, clean=_CLEAN)
+    (repo / "pkg" / _HOSTILE_FIXTURE).write_text(_SYNTAX_ERROR, encoding="utf-8")
+    sarif_path = tmp_path / "r.sarif"
+
+    code = _run_cli(
+        monkeypatch,
+        repo,
+        ".",
+        "--no-progress",
+        "--fail-dead-code",
+        "--allow-syntax-error",
+        f"pkg/{_HOSTILE_FIXTURE}",
+        "--sarif",
+        str(sarif_path),
+    )
+
+    assert code == 0
+    invocation = json.loads(sarif_path.read_text(encoding="utf-8"))["runs"][0][
+        "invocations"
+    ][0]
+    assert invocation["executionSuccessful"] is True
+    assert invocation["properties"] == {"fullScopeVerified": False, "excludedFiles": 1}
+    [notification] = invocation["toolExecutionNotifications"]
+    assert notification["level"] == "warning"
+    assert notification["descriptor"] == {"id": "codeclone/excluded-from-analysis"}
+    text = notification["message"]["text"]
+    assert "\n" not in text
+    assert "pkg/evil`<img src=x onerror=alert(1)>`␊## Verdict" in text
+    uri = notification["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+    assert uri == (
+        "pkg/evil%60%3Cimg%20src%3Dx%20onerror%3Dalert%281%29%3E%60"
+        "%0A%23%23%20Verdict%3A%20ALL%20GATES%20PASSED.py"
+    )
+
+
+def test_sarif_of_a_fully_verified_run_says_so(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    repo = _repo(tmp_path, clean=_CLEAN)
+    sarif_path = tmp_path / "r.sarif"
+
+    code = _run_cli(monkeypatch, repo, ".", "--no-progress", "--sarif", str(sarif_path))
+
+    assert code == 0
+    invocation = json.loads(sarif_path.read_text(encoding="utf-8"))["runs"][0][
+        "invocations"
+    ][0]
+    assert invocation["properties"] == {"fullScopeVerified": True, "excludedFiles": 0}
+    assert "toolExecutionNotifications" not in invocation

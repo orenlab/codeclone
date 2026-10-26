@@ -22,6 +22,8 @@ Upgrade to it now; plan the move to 3.0.
   the repository that a linked directory leads outside it is refused.
 - `--update-baseline` no longer writes through a link the repository planted
   outside the analysed root; reading a baseline through such a link still works.
+- The cache is never read or written through a link that leads outside the
+  repository (a committed `.cache` link, for example); the run stops instead.
 - In gating mode (`--ci`, `--fail-*`), a file that was found but not analysed
   is a contract error (exit `2`) instead of being skipped silently: over the
   size limit, unreadable, a parse timeout, an internal error, a failed `stat`
@@ -46,7 +48,9 @@ Upgrade to it now; plan the move to 3.0.
 - Report schema `2.12` adds the analysis scope to `inventory`
   (`files.verified`, `files.excluded`, `files.full_scope_verified`,
   `excluded_files`); the Markdown, text and HTML reports and the Action PR
-  comment show it when files were excluded.
+  comment show it when files were excluded, and SARIF carries it on the run's
+  invocation (`toolExecutionNotifications` per excluded file and
+  `properties.fullScopeVerified`).
 
 ### Enhancements
 

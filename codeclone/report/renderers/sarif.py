@@ -11,6 +11,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 import orjson
 
@@ -52,6 +53,7 @@ from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ...utils.display_text import display_text
 
 if TYPE_CHECKING:
     from ...models import StructuralFindingGroup, Suggestion
@@ -876,6 +878,7 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
     }
     if scan_root_uri:
         invocation["workingDirectory"] = {"uri": scan_root_uri}
+    invocation.update(_analysis_scope_invocation(payload, use_uri_base_id))
     run: dict[str, object] = {
         "tool": {
             "driver": {
@@ -954,6 +957,69 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
         },
         option=orjson.OPT_INDENT_2,
     ).decode("utf-8")
+
+
+#: The notification descriptor for a file the caller excluded from analysis.
+_EXCLUDED_FROM_ANALYSIS_ID = "codeclone/excluded-from-analysis"
+
+
+def _analysis_scope_invocation(
+    payload: Mapping[str, object], use_uri_base_id: bool
+) -> dict[str, object]:
+    """The verified scope of the run, on its invocation.
+
+    SARIF 2.1.0 has no field for "this file was not analysed". A file the tool
+    skipped is a runtime condition of the analysis, which the spec records as
+    ``invocation.toolExecutionNotifications`` (one notification per file, with
+    its location); whether the declared scope was verified in full has no
+    native field, so it rides the invocation's property bag. The run still
+    executed successfully, so ``executionSuccessful`` stays ``true``. Names are
+    repository text: the message replaces control characters and the location
+    URI is percent-encoded.
+    """
+
+    inventory = _as_mapping(payload.get("inventory"))
+    files = _as_mapping(inventory.get("files"))
+    if "full_scope_verified" not in files:
+        return {}
+    scope: dict[str, object] = {
+        "properties": {
+            "fullScopeVerified": files.get("full_scope_verified") is True,
+            "excludedFiles": _as_int(files.get("excluded")),
+        }
+    }
+    notifications = [
+        {
+            "level": "warning",
+            "descriptor": {"id": _EXCLUDED_FROM_ANALYSIS_ID},
+            "message": {
+                "text": (
+                    f"Not analyzed: {display_text(row.get('path', ''))} was "
+                    f"excluded by {display_text(row.get('authorized_by', ''))} "
+                    f"({display_text(row.get('reason', ''))}); the full scope "
+                    "of the run was not verified."
+                )
+            },
+            "locations": [
+                {
+                    "physicalLocation": {
+                        "artifactLocation": {
+                            "uri": quote(str(row.get("path", "")), safe="/"),
+                            **(
+                                {"uriBaseId": SARIF_SRCROOT_BASE_ID}
+                                if use_uri_base_id
+                                else {}
+                            ),
+                        }
+                    }
+                }
+            ],
+        }
+        for row in map(_as_mapping, _as_sequence(inventory.get("excluded_files")))
+    ]
+    if notifications:
+        scope["toolExecutionNotifications"] = notifications
+    return scope
 
 
 def to_sarif_report(

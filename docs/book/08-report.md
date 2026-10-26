@@ -128,7 +128,10 @@ Refs:
   `--allow-syntax-error`), `files.full_scope_verified` (`true` only when no
   found file was skipped) and `excluded_files` (each excluded file's
   root-relative `path`, `reason` and `authorized_by`). An excluded file is never
-  counted as analyzed. A `2.12` document adds fields only; readers of `2.11`
+  counted as analyzed. SARIF carries the same scope on `runs[0].invocations[0]`:
+  one `toolExecutionNotifications` entry per excluded file (level `warning`,
+  descriptor `codeclone/excluded-from-analysis`) and
+  `properties.fullScopeVerified` / `properties.excludedFiles`. A `2.12` document adds fields only; readers of `2.11`
   that ignore unknown keys keep working, but do not show the exclusions.
 - Structural findings are normalized, deduplicated, and sorted before serialization.
 
