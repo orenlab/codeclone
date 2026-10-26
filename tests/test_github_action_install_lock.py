@@ -298,3 +298,25 @@ def test_locked_files_respect_the_quarantine_cutoffs() -> None:
     assert lock["options"]["exclude-newer-package"] == uv["exclude-newer-package"]
     assert late == []
     assert [name for name, at in newest_exception.items() if at < cutoff] == []
+
+
+def test_every_action_reference_is_pinned_to_a_full_commit() -> None:
+    files = [
+        ACTION_DIR / "action.yml",
+        *sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")),
+    ]
+    uses = [
+        (path.name, line.split("uses:", 1)[1].strip())
+        for path in files
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith(("uses:", "- uses:"))
+    ]
+    pinned = re.compile(r"[\w.-]+/[\w./-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+")
+    loose = [
+        (name, ref)
+        for name, ref in uses
+        if not ref.startswith("./") and not pinned.fullmatch(ref)
+    ]
+
+    assert len(uses) >= 20
+    assert loose == []
