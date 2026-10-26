@@ -1,10 +1,52 @@
 # Changelog
 
-## [2.0.3] - 2026-09-27
+## [2.0.3] - Unreleased
 
-`2.0.3` is a distribution patch release: it lists CodeClone in the official MCP
-Registry and on Glama, ships a pre-commit hook manifest, and hardens the release
-workflow. Analysis behavior is unchanged.
+`2.0.3` is a security release and the last planned release of the 2.x line.
+Upgrade to it now; plan the move to 3.0.
+
+### Security
+
+- The Codex plugin launcher, the Claude Desktop bundle and the VS Code
+  extension no longer start a `codeclone-mcp` found inside the opened workspace
+  (`.venv`, `venv`, an ancestor virtualenv, a Poetry environment, a
+  repository-local `uv run`, or a relative `PATH` entry). They start the
+  launcher you configured by absolute path, a user-level install, or an
+  absolute `PATH` entry, and otherwise stop with setup instructions.
+- A path in the analysed repository's `pyproject.toml` (report outputs,
+  `baseline`, `metrics_baseline`, `cache_path`, `coverage_xml`) must stay inside
+  the repository, after symbolic links are followed; otherwise the run stops
+  with a contract error before anything is written or read. Paths given on the
+  command line are unchanged.
+- A report is never written through a symbolic link, and a path spelled inside
+  the repository that a linked directory leads outside it is refused.
+- `--update-baseline` no longer writes through a link the repository planted
+  outside the analysed root; reading a baseline through such a link still works.
+- In gating mode (`--ci`, `--fail-*`), a file that was found but not analysed
+  is a contract error (exit `2`) instead of being skipped silently: over the
+  size limit, unreadable, a parse timeout, an internal error, a failed `stat`
+  while walking the tree, or a syntax error. A syntax error can be excluded file
+  by file with the new command-line flag `--allow-syntax-error FILE`; excluded
+  files are listed and the run reports that the full scope was not verified.
+  This can make gated runs fail on repositories with intentionally invalid
+  `.py` files, or with newer syntax than the Python running CodeClone.
+- File names and qualnames in the Markdown report and the MCP PR summary are
+  rendered as inert code spans: a backtick or a newline in a name can no longer
+  produce live HTML or a forged line.
+- Changed-file review (`--diff-against`, MCP `analyze_changed_paths`) runs git
+  without the analysed repository's filesystem monitor, hooks or filter
+  drivers, and without inherited `GIT_DIR`-style variables.
+- The GitHub Action installs pip from a SHA-256-verified wheel instead of
+  upgrading pip through the runner's pip.
+- A `pyproject.toml` nested too deeply to read is a contract error instead of an
+  internal error.
+
+### Report
+
+- Report schema `2.12` adds the analysis scope to `inventory`
+  (`files.verified`, `files.excluded`, `files.full_scope_verified`,
+  `excluded_files`); the Markdown, text and HTML reports and the Action PR
+  comment show it when files were excluded.
 
 ### Enhancements
 
