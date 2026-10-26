@@ -82,6 +82,11 @@ def _precheck_error(
                 return message
     if args.json and command == "wizard":
         return setup_ui.SETUP_WIZARD_JSON_UNSUPPORTED
+    if args.json and command == "apply" and not (args.dry_run or args.yes):
+        # ``--json`` promises stdout is one JSON document; an interactive
+        # preview and prompt cannot share it. Refused on a terminal too, as
+        # it already was without one (maintainer ruling 2026-10-23).
+        return setup_ui.SETUP_APPLY_CONFIRM_REQUIRED
     return None
 
 
