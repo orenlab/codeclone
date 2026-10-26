@@ -33,6 +33,7 @@ from ...domain.source_scope import (
 )
 from ...models import MetricsDiff
 from ...utils.display_text import markdown_code
+from ...utils.repo_links import LinkLeavesRepositoryError
 from ._session_runtime import resolve_cache_path
 from ._session_shared import (
     _COMPACT_ITEM_EMPTY_VALUES,
@@ -564,8 +565,25 @@ def _comparison_summary_text(
     )
 
 
-def _resolve_cache_path(*, root_path: Path, args: Namespace) -> Path:
-    return resolve_cache_path(root_path=root_path, args=args)
+def _resolve_cache_path(
+    *, root_path: Path, args: Namespace, spelled_root: Path | None = None
+) -> Path:
+    try:
+        return resolve_cache_path(
+            root_path=root_path, args=args, spelled_root=spelled_root
+        )
+    except LinkLeavesRepositoryError as exc:
+        raise MCPServiceContractError(
+            f"Refusing to use the cache: {exc}. Remove the link, or pass a "
+            "cache_path outside the repository."
+        ) from exc
+
+
+def _spelled_optional_path(value: str, root_path: Path) -> Path:
+    """A request path anchored at the root, as spelled: links are not followed."""
+
+    candidate = Path(value).expanduser()
+    return candidate if candidate.is_absolute() else root_path / candidate
 
 
 def _build_cache(

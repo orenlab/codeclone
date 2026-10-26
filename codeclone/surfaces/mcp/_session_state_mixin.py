@@ -296,8 +296,9 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
                 )
             )
         if request.cache_path is not None:
+            # Kept as spelled: the cache-path rule decides on links, not this.
             args.cache_path = str(
-                _helpers._resolve_optional_path(request.cache_path, root_path)
+                _helpers._spelled_optional_path(request.cache_path, root_path)
             )
         if request.coverage_xml is not None:
             args.coverage_xml = str(

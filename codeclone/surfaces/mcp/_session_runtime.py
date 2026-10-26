@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ...utils.repo_links import RepositoryRoots, refuse_link_leaving_repository
+
 
 def validate_numeric_args(args: object) -> bool:
     return bool(
@@ -29,11 +31,27 @@ def validate_numeric_args(args: object) -> bool:
     )
 
 
-def resolve_cache_path(*, root_path: Path, args: object) -> Path:
+def resolve_cache_path(
+    *, root_path: Path, args: object, spelled_root: Path | None = None
+) -> Path:
+    """The cache path of a run, refused when a repository link leads it out.
+
+    The server never writes the cache, but it reads one; a committed ``.cache``
+    link made it reuse a cache file from outside the repository. The rule is
+    the CLI's (``utils/repo_links.py``) and raises
+    :class:`LinkLeavesRepositoryError`.
+    """
+
     raw_value = getattr(args, "cache_path", None)
     if isinstance(raw_value, str) and raw_value.strip():
-        return Path(raw_value).expanduser()
-    return root_path / ".cache" / "codeclone" / "cache.json"
+        cache_path = Path(raw_value).expanduser()
+    else:
+        cache_path = root_path / ".cache" / "codeclone" / "cache.json"
+    refuse_link_leaving_repository(
+        cache_path,
+        RepositoryRoots(spelled=spelled_root or root_path, resolved=root_path),
+    )
+    return cache_path
 
 
 def _int_attr(args: object, name: str, default: int = 0) -> int:

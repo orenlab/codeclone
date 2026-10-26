@@ -10,11 +10,18 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, NoReturn
+from typing import NoReturn
 
 from ... import ui_messages as ui
 from ...config.pyproject_loader import ConfigValidationError
 from ...contracts import DEFAULT_ROOT, ExitCode
+
+# Re-exported for the CLI modules that ask the same question (reports, the
+# analysis population); the rule itself lives in utils/repo_links.py.
+from ...utils.repo_links import RepositoryRoots as RepositoryRoots
+from ...utils.repo_links import (
+    spelled_inside_resolves_outside as spelled_inside_resolves_outside,
+)
 from .attrs import bool_attr, text_attr
 from .baseline_state import MetricsBaselineSectionProbe
 from .types import CLIArgsLike, ParserWithDefaults, StatusConsole
@@ -29,13 +36,6 @@ class ResolvedBaselineInputs:
     shared_baseline_payload: dict[str, object] | None
 
 
-class RepositoryRoots(NamedTuple):
-    """The repository root as the user spelled it and as it resolves."""
-
-    spelled: Path
-    resolved: Path
-
-
 def repository_roots(args: object) -> RepositoryRoots:
     """Both forms of the root, so each spelling is compared with its own kind.
 
@@ -46,23 +46,6 @@ def repository_roots(args: object) -> RepositoryRoots:
 
     spelled = Path(os.path.abspath(text_attr(args, "root", DEFAULT_ROOT)))
     return RepositoryRoots(spelled=spelled, resolved=spelled.resolve())
-
-
-def spelled_inside_resolves_outside(
-    spelled: Path, resolved: Path, roots: RepositoryRoots
-) -> bool:
-    """A path the user spelled inside the repository that a link leads out of it.
-
-    A path spelled outside the repository is the user's own word and is left
-    alone, linked ancestors included; one spelled inside it that still lands
-    outside went through a link the repository planted.
-    """
-
-    anchored = Path(os.path.abspath(spelled))
-    spelled_inside = anchored.is_relative_to(roots.spelled) or anchored.is_relative_to(
-        roots.resolved
-    )
-    return spelled_inside and not resolved.is_relative_to(roots.resolved)
 
 
 def resolve_runtime_path_arg(

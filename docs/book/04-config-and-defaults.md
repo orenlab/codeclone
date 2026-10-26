@@ -184,7 +184,9 @@ default cache path (`<root>/.cache/codeclone/cache.json`) or a `--cache-path`
 spelled inside the repository is led outside it by a symbolic link (`.cache`
 itself, a directory on the way, or the file), or such a link cannot be resolved,
 the run stops with a contract error before the cache is read or written. A
-`--cache-path` you spell outside the repository is used as given.
+`--cache-path` you spell outside the repository is used as given. The MCP
+server applies the same rule to the cache it reads (default path or the
+request's `cache_path`) and answers `analyze_repository` with a contract error.
 
 A `pyproject.toml` nested too deeply to read is a contract error (exit `2`), not
 an internal error.

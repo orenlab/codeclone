@@ -578,7 +578,7 @@ def test_cache_behind_a_link_that_cannot_be_resolved_is_refused(
 
 
 def test_link_on_the_way_reads_every_existing_component(tmp_path: Path) -> None:
-    from codeclone.surfaces.cli.runtime import _link_on_the_way
+    from codeclone.utils.repo_links import link_on_the_way as _link_on_the_way
 
     plain = tmp_path / "plain" / "cache.json"
     plain.parent.mkdir()

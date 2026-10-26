@@ -23,7 +23,8 @@ Upgrade to it now; plan the move to 3.0.
 - `--update-baseline` no longer writes through a link the repository planted
   outside the analysed root; reading a baseline through such a link still works.
 - The cache is never read or written through a link that leads outside the
-  repository (a committed `.cache` link, for example); the run stops instead.
+  repository (a committed `.cache` link, for example); the CLI run and the MCP
+  `analyze_repository` call stop instead.
 - In gating mode (`--ci`, `--fail-*`), a file that was found but not analysed
   is a contract error (exit `2`) instead of being skipped silently: over the
   size limit, unreadable, a parse timeout, an internal error, a failed `stat`

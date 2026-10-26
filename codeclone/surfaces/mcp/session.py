@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from ...cache.store import resolve_cache_status
 from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
@@ -100,7 +103,11 @@ class MCPSession(_MCPSessionStateMixin):
             metrics_baseline_exists,
             shared_baseline_payload,
         ) = self._resolve_baseline_inputs(root_path=root_path, args=args)
-        cache_path = _helpers._resolve_cache_path(root_path=root_path, args=args)
+        cache_path = _helpers._resolve_cache_path(
+            root_path=root_path,
+            args=args,
+            spelled_root=Path(os.path.abspath(Path(str(request.root)).expanduser())),
+        )
         cache = _helpers._build_cache(
             root_path=root_path,
             args=args,
