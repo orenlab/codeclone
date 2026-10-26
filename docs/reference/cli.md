@@ -34,10 +34,17 @@ Specialized subcommands manage setup, engineering memory, analytics, baseline pu
 | `--near-miss` | Report near-miss clone pairs. Advisory; never gates or enters the baseline |
 | `--renamed-structure` | Report renamed-structure clone groups (consistent renaming of locals and receiver attributes). Advisory; never gates or enters the baseline |
 
-If a worker process dies, the files whose results it never returned are
-analysed again in the main process. A file whose
-result was already accepted is never run or counted twice, so the summary keeps
-files found = cached + analysed + skipped.
+If a worker process dies, the results already accepted are kept and each
+counted once. The files the pool did not return are retried once each, in one
+separate single-use child process -- never in the main process, where a file
+that kills a worker would take the run down with it. If that child cannot
+return a file either (it dies, or gives no result within 120 seconds), or a
+result breaks an internal invariant, the run stops with exit 5 and names the
+file, the reason, the attempts made on it and every file whose result was
+never accepted. No report is written and no baseline is published from such a
+run: an incomplete analysis never reads as a complete one. If the worker pool
+cannot be started at all, nothing is suspected and the run continues
+sequentially in the main process.
 
 ### Baseline and cache
 

@@ -35,7 +35,7 @@ Exit codes are deterministic: the same input always produces the same code.
 | **0** | Success | No gate violations and no errors. Findings may still be present — exit `0` means nothing enabled gated on them, not that the report is empty | Run succeeded; review findings if any |
 | **2** | Contract error | Untrusted/invalid baseline, invalid output configuration, incompatible versions, unreadable sources in CI/gating mode, a path argument CodeClone cannot use | Fix configuration or baseline before proceeding |
 | **3** | Gating failure | New clones, threshold violations, or metrics quality gate failures | Address findings or adjust thresholds before merge |
-| **5** | Internal error | Unexpected exception | Report the error with `--debug` output |
+| **5** | Internal error | Unexpected exception, or an analysis that could not be completed: a file whose isolated retry after a worker death died or timed out, or a result that breaks an internal invariant. The message names the file, the reason, the attempts and the files left unverified; no report or baseline is written | Report the error with `--debug` output |
 
 ## Inputs that are a contract error, not a crash
 
@@ -51,7 +51,7 @@ message that names the input, or handled as described:
 | A baseline whose stored digest is not ASCII | Baseline status `integrity_failed`, as for any other digest mismatch: ignored with a warning, exit 2 under `--ci` |
 | A stored report whose digest is not ASCII | Refused as a digest mismatch of that tier; `memory init` runs a fresh analysis |
 | An empty `[project.scripts]` value (`x = ""`) | Ignored; the other entry points still resolve |
-| A worker process that dies mid-run | The files it never returned are analysed again in the main process; nothing is counted twice |
+| A worker process that dies mid-run | The files it never returned are retried once, in a separate child process; nothing is counted twice. If the retry dies or times out too, the run ends with exit 5 (below) |
 
 `codeclone setup apply --json` without `--yes` or `--dry-run` is also exit 2:
 `--json` output is one JSON document and cannot carry an interactive prompt.
