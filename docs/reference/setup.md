@@ -59,7 +59,7 @@ codeclone setup apply --yes --root /path/to/repo
 **Common flags:**
 
 - `--root PATH` — Repository root (default: `.`)
-- `--json` — Output as JSON (status, doctor, plan, apply)
+- `--json` — Output as JSON (status, doctor, plan, apply). With `apply`, `--json` requires `--yes` or `--dry-run`; without either it is refused with exit 2 before anything is shown or written, on a terminal too
 - `--dry-run` (apply only) — Preview writes without modifying files
 - `--yes` (apply only) — Skip confirmation prompt (required non-interactively)
 - `--plan-id ID` (apply only) — Bind apply to a specific plan; refuses if stale
@@ -72,6 +72,29 @@ Interactive apply needs a TTY or `--yes` flag. Provide confirmation:
 ```bash
 codeclone setup apply --yes
 ```
+
+**`setup apply --json` refuses without `--yes`**
+
+A JSON caller cannot answer a prompt, so `--json` never asks. Choose:
+```bash
+codeclone setup apply --json --dry-run   # preview
+codeclone setup apply --json --yes       # apply
+```
+
+**Reading the plan preview**
+
+`preview.unified_diff` in `setup plan --json` is a patch `git apply` accepts:
+a file that does not exist yet is diffed from `/dev/null`, and a last line
+without a newline carries git's `\ No newline at end of file` marker. The
+rich `setup apply` output prints the reason under the result table when an
+action fails or is skipped.
+
+**`.gitignore` is not UTF-8**
+
+Git accepts a `.gitignore` in any encoding; setup reads it as UTF-8. When it
+cannot be decoded, setup does not touch it: the `.gitignore` append is
+`blocked` and its `block_reason` names the decoding error. Add `.codeclone/`
+yourself, or convert the file to UTF-8 and re-run `codeclone setup plan`.
 
 **"Plan is stale"**
 

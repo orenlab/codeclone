@@ -34,6 +34,11 @@ Specialized subcommands manage setup, engineering memory, analytics, baseline pu
 | `--near-miss` | Report near-miss clone pairs. Advisory; never gates or enters the baseline |
 | `--renamed-structure` | Report renamed-structure clone groups (consistent renaming of locals and receiver attributes). Advisory; never gates or enters the baseline |
 
+If a worker process dies, the files whose results it never returned are
+analysed again in the main process. A file whose
+result was already accepted is never run or counted twice, so the summary keeps
+files found = cached + analysed + skipped.
+
 ### Baseline and cache
 
 | Option | Description |
@@ -60,7 +65,7 @@ Baseline update and baseline-relative gating both require a stable
 | `--patch-verify` | Verify current patch against baseline budget |
 | `--strictness LEVEL` | Strictness profile: `ci`, `strict`, or `relaxed`. Default: `ci` |
 | `--ci` | Enable CI preset (`--fail-on-new --no-color --quiet`) |
-| `--api-surface` | Collect API surface facts (contract-visible exports) for compatibility review |
+| `--api-surface` | Collect API surface facts (contract-visible exports) for compatibility review. When `pyproject.toml` declares what the project ships, only those modules form the public API: setuptools `packages` and `packages.find.include`, hatch wheel `packages`, and Poetry `packages` includes. A Poetry single-module include (`include = "my_module.py"`) ships `my_module`; a glob include (`include = "pkg/**/*.py"`, `include = "pkg*"`) ships what its literal head names (`pkg`) |
 | `--semantic-authority` | Collect report-only semantic authority candidates and provenance facts |
 | `--coverage FILE` | Join external Cobertura XML line coverage |
 
@@ -132,7 +137,7 @@ than through the import-time gate.
 |--------|-------------|
 | `--session-stats` | Show workspace session status (read-only) |
 | `--audit` | Show local Controller audit trail (read-only) |
-| `--audit-json` | Output audit payload footprint as JSON. Implies `--audit` |
+| `--audit-json` | Output audit payload footprint as JSON. Implies `--audit`, and is refused with exit 2 in every combination `--audit` is refused in: with `--patch-verify`, `--blast-radius`, `--session-stats`, `--update-baseline`, a changed-scope flag, or a report output flag |
 
 ## Commands
 
@@ -486,7 +491,7 @@ Reports are written to `.codeclone/report.<ext>` by default unless FILE is speci
 | `--text [FILE]` | Plain text | `.codeclone/report.txt` |
 
 **Report options:**
-- `--timestamped-report-paths`: Append UTC timestamp to default report filenames
+- `--timestamped-report-paths`: Append UTC timestamp to default report filenames. A report flag shortened the way argparse accepts (`--htm`, `--jso`) counts as that flag, so its default path is stamped too
 - `--open-html-report`: Open HTML report in default browser (requires `--html`)
 
 **Output formatting:**
@@ -506,9 +511,31 @@ Reports are written to `.codeclone/report.<ext>` by default unless FILE is speci
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
-| 2 | Contract error: invalid baseline, incompatible versions, or unreadable sources in CI/gating mode |
+| 2 | Contract error: invalid baseline, incompatible versions, unreadable sources in CI/gating mode, or a path argument CodeClone cannot use |
 | 3 | Gating failure: new clones, threshold violations, or metrics regression |
 | 5 | Internal error: unexpected exception |
+
+See [Exit codes](exit-codes.md) for the inputs that are a contract error rather
+than a crash.
+
+## Patch verify output
+
+`--patch-verify` prints the patch verdict and, beside it, the gate's own
+outcome: `gates=<label>` on the `--quiet` line and `Gate preview  <label>
+(exit N)` in the full output. The label names what the gate said; it never
+changes an exit code and is not the patch verdict.
+
+| Gate exit | Condition | Label |
+|-----------|-----------|-------|
+| 0 | — | `PASS` |
+| 3 | a gate failed on a measured fact | `VIOLATED` |
+| 3 | the gate refused to answer over a population nobody measured (`unmeasured`, `complete_empty`) | `UNAVAILABLE` |
+| 2 | every unavailable lane is one the baseline was refused for: a baseline file the run found and rejected (`integrity_failed`, a schema or fingerprint mismatch, invalid JSON, …), another project's `baseline_scope_id`, or a lane written under an incompatible contract | `REFUSED` |
+| 2 | otherwise: no baseline file, a comparison the run did not make, a missing evaluation | `UNAVAILABLE` |
+| 5, or any code outside the gate contract | — | `ERROR` |
+
+Before this table the label was `pass` for exit 0 and `FAIL` for every other
+outcome, so a check that never ran read like a proven violation.
 
 ## Examples
 

@@ -33,9 +33,28 @@ Exit codes are deterministic: the same input always produces the same code.
 | Code | Meaning | Cause | Action |
 |------|---------|-------|--------|
 | **0** | Success | No gate violations and no errors. Findings may still be present — exit `0` means nothing enabled gated on them, not that the report is empty | Run succeeded; review findings if any |
-| **2** | Contract error | Untrusted/invalid baseline, invalid output configuration, incompatible versions, unreadable sources in CI/gating mode | Fix configuration or baseline before proceeding |
+| **2** | Contract error | Untrusted/invalid baseline, invalid output configuration, incompatible versions, unreadable sources in CI/gating mode, a path argument CodeClone cannot use | Fix configuration or baseline before proceeding |
 | **3** | Gating failure | New clones, threshold violations, or metrics quality gate failures | Address findings or adjust thresholds before merge |
 | **5** | Internal error | Unexpected exception | Report the error with `--debug` output |
+
+## Inputs that are a contract error, not a crash
+
+These inputs used to end in the internal-error handler (exit 5) or, for the
+`setup` and `memory` subcommands, in a raw traceback. Each is now refused with a
+message that names the input, or handled as described:
+
+| Input | Now |
+|-------|-----|
+| A path that names an unknown user's home, such as `--baseline ~nobody/b.json`, `--cache-path`, a report flag (`--html`, `--json`, …), or `setup`/`memory --root` | Exit 2, `Invalid … path` / `Repository root …` |
+| A path or error text containing Rich markup brackets, such as `--html 'out[/x].htm'`, a missing root `no[/x]`, or `memory --root 'p[/x]'` | Exit 2; the text is printed as written |
+| A `.gitignore` that is not UTF-8 | `setup` and MCP analysis run; the `.gitignore` append is blocked and names the decoding error |
+| A baseline whose stored digest is not ASCII | Baseline status `integrity_failed`, as for any other digest mismatch: ignored with a warning, exit 2 under `--ci` |
+| A stored report whose digest is not ASCII | Refused as a digest mismatch of that tier; `memory init` runs a fresh analysis |
+| An empty `[project.scripts]` value (`x = ""`) | Ignored; the other entry points still resolve |
+| A worker process that dies mid-run | The files it never returned are analysed again in the main process; nothing is counted twice |
+
+`codeclone setup apply --json` without `--yes` or `--dry-run` is also exit 2:
+`--json` output is one JSON document and cannot carry an interactive prompt.
 
 ## Key commands
 
