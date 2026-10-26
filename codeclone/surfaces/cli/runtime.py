@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+import os
+import stat
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 from ... import ui_messages as ui
 from ...cache.store import Cache, resolve_cache_status
@@ -15,6 +18,7 @@ from ...cache.versioning import CacheStatus
 from ...contracts import ExitCode
 from . import state as cli_state
 from .attrs import bool_attr, int_attr, optional_text_attr, set_bool_attr
+from .startup import repository_roots, spelled_inside_resolves_outside
 from .types import PrinterLike, require_status_console
 
 
@@ -106,9 +110,11 @@ def resolve_cache_path(
 ) -> Path:
     cache_path_arg = optional_text_attr(args, "cache_path")
     if from_args and cache_path_arg:
-        return Path(cache_path_arg).expanduser()
+        return _refuse_cache_through_link(Path(cache_path_arg).expanduser(), args=args)
 
-    cache_path = root_path / ".cache" / "codeclone" / "cache.json"
+    cache_path = _refuse_cache_through_link(
+        root_path / ".cache" / "codeclone" / "cache.json", args=args
+    )
     if legacy_cache_path.exists():
         try:
             legacy_resolved = legacy_cache_path.resolve()
@@ -122,6 +128,64 @@ def resolve_cache_path(
                 )
             )
     return cache_path
+
+
+#: Why a cache is not used through a link the repository planted.
+_ERR_CACHE_LEAVES_REPOSITORY = (
+    "Refusing to use the cache at {spelled}: the path is inside the repository, "
+    "but a symbolic link on the way leaves it ({detail}). Remove the link, or "
+    "pass a cache path outside the repository with --cache-path."
+)
+
+
+def _refuse_cache_through_link(cache_path: Path, *, args: object) -> Path:
+    """Stop a run whose cache a repository's link would carry outside it.
+
+    A repository may commit ``.cache`` -- or any directory or file on the way
+    to the cache -- as a link to anywhere the user can write; the cache was
+    then created, rewritten and read there. Unlike a shared baseline, a cache
+    is never worth reading through such a link: it only speeds the run up, and
+    a cache from outside the repository would feed its facts into the
+    analysis. So the run stops before the cache is opened at all.
+    """
+
+    try:
+        resolved = cache_path.resolve()
+    except (OSError, RuntimeError):
+        # A path that cannot be resolved can only escape through a link; with
+        # no link on the way it stays where it is spelled.
+        if _link_on_the_way(cache_path):
+            _exit_cache_refused(cache_path, "a link on the way cannot be resolved")
+        return cache_path
+    if spelled_inside_resolves_outside(cache_path, resolved, repository_roots(args)):
+        _exit_cache_refused(cache_path, f"it leads to {resolved}")
+    return cache_path
+
+
+def _link_on_the_way(path: Path) -> bool:
+    """Whether any existing component of *path* is a link, or cannot be seen."""
+
+    absolute = Path(os.path.abspath(path))
+    for component in (*reversed(absolute.parents), absolute):
+        try:
+            mode = os.lstat(component).st_mode
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True
+        if stat.S_ISLNK(mode):
+            return True
+    return False
+
+
+def _exit_cache_refused(cache_path: Path, detail: str) -> NoReturn:
+    console = require_status_console(cli_state.get_console())
+    console.print(
+        ui.fmt_contract_error(
+            _ERR_CACHE_LEAVES_REPOSITORY.format(spelled=cache_path, detail=detail)
+        )
+    )
+    sys.exit(ExitCode.CONTRACT_ERROR)
 
 
 def metrics_computed(args: object) -> tuple[str, ...]:

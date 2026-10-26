@@ -461,3 +461,139 @@ def test_report_path_that_links_to_a_repository_file_is_refused(
 
     assert code == 2
     assert _sha256(source) == before
+
+
+@pytest.mark.parametrize(
+    "linked",
+    [
+        pytest.param(".cache", id="cache-root-directory"),
+        pytest.param(".cache/codeclone", id="cache-subdirectory"),
+    ],
+)
+def test_cache_through_a_committed_directory_link_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    linked: str,
+) -> None:
+    layout = _Layout(tmp_path)
+    link = layout.repo / linked
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(layout.outside, target_is_directory=True)
+
+    code = _run_cli(monkeypatch, layout.repo, ".", "--no-progress")
+
+    output = _flat(capsys.readouterr().out)
+    assert code == 2, output
+    assert list(layout.outside.iterdir()) == []
+    assert "cache" in output
+    assert "symbolic link" in output
+
+
+def test_cache_file_that_is_a_committed_link_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _Layout(tmp_path)
+    victim = layout.victim("cache.json")
+    before = _sha256(victim)
+    (layout.repo / ".cache" / "codeclone").mkdir(parents=True)
+    (layout.repo / ".cache" / "codeclone" / "cache.json").symlink_to(victim)
+
+    code = _run_cli(monkeypatch, layout.repo, ".", "--no-progress")
+
+    assert code == 2
+    assert _sha256(victim) == before
+
+
+def test_cache_through_a_link_that_stays_inside_the_repository_is_used(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _Layout(tmp_path)
+    (layout.repo / "build-cache").mkdir()
+    (layout.repo / ".cache").symlink_to(
+        layout.repo / "build-cache", target_is_directory=True
+    )
+
+    code = _run_cli(monkeypatch, layout.repo, ".", "--no-progress")
+
+    assert code == 0
+    assert (layout.repo / "build-cache" / "codeclone" / "cache.json").is_file()
+
+
+def test_cache_path_the_user_spelled_outside_is_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _Layout(tmp_path)
+    target = layout.outside / "user-cache.json"
+
+    code = _run_cli(
+        monkeypatch, layout.repo, ".", "--no-progress", "--cache-path", str(target)
+    )
+
+    assert code == 0
+    assert target.is_file()
+
+
+def test_cache_path_on_the_command_line_through_a_planted_link_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _Layout(tmp_path)
+    (layout.repo / "ci").symlink_to(layout.outside, target_is_directory=True)
+
+    code = _run_cli(
+        monkeypatch, layout.repo, ".", "--no-progress", "--cache-path", "ci/cache.json"
+    )
+
+    assert code == 2
+    assert list(layout.outside.iterdir()) == []
+
+
+def test_cache_behind_a_link_that_cannot_be_resolved_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A failed resolution is not evidence that the link stays inside.
+    layout = _Layout(tmp_path)
+    (layout.repo / "build-cache").mkdir()
+    (layout.repo / ".cache").symlink_to(
+        layout.repo / "build-cache", target_is_directory=True
+    )
+    original_resolve = Path.resolve
+
+    def _resolve(self: Path, strict: bool = False) -> Path:
+        if ".cache" in self.parts:
+            raise OSError("resolve failed")
+        return original_resolve(self, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _resolve)
+
+    code = _run_cli(monkeypatch, layout.repo, ".", "--no-progress")
+
+    assert code == 2
+    assert not (layout.repo / "build-cache" / "codeclone").exists()
+
+
+def test_link_on_the_way_reads_every_existing_component(tmp_path: Path) -> None:
+    from codeclone.surfaces.cli.runtime import _link_on_the_way
+
+    plain = tmp_path / "plain" / "cache.json"
+    plain.parent.mkdir()
+    plain.write_text("{}", encoding="utf-8")
+    assert _link_on_the_way(plain) is False
+    assert _link_on_the_way(tmp_path / "plain" / "missing" / "cache.json") is False
+
+    (tmp_path / "linked").symlink_to(tmp_path / "plain", target_is_directory=True)
+    assert _link_on_the_way(tmp_path / "linked" / "cache.json") is True
+
+    sealed = tmp_path / "sealed"
+    (sealed / "inner").mkdir(parents=True)
+    sealed.chmod(0o600)
+    try:
+        # An unobservable component is not evidence that there is no link.
+        assert _link_on_the_way(sealed / "inner" / "cache.json") is True
+    finally:
+        sealed.chmod(0o700)

@@ -179,6 +179,13 @@ component is a link, or a path spelled inside the repository that a linked
 directory leads outside it, is refused with a contract error whether it came
 from `pyproject.toml` or from the command line.
 
+The cache is never used through a link that leaves the repository: when the
+default cache path (`<root>/.cache/codeclone/cache.json`) or a `--cache-path`
+spelled inside the repository is led outside it by a symbolic link (`.cache`
+itself, a directory on the way, or the file), or such a link cannot be resolved,
+the run stops with a contract error before the cache is read or written. A
+`--cache-path` you spell outside the repository is used as given.
+
 A `pyproject.toml` nested too deeply to read is a contract error (exit `2`), not
 an internal error.
 
