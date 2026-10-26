@@ -15,19 +15,19 @@ topic when supported by that server.
 
 ## Install
 
-The bundle prefers the current workspace launcher first:
+The bundle starts only a trusted launcher, in this order:
 
-1. `./.venv/bin/codeclone-mcp`
-2. the current Poetry environment launcher
-3. user-local install paths and `PATH`
+1. the **CodeClone launcher command** from the bundle settings (an absolute path,
+   or a bare name looked up in absolute `PATH` directories)
+2. user-level install paths (`~/.local/bin`, `~/Library/Python/*/bin`, the
+   Windows per-user Python `Scripts` directories)
+3. `codeclone-mcp` from an absolute `PATH` directory
 
-```bash
-uv venv
-uv pip install --python .venv/bin/python "codeclone[mcp]"
-.venv/bin/codeclone-mcp --help
-```
+Opening a project is not consent to run programs from it: the bundle never
+starts a launcher from the opened workspace (`.venv`, `venv`, an ancestor's
+virtualenv, a Poetry environment, or a relative `PATH` entry).
 
-Global fallback:
+Recommended setup:
 
 ```bash
 uv tool install "codeclone[mcp]"
@@ -50,9 +50,11 @@ codeclone-mcp --help
 
 ## Runtime model
 
-Node wrapper launches `codeclone-mcp` via local `stdio`. It prefers a
-workspace-local `.venv`, then a Poetry environment, then user-local install
-paths, then `PATH`.
+Node wrapper launches `codeclone-mcp` via local `stdio`: the configured launcher
+command, else a user-level install path, else an absolute `PATH` entry. It never
+starts a launcher from the opened workspace. To use a project virtual
+environment, set **CodeClone launcher command** to the absolute path of its
+`codeclone-mcp`.
 
 ## Privacy
 
@@ -61,8 +63,8 @@ See [Privacy Policy](privacy-policy.md).
 
 ## Current limits
 
-- expects either a workspace launcher, a user-local/global launcher, or an
-  explicitly configured absolute launcher path
+- expects a user-level/global launcher or an explicitly configured launcher;
+  a workspace `.venv` launcher is used only when configured by absolute path
 - local install surface, not a hosted service layer
 
 For the underlying MCP contract, see:

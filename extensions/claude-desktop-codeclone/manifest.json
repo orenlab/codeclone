@@ -107,13 +107,13 @@
     "workspace_root": {
       "type": "string",
       "title": "Workspace root path",
-      "description": "Optional absolute path to the Python project root (the directory that contains .venv or venv). When set, the launcher prefers that virtual environment over user-local or system-wide installs. Useful when Claude Desktop starts outside the project directory.",
+      "description": "Optional absolute path to the Python project root, passed to the server as its workspace. The launcher never starts a codeclone-mcp from this project (.venv or venv); to use one, set the launcher command to its absolute path.",
       "required": false
     },
     "launcher_command": {
       "type": "string",
       "title": "CodeClone launcher command",
-      "description": "Optional absolute path or bare command name for codeclone-mcp. Leave empty to prefer workspace launchers, then user-local paths, then PATH.",
+      "description": "Optional absolute path or bare command name for codeclone-mcp. Leave empty to use a user-level install, then PATH. A launcher inside the opened project is never started automatically.",
       "required": false
     },
     "launcher_args_json": {

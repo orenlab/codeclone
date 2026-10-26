@@ -10,21 +10,19 @@ exposes them without adding a second client-side interpretation layer.
 
 ## Install
 
-The bundle prefers the current workspace launcher first:
+The bundle starts only a trusted launcher, in this order:
 
-1. `./.venv/bin/codeclone-mcp`
-2. the current Poetry environment launcher
-3. user-local install paths and `PATH`
+1. the **CodeClone launcher command** from the bundle settings (an absolute path,
+   or a bare name looked up in absolute `PATH` directories)
+2. user-level install paths (`~/.local/bin`, `~/Library/Python/*/bin`, the
+   Windows per-user Python `Scripts` directories)
+3. `codeclone-mcp` from an absolute `PATH` directory
 
-Recommended workspace-local setup:
+Opening a project is not consent to run programs from it: the bundle never
+starts a launcher from the opened workspace (`.venv`, `venv`, an ancestor's
+virtualenv, a Poetry environment, or a relative `PATH` entry).
 
-```bash
-uv venv
-uv pip install --python .venv/bin/python "codeclone[mcp]"
-.venv/bin/codeclone-mcp --help
-```
-
-Global fallback:
+Recommended setup:
 
 ```bash
 uv tool install "codeclone[mcp]"

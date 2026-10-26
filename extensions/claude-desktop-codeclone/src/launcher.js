@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const {spawn, spawnSync} = require("node:child_process");
+const {spawn} = require("node:child_process");
 
 const USER_CONFIG_PLACEHOLDER_RE = /^\$\{user_config\.[^}]+\}$/;
 const BLOCKED_ARGS = new Set([
@@ -24,8 +24,6 @@ const BLOCKED_ARGS = new Set([
  *   cwd: string | null
  * }} LaunchSpec
  */
-
-const ANCESTOR_WALK_MAX_DEPTH = 8;
 
 // Bounded escalation on shutdown: after stdin closes or a shutdown signal is
 // received, give the child SHUTDOWN_GRACE_MS to exit cleanly; if it is still
@@ -207,162 +205,55 @@ async function candidateAutoCommands(env, platform) {
 }
 
 /**
- * @param {string} rootPath
- * @param {NodeJS.Platform} platform
- * @returns {string[]}
- */
-function workspaceLocalLauncherCandidates(rootPath, platform) {
-    const root = String(rootPath || "").trim();
-    if (!root) {
-        return [];
-    }
-    if (platform === "win32") {
-        return [
-            path.join(root, ".venv", "Scripts", "codeclone-mcp.exe"),
-            path.join(root, ".venv", "Scripts", "codeclone-mcp.cmd"),
-            path.join(root, "venv", "Scripts", "codeclone-mcp.exe"),
-            path.join(root, "venv", "Scripts", "codeclone-mcp.cmd"),
-        ];
-    }
-    return [
-        path.join(root, ".venv", "bin", "codeclone-mcp"),
-        path.join(root, "venv", "bin", "codeclone-mcp"),
-    ];
-}
-
-/**
- * @param {NodeJS.ProcessEnv} env
- * @param {string} cwd
- * @returns {string[]}
- */
-function workspaceRoots(env, cwd) {
-    const configuredRoot = normalizeConfiguredValue(env.CODECLONE_WORKSPACE_ROOT);
-    return [
-        ...new Set([
-            configuredRoot,
-            String(cwd || "").trim(),
-            String(env.PWD || "").trim(),
-        ]),
-    ].filter(Boolean);
-}
-
-/**
- * Walk upward from a starting directory looking for a workspace-local launcher
- * in an ancestor `.venv`/`venv` virtual environment. Returns the first
- * ancestor directory that contains a matching launcher, or null. Bounded by
- * ANCESTOR_WALK_MAX_DEPTH and by the filesystem root to keep startup cost low
- * and deterministic.
+ * Resolve a bare command name through the absolute entries of PATH only.
  *
- * @param {string} start
+ * Opening a repository is not consent to run programs from it. An empty or
+ * relative PATH entry would be resolved against the current directory, and a
+ * Windows lookup tries the current directory first, so neither is consulted:
+ * the result is an absolute path outside the opened workspace's control, or
+ * null.
+ *
+ * @param {string} name
+ * @param {NodeJS.ProcessEnv} env
  * @param {NodeJS.Platform} platform
  * @returns {Promise<string | null>}
  */
-async function findAncestorWorkspaceRoot(start, platform) {
-    const anchor = String(start || "").trim();
-    if (!anchor) {
-        return null;
-    }
-    let current = path.resolve(anchor);
-    for (let depth = 0; depth < ANCESTOR_WALK_MAX_DEPTH; depth += 1) {
-        for (const candidate of workspaceLocalLauncherCandidates(current, platform)) {
-            if (await fileExists(candidate)) {
-                return current;
-            }
+async function resolvePathCommand(name, env, platform) {
+    const pathModule = platform === "win32" ? path.win32 : path.posix;
+    const executable =
+        platform === "win32" && !pathModule.extname(name) ? `${name}.exe` : name;
+    const delimiter = platform === "win32" ? ";" : ":";
+    for (const entry of String(env.PATH ?? "").split(delimiter)) {
+        const directory = entry.trim();
+        if (!directory || !pathModule.isAbsolute(directory)) {
+            continue;
         }
-        const parent = path.dirname(current);
-        if (!parent || parent === current) {
-            return null;
+        const candidate = pathModule.join(directory, executable);
+        if (await isExecutableFile(candidate, platform)) {
+            return candidate;
         }
-        current = parent;
     }
     return null;
 }
 
 /**
- * @param {NodeJS.ProcessEnv} env
+ * @param {string} filePath
  * @param {NodeJS.Platform} platform
- * @param {string} cwd
- * @returns {Promise<{command: string, root: string}[]>}
+ * @returns {Promise<boolean>}
  */
-async function candidateWorkspaceCommands(env, platform, cwd) {
-    const roots = workspaceRoots(env, cwd);
-    const directCandidates = roots.flatMap((root) =>
-        workspaceLocalLauncherCandidates(root, platform).map((command) => ({
-            command,
-            root,
-        })),
-    );
-
-    /** @type {{command: string, root: string}[]} */
-    const existing = [];
-    /** @type {Set<string>} */
-    const seen = new Set();
-    for (const candidate of directCandidates) {
-        if (seen.has(candidate.command)) {
-            continue;
+async function isExecutableFile(filePath, platform) {
+    try {
+        const stat = await fs.stat(filePath);
+        if (!stat.isFile()) {
+            return false;
         }
-        if (await fileExists(candidate.command)) {
-            existing.push(candidate);
-            seen.add(candidate.command);
+        if (platform !== "win32") {
+            await fs.access(filePath, fsSync.constants.X_OK);
         }
+        return true;
+    } catch {
+        return false;
     }
-    if (existing.length > 0) {
-        return existing;
-    }
-
-    // Ancestor walk only triggers when no direct workspace match is found.
-    // This handles the common Claude Desktop case where the bundle is launched
-    // from an unrelated cwd but a parent of cwd/PWD is the real project root.
-    for (const root of roots) {
-        const ancestor = await findAncestorWorkspaceRoot(root, platform);
-        if (!ancestor) {
-            continue;
-        }
-        for (const command of workspaceLocalLauncherCandidates(ancestor, platform)) {
-            if (seen.has(command)) {
-                continue;
-            }
-            if (await fileExists(command)) {
-                existing.push({command, root: ancestor});
-                seen.add(command);
-            }
-        }
-    }
-    return existing;
-}
-
-/**
- * @param {NodeJS.ProcessEnv} env
- * @param {NodeJS.Platform} platform
- * @param {string} cwd
- * @returns {Promise<{command: string, root: string} | null>}
- */
-async function resolvePoetryLauncher(env, platform, cwd) {
-    const executable = platform === "win32" ? "codeclone-mcp.exe" : "codeclone-mcp";
-    for (const root of workspaceRoots(env, cwd)) {
-        if (!(await fileExists(path.join(root, "pyproject.toml")))) {
-            continue;
-        }
-        const poetryProbe = spawnSync("poetry", ["env", "info", "-p"], {
-            cwd: root,
-            env,
-            encoding: "utf8",
-            stdio: ["ignore", "pipe", "ignore"],
-            windowsHide: true,
-        });
-        const poetryRoot = String(poetryProbe.stdout || "").trim();
-        if (!poetryRoot) {
-            continue;
-        }
-        const candidate =
-            platform === "win32"
-                ? path.join(poetryRoot, "Scripts", executable)
-                : path.join(poetryRoot, "bin", executable);
-        if (await fileExists(candidate)) {
-            return {command: candidate, root};
-        }
-    }
-    return null;
 }
 
 /**
@@ -376,7 +267,6 @@ async function resolvePoetryLauncher(env, platform, cwd) {
 async function resolveLaunchSpec(options = {}) {
     const env = options.env ?? process.env;
     const platform = options.platform ?? process.platform;
-    const cwd = options.cwd ?? process.cwd();
     const configuredCommand = normalizeConfiguredValue(env.CODECLONE_MCP_COMMAND);
     const configuredArgs = parseLauncherArgsJson(env.CODECLONE_MCP_ARGS_JSON ?? "");
     validateConfiguredCommand(configuredCommand);
@@ -386,34 +276,22 @@ async function resolveLaunchSpec(options = {}) {
         normalizeConfiguredValue(env.CODECLONE_WORKSPACE_ROOT) || null;
 
     if (configuredCommand) {
+        const command = path.isAbsolute(configuredCommand)
+            ? configuredCommand
+            : await resolvePathCommand(configuredCommand, env, platform);
+        if (!command) {
+            throw new Error(buildSetupMessage());
+        }
         return {
-            command: configuredCommand,
+            command,
             args: [...configuredArgs, "--transport", "stdio"],
             source: "configured",
             cwd: configuredRoot,
         };
     }
 
-    const workspaceCommands = await candidateWorkspaceCommands(env, platform, cwd);
-    if (workspaceCommands.length > 0) {
-        return {
-            command: workspaceCommands[0].command,
-            args: ["--transport", "stdio"],
-            source: "workspaceLocal",
-            cwd: workspaceCommands[0].root,
-        };
-    }
-
-    const poetryLauncher = await resolvePoetryLauncher(env, platform, cwd);
-    if (poetryLauncher) {
-        return {
-            command: poetryLauncher.command,
-            args: ["--transport", "stdio"],
-            source: "poetryEnv",
-            cwd: poetryLauncher.root,
-        };
-    }
-
+    // Never a launcher from the opened workspace (.venv, venv, an ancestor's
+    // virtualenv, a Poetry environment): only a user-level install or PATH.
     const autoCommands = await candidateAutoCommands(env, platform);
     if (autoCommands.length > 0) {
         return {
@@ -424,8 +302,12 @@ async function resolveLaunchSpec(options = {}) {
         };
     }
 
+    const pathCommand = await resolvePathCommand("codeclone-mcp", env, platform);
+    if (!pathCommand) {
+        throw new Error(buildSetupMessage());
+    }
     return {
-        command: "codeclone-mcp",
+        command: pathCommand,
         args: ["--transport", "stdio"],
         source: "path",
         cwd: configuredRoot,
@@ -461,8 +343,9 @@ function lockResolvedCommand(command) {
 function buildSetupMessage() {
     return [
         "CodeClone launcher not found.",
-        "Install CodeClone with the MCP extra in the current workspace, Poetry environment, or PATH, or point this bundle at a working codeclone-mcp launcher.",
+        'Install it outside the workspace, for example with `uv tool install "codeclone[mcp]"`, so codeclone-mcp is on PATH.',
         "Or configure an absolute launcher path in the Claude Desktop bundle settings.",
+        "A launcher inside the opened project (.venv, venv, Poetry) is never started automatically.",
     ].join("\n");
 }
 
@@ -690,15 +573,12 @@ module.exports = {
     BLOCKED_ARGS,
     buildSetupMessage,
     candidateAutoCommands,
-    candidateWorkspaceCommands,
     exitProxy,
     normalizeConfiguredValue,
     parseLauncherArgsJson,
     resolveLaunchSpec,
-    resolvePoetryLauncher,
+    resolvePathCommand,
     runProxy,
     validateAdditionalArgs,
     validateConfiguredCommand,
-    workspaceLocalLauncherCandidates,
-    workspaceRoots,
 };

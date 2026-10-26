@@ -7,6 +7,7 @@ const path = require("node:path");
 const {spawn} = require("node:child_process");
 const test = require("node:test");
 
+const launcher = require("../src/launcher");
 const {
     BLOCKED_ARGS,
     buildSetupMessage,
@@ -14,12 +15,9 @@ const {
     normalizeConfiguredValue,
     parseLauncherArgsJson,
     resolveLaunchSpec,
-    resolvePoetryLauncher,
     validateAdditionalArgs,
     validateConfiguredCommand,
-    workspaceLocalLauncherCandidates,
-    workspaceRoots,
-} = require("../src/launcher");
+} = launcher;
 
 const rootDir = path.resolve(__dirname, "..");
 const serverEntry = path.join(rootDir, "server", "index.js");
@@ -94,171 +92,194 @@ test("resolveLaunchSpec uses explicit launcher config when present", async () =>
     });
 });
 
-test("resolveLaunchSpec falls back to PATH when nothing is configured", async () => {
-    const emptyWorkspace = fs.mkdtempSync(
-        path.join(os.tmpdir(), "codeclone-claude-empty-workspace-"),
+/**
+ * @param {string} filePath
+ * @param {string} marker
+ */
+function writeMarkerLauncher(filePath, marker) {
+    fs.mkdirSync(path.dirname(filePath), {recursive: true});
+    fs.writeFileSync(filePath, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${marker}'\n`, "utf8");
+    fs.chmodSync(filePath, 0o755);
+    return filePath;
+}
+
+/**
+ * A hostile project that plants a launcher everywhere one used to be found:
+ * its .venv and venv, an ancestor's .venv, its root (for a cwd-relative PATH
+ * entry) and a Poetry on PATH that reports the project's own .venv.
+ */
+function hostileWorkspace() {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "codeclone-claude-hostile-"));
+    const root = path.join(base, "parent", "hostile-repo");
+    const hostileMarker = path.join(base, "HOSTILE_LAUNCHER_STARTED");
+    const trustedMarker = path.join(base, "TRUSTED_LAUNCHER_STARTED");
+    for (const planted of [
+        path.join(root, ".venv", "bin", "codeclone-mcp"),
+        path.join(root, "venv", "bin", "codeclone-mcp"),
+        path.join(base, "parent", ".venv", "bin", "codeclone-mcp"),
+        path.join(root, "codeclone-mcp"),
+    ]) {
+        writeMarkerLauncher(planted, hostileMarker);
+    }
+    fs.writeFileSync(path.join(root, "pyproject.toml"), "[tool.poetry]\nname='x'\n", "utf8");
+    const tools = path.join(base, "tools-bin");
+    fs.mkdirSync(tools, {recursive: true});
+    fs.writeFileSync(
+        path.join(tools, "poetry"),
+        `#!/bin/sh\nprintf '%s\\n' '${path.join(root, ".venv")}'\n`,
+        "utf8",
     );
-    const spec = await resolveLaunchSpec({
-        env: {
-            HOME: "/tmp/codeclone-claude-no-home",
-        },
-        platform: "linux",
-        cwd: emptyWorkspace,
+    fs.chmodSync(path.join(tools, "poetry"), 0o755);
+    const trustedDir = path.join(base, "trusted-install", "bin");
+    const trusted = writeMarkerLauncher(path.join(trustedDir, "codeclone-mcp"), trustedMarker);
+    const home = path.join(base, "home");
+    fs.mkdirSync(home, {recursive: true});
+    return {base, root, hostileMarker, trustedMarker, tools, trustedDir, trusted, home};
+}
+
+/**
+ * Run the bundle's real entry point from inside the workspace.
+ *
+ * @param {{root: string, home: string}} workspace
+ * @param {Record<string, string>} env
+ * @returns {Promise<{code: number | null, stderr: string}>}
+ */
+async function runServerIn(workspace, env) {
+    const child = spawn(process.execPath, [serverEntry], {
+        cwd: workspace.root,
+        env: {HOME: workspace.home, PWD: workspace.root, ...env},
+        stdio: ["pipe", "pipe", "pipe"],
     });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+        stderr += String(chunk);
+    });
+    child.stdin.end();
+    const code = await new Promise((resolve) => {
+        child.on("exit", resolve);
+    });
+    return {code, stderr};
+}
+
+test("the bundle never starts a launcher planted in the opened workspace", async () => {
+    const workspace = hostileWorkspace();
+
+    const {code, stderr} = await runServerIn(workspace, {
+        PATH: [workspace.tools, ".", ""].join(path.delimiter),
+        CODECLONE_WORKSPACE_ROOT: workspace.root,
+    });
+
+    assert.equal(fs.existsSync(workspace.hostileMarker), false, stderr);
+    assert.equal(code, 2, stderr);
+    assert.match(stderr, /CodeClone launcher not found/);
+});
+
+test("the bundle starts the trusted install outside the workspace", async () => {
+    const workspace = hostileWorkspace();
+
+    const {code, stderr} = await runServerIn(workspace, {
+        PATH: [workspace.tools, workspace.trustedDir].join(path.delimiter),
+        CODECLONE_WORKSPACE_ROOT: workspace.root,
+    });
+
+    assert.equal(fs.existsSync(workspace.hostileMarker), false, stderr);
+    assert.equal(code, 0, stderr);
+    assert.equal(fs.readFileSync(workspace.trustedMarker, "utf8"), "--transport stdio\n");
+    assert.match(stderr, /launcher source=path/);
+});
+
+test("the bundle skips relative PATH entries before a trusted one", async () => {
+    const workspace = hostileWorkspace();
+    for (const dir of [".venv", "venv"]) {
+        fs.rmSync(path.join(workspace.root, dir), {recursive: true, force: true});
+    }
+    fs.rmSync(path.join(workspace.base, "parent", ".venv"), {recursive: true, force: true});
+
+    const {code, stderr} = await runServerIn(workspace, {
+        PATH: [".", "", workspace.trustedDir].join(path.delimiter),
+        CODECLONE_WORKSPACE_ROOT: workspace.root,
+    });
+
+    assert.equal(fs.existsSync(workspace.hostileMarker), false, stderr);
+    assert.equal(code, 0, stderr);
+    assert.equal(fs.existsSync(workspace.trustedMarker), true);
+});
+
+test("a configured bare command name is resolved through absolute PATH entries only", async () => {
+    const workspace = hostileWorkspace();
+
+    const {code, stderr} = await runServerIn(workspace, {
+        PATH: [".", workspace.trustedDir].join(path.delimiter),
+        CODECLONE_MCP_COMMAND: "codeclone-mcp",
+        CODECLONE_WORKSPACE_ROOT: workspace.root,
+    });
+
+    assert.equal(fs.existsSync(workspace.hostileMarker), false, stderr);
+    assert.equal(code, 0, stderr);
+    assert.equal(fs.existsSync(workspace.trustedMarker), true);
+    assert.match(stderr, /launcher source=configured/);
+});
+
+test("the configured absolute launcher is started", async () => {
+    const workspace = hostileWorkspace();
+
+    const {code, stderr} = await runServerIn(workspace, {
+        PATH: workspace.tools,
+        CODECLONE_MCP_COMMAND: workspace.trusted,
+        CODECLONE_WORKSPACE_ROOT: workspace.root,
+    });
+
+    assert.equal(fs.existsSync(workspace.hostileMarker), false, stderr);
+    assert.equal(code, 0, stderr);
+    assert.equal(fs.existsSync(workspace.trustedMarker), true);
+});
+
+test("resolveLaunchSpec resolves PATH to an absolute launcher outside the workspace", async () => {
+    const workspace = hostileWorkspace();
+
+    const spec = await resolveLaunchSpec({
+        env: {HOME: workspace.home, PATH: [".", workspace.trustedDir].join(path.delimiter)},
+        platform: "linux",
+        cwd: workspace.root,
+    });
+
     assert.deepEqual(spec, {
-        command: "codeclone-mcp",
+        command: workspace.trusted,
         args: ["--transport", "stdio"],
         source: "path",
         cwd: null,
     });
 });
 
-test("workspaceLocalLauncherCandidates prefer workspace virtual environments", () => {
-    assert.deepEqual(workspaceLocalLauncherCandidates("/repo", "linux"), [
-        "/repo/.venv/bin/codeclone-mcp",
-        "/repo/venv/bin/codeclone-mcp",
-    ]);
-});
+test("resolvePathCommand ignores relative entries and non-executable files", async () => {
+    const workspace = hostileWorkspace();
+    const plain = path.join(workspace.base, "plain-bin");
+    fs.mkdirSync(plain, {recursive: true});
+    fs.writeFileSync(path.join(plain, "codeclone-mcp"), "", "utf8");
 
-test("workspaceRoots places CODECLONE_WORKSPACE_ROOT first, before cwd and PWD", () => {
-    const roots = workspaceRoots(
-        {CODECLONE_WORKSPACE_ROOT: "/configured", PWD: "/from-pwd"},
-        "/from-cwd",
+    assert.equal(
+        await launcher.resolvePathCommand(
+            "codeclone-mcp",
+            {PATH: [".", "", plain].join(":")},
+            "linux",
+        ),
+        null,
     );
-    assert.deepEqual(roots, ["/configured", "/from-cwd", "/from-pwd"]);
-});
-
-test("workspaceRoots ignores unset or placeholder CODECLONE_WORKSPACE_ROOT", () => {
-    assert.deepEqual(
-        workspaceRoots({CODECLONE_WORKSPACE_ROOT: "${user_config.workspace_root}"}, "/cwd"),
-        ["/cwd"],
+    assert.equal(
+        await launcher.resolvePathCommand(
+            "codeclone-mcp",
+            {PATH: [plain, workspace.trustedDir].join(":")},
+            "linux",
+        ),
+        workspace.trusted,
     );
-    assert.deepEqual(
-        workspaceRoots({CODECLONE_WORKSPACE_ROOT: ""}, "/cwd"),
-        ["/cwd"],
-    );
-    assert.deepEqual(
-        workspaceRoots({}, "/cwd"),
-        ["/cwd"],
-    );
-});
-
-test("resolveLaunchSpec prefers a workspace-local launcher before PATH", async () => {
-    const workspaceRoot = fs.mkdtempSync(
-        path.join(os.tmpdir(), "codeclone-claude-workspace-"),
-    );
-    const launcherPath = path.join(workspaceRoot, ".venv", "bin", "codeclone-mcp");
-    fs.mkdirSync(path.dirname(launcherPath), {recursive: true});
-    fs.writeFileSync(launcherPath, "#!/bin/sh\nexit 0\n", "utf8");
-    fs.chmodSync(launcherPath, 0o755);
-
-    const spec = await resolveLaunchSpec({
-        env: {
-            HOME: "/tmp/codeclone-claude-no-home",
-        },
-        platform: "linux",
-        cwd: workspaceRoot,
-    });
-
-    assert.deepEqual(spec, {
-        command: launcherPath,
-        args: ["--transport", "stdio"],
-        source: "workspaceLocal",
-        cwd: workspaceRoot,
-    });
-});
-
-test("resolveLaunchSpec walks ancestors of cwd to find a project .venv launcher", async () => {
-    const workspaceRoot = fs.mkdtempSync(
-        path.join(os.tmpdir(), "codeclone-claude-ancestor-"),
-    );
-    const launcherPath = path.join(workspaceRoot, ".venv", "bin", "codeclone-mcp");
-    fs.mkdirSync(path.dirname(launcherPath), {recursive: true});
-    fs.writeFileSync(launcherPath, "#!/bin/sh\nexit 0\n", "utf8");
-    fs.chmodSync(launcherPath, 0o755);
-
-    const subdir = path.join(workspaceRoot, "src", "deep", "nested");
-    fs.mkdirSync(subdir, {recursive: true});
-
-    const spec = await resolveLaunchSpec({
-        env: {
-            HOME: "/tmp/codeclone-claude-no-home",
-        },
-        platform: "linux",
-        cwd: subdir,
-    });
-
-    assert.deepEqual(spec, {
-        command: launcherPath,
-        args: ["--transport", "stdio"],
-        source: "workspaceLocal",
-        cwd: workspaceRoot,
-    });
-});
-
-test("resolveLaunchSpec uses CODECLONE_WORKSPACE_ROOT even when cwd is wrong", async () => {
-    const workspaceRoot = fs.mkdtempSync(
-        path.join(os.tmpdir(), "codeclone-claude-wsroot-"),
-    );
-    const launcherPath = path.join(workspaceRoot, ".venv", "bin", "codeclone-mcp");
-    fs.mkdirSync(path.dirname(launcherPath), {recursive: true});
-    fs.writeFileSync(launcherPath, "#!/bin/sh\nexit 0\n", "utf8");
-    fs.chmodSync(launcherPath, 0o755);
-
-    const spec = await resolveLaunchSpec({
-        env: {
-            HOME: "/tmp/codeclone-claude-no-home",
-            CODECLONE_WORKSPACE_ROOT: workspaceRoot,
-        },
-        platform: "linux",
-        cwd: os.tmpdir(),  // wrong cwd — simulates Claude Desktop launching outside the project
-    });
-
-    assert.deepEqual(spec, {
-        command: launcherPath,
-        args: ["--transport", "stdio"],
-        source: "workspaceLocal",
-        cwd: workspaceRoot,
-    });
-});
-
-test("resolvePoetryLauncher finds the launcher inside the active Poetry env", async () => {
-    const workspaceRoot = fs.mkdtempSync(
-        path.join(os.tmpdir(), "codeclone-claude-poetry-"),
-    );
-    const toolRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codeclone-claude-tools-"));
-    const poetryEnvRoot = path.join(toolRoot, "poetry-env");
-    const launcherPath = path.join(poetryEnvRoot, "bin", "codeclone-mcp");
-    fs.writeFileSync(path.join(workspaceRoot, "pyproject.toml"), "[tool.poetry]\nname='demo'\n", "utf8");
-    fs.mkdirSync(path.dirname(launcherPath), {recursive: true});
-    fs.writeFileSync(launcherPath, "#!/bin/sh\nexit 0\n", "utf8");
-    fs.chmodSync(launcherPath, 0o755);
-
-    const poetryBin = path.join(toolRoot, "poetry");
-    fs.writeFileSync(
-        poetryBin,
-        "#!/bin/sh\nprintf '%s\\n' \"$FAKE_POETRY_ENV\"\n",
-        "utf8",
-    );
-    fs.chmodSync(poetryBin, 0o755);
-
-    const resolved = await resolvePoetryLauncher(
-        {
-            ...process.env,
-            PATH: toolRoot,
-            FAKE_POETRY_ENV: poetryEnvRoot,
-        },
-        "linux",
-        workspaceRoot,
-    );
-
-    assert.deepEqual(resolved, {command: launcherPath, root: workspaceRoot});
 });
 
 test("buildSetupMessage stays actionable and bounded", () => {
     const text = buildSetupMessage();
-    assert.match(text, /workspace, Poetry environment, or PATH/);
+    assert.match(text, /uv tool install "codeclone\[mcp\]"/);
     assert.match(text, /absolute launcher path/);
+    assert.match(text, /never started automatically/);
 });
 
 test("exitProxy sets exitCode and exits immediately", () => {

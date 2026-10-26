@@ -68,15 +68,16 @@ The wrapper:
 4. launches the child process with `shell: false`
 5. proxies stdio until shutdown
 
-The wrapper may auto-discover a few common global install locations, but it now
-prefers:
+The wrapper starts only a trusted launcher:
 
-- a workspace-local `.venv`
-- the active Poetry environment for the current workspace
-- user-local install locations and `PATH`
-- or an explicit launcher command in bundle settings
+- an explicit launcher command in bundle settings (absolute path, or a bare
+  name looked up in absolute `PATH` directories)
+- user-level install locations
+- `codeclone-mcp` from an absolute `PATH` directory
 
-This keeps the launcher closer to the active project Python when possible.
+It never starts a launcher from the opened workspace (`.venv`, `venv`, an
+ancestor's virtualenv, a Poetry environment, a relative `PATH` entry): opening
+a project is not consent to run programs from it.
 
 ## Design rules
 
