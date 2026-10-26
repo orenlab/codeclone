@@ -15,9 +15,10 @@ complete, whatever made it incomplete. When the pool loses files:
   a worker would kill the run;
 * the first file that child cannot return -- it died, or hung past the
   deadline -- ends the run with an internal error (exit 5) that names the
-  file, the reason, the attempts and the unverified files. Not a
-  truncation, not an unverified measurement, and no second child: a limit
-  that kills every process does not turn into a chain of spawns;
+  file, the reason and the attempts, and splits the run into confirmed
+  files, the culprit and the files not processed. Not a truncation, not an
+  unverified measurement, and no second child: a limit that kills every
+  process does not turn into a chain of spawns;
 * a result the parent cannot accept breaks an engine invariant and ends the
   run the same way.
 
@@ -41,6 +42,7 @@ import pytest
 import codeclone.core.discovery as core_discovery
 import codeclone.core.parallelism as core_parallelism
 import codeclone.core.worker as core_worker
+import codeclone.core.worker_recovery as core_recovery
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.cache.store import Cache
 from codeclone.core._types import (
@@ -48,8 +50,9 @@ from codeclone.core._types import (
     ProcessingResult,
     _unit_to_group_item,
 )
-from codeclone.core.parallelism import WorkerRecoveryError, process
+from codeclone.core.parallelism import process
 from codeclone.core.pipeline import analyze
+from codeclone.core.worker_recovery import WorkerRecoveryError
 from codeclone.paths.module_identity.inventory import build_module_registry
 from tests import _worker_death_probe as probe
 from tests._pipeline_fixtures import analysis_boot
@@ -91,10 +94,9 @@ class _Run:
     ) -> None:
         self.root = tmp_path / "proj"
         self.root.mkdir()
-        self.probe_dir = tmp_path / "probe"
+        self.probe_dir = tmp_path / probe.PROBE_DIR_NAME
         self.probe_dir.mkdir()
         (self.probe_dir / "attempts.log").write_text("", "utf-8")
-        monkeypatch.setenv(probe.PROBE_DIR_ENV, str(self.probe_dir))
         _write_tree(self.root)
         self.boot = analysis_boot(self.root, min_loc=1, min_stmt=1, skip_metrics=False)
         self.boot.args.processes = 2
@@ -109,7 +111,7 @@ class _Run:
         if invoke is not None:
             monkeypatch.setattr(core_parallelism, "_invoke_process_file", invoke)
         self.spawns = 0
-        real_spawn = core_parallelism._spawn_isolated_recovery
+        real_spawn = core_recovery._start_recovery_process
 
         def _counting_spawn(args: tuple[object, ...]) -> object:
             self.spawns += 1
@@ -117,11 +119,8 @@ class _Run:
                 raise AssertionError("recovery is spawning a chain of processes")
             return real_spawn(args)
 
-        monkeypatch.setattr(
-            core_parallelism, "_spawn_isolated_recovery", _counting_spawn
-        )
+        monkeypatch.setattr(core_recovery, "_start_recovery_process", _counting_spawn)
         self.worker_errors: list[str] = []
-        self.fallbacks: list[str] = []
         self.error: WorkerRecoveryError | None = None
         self.processing: ProcessingResult | None = None
         started = time.monotonic()
@@ -131,7 +130,6 @@ class _Run:
                 discovery=self.discovery,
                 cache=cache,
                 on_worker_error=self.worker_errors.append,
-                on_parallel_fallback=lambda exc: self.fallbacks.append(str(exc)),
                 batch_size=batch_size,
             )
         except WorkerRecoveryError as exc:
@@ -195,12 +193,7 @@ def test_a_healthy_pool_counts_every_file_once_and_spawns_nothing(
 
     run = _Run(tmp_path, monkeypatch, invoke=None, batch_size=_MID_RUN_BATCH_SIZE)
 
-    assert (run.error, run.spawns, run.worker_errors, run.fallbacks) == (
-        None,
-        0,
-        [],
-        [],
-    )
+    assert (run.error, run.spawns, run.worker_errors) == (None, 0, [])
     assert run.accounting() == _COMPLETE
 
 
@@ -217,7 +210,6 @@ def test_a_worker_death_is_recovered_in_one_isolated_process(
     assert run.error is None
     assert run.worker_errors, "no worker died; the probe proves nothing"
     assert run.spawns == 1
-    assert run.fallbacks == []
     assert run.accounting() == _COMPLETE
     killer_pids = run.pids_that_ran(_KILLER_NAME)
     assert len(killer_pids) == 2 and len(set(killer_pids)) == 2
@@ -233,14 +225,17 @@ def _assert_internal_error(
 ) -> WorkerRecoveryError:
     error = run.error
     assert error is not None and run.processing is None
-    assert Path(error.filepath).name == _KILLER_NAME
+    assert Path(str(error.culprit)).name == _KILLER_NAME
     assert reason in error.reason, error.reason
     assert error.attempts == attempts
     assert Path(error.unverified[0]).name == _KILLER_NAME
     message = str(error)
     assert _KILLER_NAME in message
     assert f"attempts on this file: {attempts}" in message
-    assert f"unverified files: {len(error.unverified)}" in message
+    assert f"not processed: {len(error.not_processed)}" in message
+    # The three classes cover the run, each file in exactly one of them.
+    classes = [*error.confirmed, str(error.culprit), *error.not_processed]
+    assert sorted(classes) == sorted(run.discovery.files_to_process)
     assert os.getpid() not in run.pids_that_ran(_KILLER_NAME)
     assert multiprocessing.active_children() == []
     return error
@@ -263,7 +258,7 @@ def test_a_second_death_is_an_internal_error_naming_the_file(
 def test_a_hung_retry_is_an_internal_error_after_the_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(core_parallelism, "ISOLATED_RECOVERY_TIMEOUT_SECONDS", 2.0)
+    monkeypatch.setattr(core_recovery, "ISOLATED_RECOVERY_TIMEOUT_SECONDS", 2.0)
 
     run = _Run(tmp_path, monkeypatch, invoke=probe.hang_after_first_death)
 
@@ -287,8 +282,10 @@ def test_a_limit_that_kills_every_process_spawns_one_recovery_only(
     assert sorted(Path(path).name for path in error.unverified) == sorted(
         Path(path).name for path in run.discovery.files_to_process
     )
-    # Seventeen unverified files: the message names ten and counts the rest.
-    assert str(error).endswith(f"and {_FILES - 10} more)")
+    # The culprit plus sixteen files never run: the message names ten of
+    # them and counts the rest.
+    assert len(error.not_processed) == _FILES - 1
+    assert str(error).endswith(f"and {_FILES - 1 - 10} more)")
     assert multiprocessing.active_children() == []
 
 
@@ -367,6 +364,5 @@ def test_the_recovery_deadline_dwarfs_the_cost_of_the_largest_file() -> None:
 
     assert result.success, result.error
     assert (
-        10 * (startup + worst_file)
-        <= core_parallelism.ISOLATED_RECOVERY_TIMEOUT_SECONDS
+        10 * (startup + worst_file) <= core_recovery.ISOLATED_RECOVERY_TIMEOUT_SECONDS
     )

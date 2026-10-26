@@ -67,15 +67,14 @@ def _run_with_dying_worker(
     spawning one child after another -- is ended with every process it
     started, not left behind as an orphan when the test gives up."""
 
-    probe_dir = tmp_path / "probe"
-    probe_dir.mkdir(exist_ok=True)
+    (tmp_path / probe.PROBE_DIR_NAME).mkdir(exist_ok=True)
     script = tmp_path / "run_with_probe.py"
     script.write_text(_RUN_WITH_PROBE, "utf-8")
     command = [sys.executable, str(script), *args]
     with subprocess.Popen(
         command,
         cwd=str(tmp_path),
-        env=child_env(tmp_path, {probe.PROBE_DIR_ENV: str(probe_dir)}),
+        env=child_env(tmp_path),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

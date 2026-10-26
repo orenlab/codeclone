@@ -103,7 +103,6 @@ from .runtime import (
     WARN_HTML_REPORT_OPEN_FAILED,
     WARN_LEGACY_CACHE,
     WARN_LEGACY_REPO_WORKSPACE,
-    WARN_PARALLEL_FALLBACK,
     WARN_UNSUPPORTED_CONSTRUCT_SUMMARY,
     WARN_WORKER_FAILED,
 )
@@ -264,10 +263,6 @@ def fmt_worker_failed(error: object) -> str:
 
 def fmt_batch_item_failed(error: object) -> str:
     return WARN_BATCH_ITEM_FAILED.format(error=esc(error))
-
-
-def fmt_parallel_fallback(error: object) -> str:
-    return WARN_PARALLEL_FALLBACK.format(error=esc(error))
 
 
 def fmt_failed_files_header(count: int) -> str:

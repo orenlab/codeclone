@@ -1320,32 +1320,42 @@ def test_cli_cache_status_string_fallback(
     assert _report_meta_cache(payload)["status"] == expected_status
 
 
-def test_cli_main_progress_fallback(
+@pytest.mark.parametrize("no_progress", [False, True], ids=["progress", "no-progress"])
+def test_cli_parallel_pool_that_cannot_start_is_a_contract_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    no_progress: bool,
 ) -> None:
+    """The pool cannot start: a diagnosed error with the step that resolves
+    it, never a quiet sequential run (maintainer ruling 2026-10-26; this
+    used to print "falling back to sequential" and carry on)."""
+
     for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
-    _run_main(monkeypatch, [str(tmp_path), "--processes", "2"])
-    out = capsys.readouterr().out
-    assert_contains_all(out, "falling back to sequential")
+    args = [str(tmp_path), "--processes", "2"]
+    if no_progress:
+        args.append("--no-progress")
+    _assert_cli_exit(monkeypatch, args, expected_code=2)
+    out = " ".join(capsys.readouterr().out.split())
+    assert_contains_all(out, "Parallel processing could not start", "--processes 1")
+    assert "falling back" not in out
 
 
-def test_cli_main_no_progress_fallback(
+def test_cli_explicit_sequential_mode_never_starts_a_pool(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """``--processes 1`` is the explicit sequential mode: it runs as before,
+    whatever the pool would have done."""
+
     for idx in range(_parallel_min_files(2) + 1):
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
-    _run_main(monkeypatch, [str(tmp_path), "--processes", "2", "--no-progress"])
-    out = capsys.readouterr().out
-    assert_contains_all(out, "falling back to sequential")
+    _run_main(monkeypatch, [str(tmp_path), "--processes", "1", "--no-progress"])
 
 
 def test_cli_main_no_progress_fallback_quiet(

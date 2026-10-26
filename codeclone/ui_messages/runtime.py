@@ -28,10 +28,6 @@ INFO_PROCESSING_CHANGED = "  [info]Processing {count} changed files...[/info]"
 
 WARN_WORKER_FAILED = "[warning]Worker failed: {error}[/warning]"
 WARN_BATCH_ITEM_FAILED = "[warning]Failed to process batch item: {error}[/warning]"
-WARN_PARALLEL_FALLBACK = (
-    "[warning]Parallel processing unavailable, "
-    "falling back to sequential: {error}[/warning]"
-)
 WARN_FAILED_FILES_HEADER = (
     f"\n  [warning]{GLYPH_WARN} {{count}} files failed to process[/warning]"
 )

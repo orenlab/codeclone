@@ -44,6 +44,7 @@ from codeclone.core.discovery_cache import (
     usable_cached_source_stats,
 )
 from codeclone.core.parallelism import (
+    ParallelProcessingUnavailableError,
     _parallel_min_files,
     _resolve_process_count,
     process,
@@ -893,30 +894,37 @@ def _build_report_case(
     return boot, discovery, processing, analysis
 
 
-def test_process_parallel_fallback_without_callback_uses_sequential(
+def _pool_that_cannot_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
+) -> tuple[pytest.ExceptionInfo[ParallelProcessingUnavailableError], list[str]]:
+    boot, discovery, cache, _filepaths = _build_large_batch_case(tmp_path)
+    analysed: list[str] = []
+    stub = _stub_process_file(expected_root=str(tmp_path))
+
+    def _recording(filepath: str, *args: object, **kwargs: object) -> object:
+        analysed.append(filepath)
+        return stub(filepath, *args, **kwargs)  # type: ignore[operator]
 
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailExec)
-    monkeypatch.setattr(
-        core_worker,
-        "process_file",
-        _stub_process_file(
-            expected_root=str(tmp_path),
-        ),
-    )
+    monkeypatch.setattr(core_worker, "process_file", _recording)
+    with pytest.raises(ParallelProcessingUnavailableError) as raised:
+        process(boot=boot, discovery=discovery, cache=cache)
+    return raised, analysed
 
-    result = process(
-        boot=boot,
-        discovery=discovery,
-        cache=cache,
-        on_parallel_fallback=None,
-    )
 
-    assert result.files_analyzed == len(filepaths)
-    assert result.files_skipped == 0
-    assert result.analyzed_functions == len(filepaths)
+def test_process_parallel_pool_that_cannot_start_is_a_typed_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No hidden fallback (maintainer ruling 2026-10-26): parallel mode whose
+    pool cannot start does not quietly analyse in this process. It used to
+    fall back to sequential analysis here; now it stops, a user error with
+    the one step that resolves it."""
+
+    raised, analysed = _pool_that_cannot_start(tmp_path, monkeypatch)
+
+    assert analysed == []
+    assert "executor unavailable" in str(raised.value)
+    assert any("--processes 1" in step for step in raised.value.remediation)
 
 
 def test_process_small_batch_skips_parallel_executor(
@@ -929,22 +937,14 @@ def test_process_small_batch_skips_parallel_executor(
     discovery = _build_discovery((str(src),), root=tmp_path)
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
     cache.bind_module_registry(discovery.module_registry)
-    callbacks: list[str] = []
-
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _UnexpectedExec)
     monkeypatch.setattr(
         core_worker,
         "process_file",
         _stub_process_file(expected_root=str(tmp_path)),
     )
-    result = process(
-        boot=boot,
-        discovery=discovery,
-        cache=cache,
-        on_parallel_fallback=lambda exc: callbacks.append(str(exc)),
-    )
+    result = process(boot=boot, discovery=discovery, cache=cache)
 
-    assert callbacks == []
     assert result.files_analyzed == 1
     assert result.files_skipped == 0
 
@@ -989,30 +989,6 @@ def test_invoke_process_file_passes_full_contract_without_introspection(
             segment_min_stmt=10,
         )
         assert result.success is True
-
-
-def test_process_parallel_failure_large_batch_invokes_fallback_callback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    boot, discovery, cache, filepaths = _build_large_batch_case(tmp_path)
-    callbacks: list[str] = []
-
-    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailExec)
-    monkeypatch.setattr(
-        core_worker,
-        "process_file",
-        _stub_process_file(expected_root=str(tmp_path)),
-    )
-    result = process(
-        boot=boot,
-        discovery=discovery,
-        cache=cache,
-        on_parallel_fallback=lambda exc: callbacks.append(type(exc).__name__),
-    )
-
-    assert callbacks == ["RuntimeError"]
-    assert result.files_analyzed == len(filepaths)
-    assert result.files_skipped == 0
 
 
 def test_process_parallel_executor_analyzes_real_files(tmp_path: Path) -> None:

@@ -187,9 +187,6 @@ def run_analysis_stages(
                 on_worker_error=lambda reason: printer.print(
                     ui.fmt_cli_runtime_warning(ui.fmt_worker_failed(reason))
                 ),
-                on_parallel_fallback=lambda exc: printer.print(
-                    ui.fmt_cli_runtime_warning(ui.fmt_parallel_fallback(exc))
-                ),
             )
     else:
         processing_result = process_fn(
@@ -208,9 +205,6 @@ def run_analysis_stages(
                         ui.fmt_cli_runtime_warning(ui.fmt_worker_failed(reason))
                     )
                 )
-            ),
-            on_parallel_fallback=lambda exc: printer.print(
-                ui.fmt_cli_runtime_warning(ui.fmt_parallel_fallback(exc))
             ),
         )
 

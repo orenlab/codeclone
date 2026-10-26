@@ -393,6 +393,9 @@ _PROCESS_LAUNCHERS: dict[str, str] = {
     _GIT_OWNER: "git, for every caller: the one hardened call form",
     "codeclone/baseline/publish.py": "ps, for the publish lock's process start",
     "codeclone/core/parallelism.py": "this interpreter, as analysis workers",
+    "codeclone/core/worker_recovery.py": (
+        "this interpreter, as the one isolated recovery worker"
+    ),
     "codeclone/memory/jobs/spawn.py": "this interpreter, as the projection worker",
     "codeclone/workspace_intent/lifecycle.py": "ps, for an intent holder's start",
 }

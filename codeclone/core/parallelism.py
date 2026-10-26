@@ -6,20 +6,16 @@
 
 from __future__ import annotations
 
-import multiprocessing
-import os
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
-from multiprocessing.connection import Connection
-from multiprocessing.process import BaseProcess
-from typing import Final
 
 from ..analysis.phase_ledger import PhaseLedger, PhaseSnapshot
 from ..cache.entries import SourceStatsDict
 from ..cache.reuse import clone_artifact_channels
 from ..cache.store import Cache
+from ..contracts.errors import DiagnosedUserError
 from ..models import (
     ClassMetrics,
     DeadCandidate,
@@ -30,10 +26,8 @@ from ..models import (
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
-    ModuleRegistryHandle,
     ModuleTypingCoverage,
     NestedDefinition,
-    RehydratedCacheNeutral,
     RuntimeReachabilityFact,
     SecuritySurface,
     SemanticAuthorityResult,
@@ -67,129 +61,27 @@ from ._types import (
     structural_findings_required,
 )
 from .worker import _install_module_registry, _invoke_process_file
-
-#: How long the isolated recovery waits for one file's result, in seconds.
-#: Measured 2026-10-26 on this repository (1423 files): the slowest file took
-#: 1.4 s to process (a 21 572-line test module), and a fresh child spends about
-#: 0.8 s importing the engine before its first file. 120 s is roughly eighty
-#: times that worst case -- room for a much slower machine or a much larger
-#: generated file -- while a hung child still ends the run within two minutes.
-ISOLATED_RECOVERY_TIMEOUT_SECONDS: Final = 120.0
-_LOST_FILE_SAMPLE: Final = 10
-_CHILD_EXIT_GRACE_SECONDS: Final = 5.0
+from .worker_recovery import WorkerRecoveryError, checked_result, recover_in_isolation
 
 
-class WorkerRecoveryError(Exception):
-    """The run cannot be completed: an internal error, exit 5.
+class ParallelProcessingUnavailableError(DiagnosedUserError):
+    """Parallel mode was chosen and its worker pool could not start.
 
-    Raised when the isolated retry of a file the pool lost dies or times out,
-    or when a result breaks an engine invariant. It is not a truncation and
-    not an unverified measurement: no report is produced, so no partial
-    analysis can look complete and no baseline can be published from it. The
-    message names the file, the reason, the attempts made on it, and the
-    unverified population -- every file whose result was never accepted.
+    Nothing was analysed. The run does not quietly continue in this process
+    instead (maintainer ruling 2026-10-26): a mode the user never chose
+    would be measuring their repository, and a sandbox or limit that refuses
+    a pool is something they can see and decide about. Running sequentially
+    is one explicit setting away.
     """
 
-    def __init__(
-        self,
-        *,
-        root: str,
-        filepath: str,
-        reason: str,
-        attempts: int,
-        unverified: Sequence[str],
-    ) -> None:
-        self.filepath = filepath
-        self.reason = reason
-        self.attempts = attempts
-        self.unverified = tuple(unverified)
-        shown = ", ".join(
-            _display_path(path, root) for path in self.unverified[:_LOST_FILE_SAMPLE]
-        )
-        rest = len(self.unverified) - _LOST_FILE_SAMPLE
-        more = f" and {rest} more" if rest > 0 else ""
+    def __init__(self, cause: BaseException) -> None:
         super().__init__(
-            f"analysis incomplete: {_display_path(filepath, root)}: {reason}; "
-            f"attempts on this file: {attempts}; unverified files: "
-            f"{len(self.unverified)} ({shown}{more})"
+            f"Parallel processing could not start: {cause}",
+            remediation=(
+                "Run sequentially: pass --processes 1, or set processes = 1 "
+                "under [tool.codeclone] in pyproject.toml.",
+            ),
         )
-
-
-def _display_path(path: str, root: str) -> str:
-    try:
-        return os.path.relpath(path, root)
-    except ValueError:
-        return path
-
-
-def _isolated_recovery_child(
-    sender: Connection,
-    registry: ModuleRegistryHandle,
-    worker: Callable[..., FileProcessResult],
-    files: Sequence[str],
-    neutral_reuse: Mapping[str, RehydratedCacheNeutral | None],
-    collect_phases: bool,
-) -> None:
-    """Process the files the pool lost, one after another, streaming each
-    result back. Runs in a single-use child, never in the parent: a file
-    that killed a worker may kill this process too, and only this process."""
-
-    _install_module_registry(registry)
-    for filepath in files:
-        ledger = PhaseLedger(active=True) if collect_phases else None
-        sender.send(
-            worker(
-                filepath,
-                phase_ledger=ledger,
-                neutral_reuse=neutral_reuse.get(filepath),
-            )
-        )
-    sender.close()
-
-
-def _spawn_isolated_recovery(
-    args: tuple[object, ...],
-) -> tuple[BaseProcess, Connection]:
-    """Start the one recovery child and return it with the result channel."""
-
-    context = multiprocessing.get_context()
-    receiver, sender = context.Pipe(duplex=False)
-    child = context.Process(
-        target=_isolated_recovery_child, args=(sender, *args), daemon=True
-    )
-    child.start()
-    # The parent's copy of the sending end must go, or a dead child never
-    # reads as end-of-file and every death would wait out the timeout.
-    sender.close()
-    return child, receiver
-
-
-class _NoIsolatedResult(str):
-    """Why the recovery child gave no result for the file it was on."""
-
-
-def _receive_isolated_result(child: BaseProcess, receiver: Connection) -> object:
-    """The next result from the recovery child, or why there is none."""
-
-    if not receiver.poll(ISOLATED_RECOVERY_TIMEOUT_SECONDS):
-        return _NoIsolatedResult(
-            f"no result within {ISOLATED_RECOVERY_TIMEOUT_SECONDS:g} s"
-        )
-    try:
-        return receiver.recv()
-    except EOFError:
-        child.join(timeout=5)
-        return _NoIsolatedResult(f"isolated process exited with code {child.exitcode}")
-
-
-def _files_from(files: Sequence[str], index: int) -> Sequence[str]:
-    return files[index:]
-
-
-def _unsettled_first(first: str, files: Sequence[str], settled: set[str]) -> list[str]:
-    """``first``, then every other file whose result was never accepted."""
-
-    return [first, *(path for path in files if path not in settled and path != first)]
 
 
 def _parallel_min_files(processes: int) -> int:
@@ -243,7 +135,6 @@ def process(
     cache: Cache,
     on_advance: Callable[[], None] | None = None,
     on_worker_error: Callable[[str], None] | None = None,
-    on_parallel_fallback: Callable[[Exception], None] | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> ProcessingResult:
     semantic_authority: SemanticAuthorityResult | None = None
@@ -542,91 +433,28 @@ def process(
             if on_advance is not None:
                 on_advance()
 
-    def _accept_or_fail(
-        result: object,
-        *,
-        filepath: str,
-        attempts: int,
-        unsettled: Callable[[], Sequence[str]],
-    ) -> None:
-        """Accept the result for ``filepath``, or end the run: a result that is
-        not that file's, or that the parent cannot accept, breaks an engine
-        invariant, and nothing of it is kept."""
+    def _confirmed(settled: set[str]) -> list[str]:
+        return [path for path in files_to_process if path in settled]
+
+    def _accept_or_fail(result: object, *, filepath: str, settled: set[str]) -> None:
+        """Accept the pool's result for ``filepath``, or end the run: a result
+        that is not that file's, or that the parent cannot accept, breaks an
+        engine invariant, and nothing of it is kept."""
         try:
-            if not isinstance(result, FileProcessResult):
-                raise TypeError(f"expected a file result, got {type(result).__name__}")
-            if result.filepath != filepath:
-                raise ValueError(f"the result is for {result.filepath}")
-            _accept_result(result)
+            _accept_result(checked_result(result, filepath))
         except Exception as exc:
             raise WorkerRecoveryError(
                 root=root_str,
-                filepath=filepath,
+                culprit=filepath,
                 reason=f"result breaks an engine invariant: {exc}",
-                attempts=attempts,
-                unverified=unsettled(),
+                attempts=1,
+                confirmed=_confirmed(settled),
+                not_processed=[
+                    path
+                    for path in files_to_process
+                    if path not in settled and path != filepath
+                ],
             ) from exc
-
-    def _recover_in_isolation(files: Sequence[str], lost: set[str]) -> None:
-        """Retry the files the pool did not return, once each, in one
-        single-use child process (maintainer ruling 2026-10-26).
-
-        The first file the child cannot return -- it died, or it hung past
-        the deadline -- ends the run with an internal error: no second
-        child, no new pool, so a limit that kills every process cannot turn
-        recovery into a chain of spawns.
-        """
-        try:
-            child, receiver = _spawn_isolated_recovery(
-                (
-                    registry,
-                    worker,
-                    tuple(files),
-                    {path: neutral_reuse_by_file.get(path) for path in files},
-                    collect_phases,
-                )
-            )
-        except Exception as exc:
-            raise WorkerRecoveryError(
-                root=root_str,
-                filepath=files[0],
-                reason=f"isolated process could not start: {exc}",
-                attempts=2 if files[0] in lost else 1,
-                unverified=files,
-            ) from exc
-        completed = False
-        try:
-            for index, filepath in enumerate(files):
-                attempts = 2 if filepath in lost else 1
-                outcome = _receive_isolated_result(child, receiver)
-                if isinstance(outcome, _NoIsolatedResult):
-                    raise WorkerRecoveryError(
-                        root=root_str,
-                        filepath=filepath,
-                        reason=outcome,
-                        attempts=attempts,
-                        unverified=files[index:],
-                    )
-                _accept_or_fail(
-                    outcome,
-                    filepath=filepath,
-                    attempts=attempts,
-                    unsettled=partial(_files_from, files, index),
-                )
-                if on_advance is not None:
-                    on_advance()
-            completed = True
-        finally:
-            receiver.close()
-            # A child that failed is ended at once; one that delivered every
-            # result gets a short grace to exit on its own.
-            if not completed and child.is_alive():
-                child.kill()
-            child.join(timeout=_CHILD_EXIT_GRACE_SECONDS)
-            if child.is_alive():
-                child.kill()
-                child.join()
-        record_counter("registry_worker_installs", 1)
 
     def _run_files() -> None:
         if not _should_use_parallel(len(files_to_process), processes):
@@ -670,14 +498,7 @@ def process(
                             if on_worker_error is not None:
                                 on_worker_error(str(exc))
                             continue
-                        _accept_or_fail(
-                            result,
-                            filepath=filepath,
-                            attempts=1,
-                            unsettled=partial(
-                                _unsettled_first, filepath, files_to_process, settled
-                            ),
-                        )
+                        _accept_or_fail(result, filepath=filepath, settled=settled)
                         settled.add(filepath)
                         if on_advance is not None:
                             on_advance()
@@ -686,16 +507,26 @@ def process(
             pool_error = exc
         if pool_error is not None and not settled and not lost:
             # The pool never ran a file: parallelism is unavailable here, and
-            # no file is suspected of anything. The documented sequential
-            # fallback stands.
-            if on_parallel_fallback is not None:
-                on_parallel_fallback(pool_error)
-            _run_sequential(files_to_process)
-            record_counter("registry_worker_installs", 1)
-            return
+            # no file is suspected of anything. Nothing runs in this process
+            # in its place -- sequential mode is the user's explicit choice.
+            raise ParallelProcessingUnavailableError(pool_error) from pool_error
         unsettled = [path for path in files_to_process if path not in settled]
         if unsettled:
-            _recover_in_isolation(unsettled, lost)
+            recover_in_isolation(
+                files=unsettled,
+                lost=lost,
+                worker=worker,
+                registry=registry,
+                neutral_reuse={
+                    path: neutral_reuse_by_file.get(path) for path in unsettled
+                },
+                collect_phases=collect_phases,
+                accept=_accept_result,
+                on_advance=on_advance,
+                root=root_str,
+                already_confirmed=_confirmed(settled),
+            )
+            record_counter("registry_worker_installs", 1)
 
     with span(name="analysis.registry_bind") as registry_span:
         with span(name="analysis.relative_imports") as relative_span:

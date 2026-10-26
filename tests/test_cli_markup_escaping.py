@@ -39,7 +39,6 @@ _BUILDERS: dict[str, Callable[[str], str]] = {
     "coverage_join_ignored": ui.fmt_coverage_join_ignored,
     "worker_failed": ui.fmt_worker_failed,
     "batch_item_failed": ui.fmt_batch_item_failed,
-    "parallel_fallback": ui.fmt_parallel_fallback,
     "cache_save_failed": ui.fmt_cache_save_failed,
     "invalid_cache_path": lambda value: ui.fmt_invalid_cache_path(
         path=value, error=value

@@ -92,7 +92,6 @@ def _build_catalog() -> dict[str, str]:
         "fmt_processing_changed": ui.fmt_processing_changed(42),
         "fmt_worker_failed": ui.fmt_worker_failed("worker crashed"),
         "fmt_batch_item_failed": ui.fmt_batch_item_failed("bad item"),
-        "fmt_parallel_fallback": ui.fmt_parallel_fallback("no semaphore"),
         "fmt_failed_files_header": ui.fmt_failed_files_header(2),
         "fmt_unsupported_construct_summary": ui.fmt_unsupported_construct_summary(
             count=2,
