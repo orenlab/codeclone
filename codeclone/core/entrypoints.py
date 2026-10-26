@@ -65,8 +65,11 @@ def _load_toml_payload(path: Path) -> Mapping[str, object]:
 def _entrypoint_ref(value: object) -> _EntryPointRef | None:
     if not isinstance(value, str):
         return None
-    ref = value.strip().split(maxsplit=1)[0]
-    module, separator, local = ref.partition(":")
+    # A blank value (``x = ""``) declares no target; it splits to nothing.
+    tokens = value.split(maxsplit=1)
+    if not tokens:
+        return None
+    module, separator, local = tokens[0].partition(":")
     if not separator or not module or not local:
         return None
     if not _is_dotted_identifier(module) or not _is_dotted_identifier(local):
@@ -235,13 +238,19 @@ def _glob_prefixes(patterns: tuple[str, ...]) -> set[str]:
 
 
 def _module_of_path(value: str) -> str:
-    """``src/example`` and ``example/`` both name the module ``example``."""
+    """``src/example`` and ``example/`` both name the module ``example``.
 
-    parts = [
-        part for part in value.replace("\\", "/").split("/") if part and part != "."
-    ]
+    So do the two other spellings Poetry's ``include`` accepts: a single-module
+    file (``example.py``) ships the module, not a file name, and a glob
+    (``example/**/*.py``) ships what its literal head names. Anything from the
+    first wildcard on is dropped, as ``_glob_prefixes`` does for setuptools.
+    """
+
+    literal = value.replace("\\", "/").split("*", maxsplit=1)[0]
+    parts = [part for part in literal.split("/") if part and part != "."]
     if not parts:
         return ""
+    parts[-1] = parts[-1].removesuffix(".py")
     if len(parts) > 1 and parts[0] in {"src", "lib"}:
         parts = parts[1:]
     return ".".join(parts)
