@@ -205,7 +205,8 @@ def _plan_gitignore_append(ctx: DiscoverContext) -> dict[str, object] | None:
 
     path = ctx.root_path / ".gitignore"
     before_text = ""
-    if path.is_file():
+    before_exists = path.is_file()
+    if before_exists:
         try:
             before_text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
@@ -234,7 +235,9 @@ def _plan_gitignore_append(ctx: DiscoverContext) -> dict[str, object] | None:
         "block_reason": "",
         "lines": [line],
         "preview": {
-            "unified_diff": _unified_diff(before_text, after_text, ".gitignore"),
+            "unified_diff": _unified_diff(
+                before_text, after_text, ".gitignore", before_exists=before_exists
+            ),
         },
     }
 
@@ -282,21 +285,47 @@ def _read_pyproject_text(root_path: Path) -> str:
         return handle.read().decode("utf-8")
 
 
-def _unified_diff(before_text: str, after_text: str, filename: str) -> str:
-    before_lines = before_text.splitlines(keepends=True)
-    after_lines = after_text.splitlines(keepends=True)
-    if not before_lines and not after_text:
+_NO_NEWLINE_AT_EOF: Final = "\\ No newline at end of file"
+
+
+def _patch_lines(text: str) -> list[str]:
+    """Lines as a patch counts them: split on ``\\n`` only, endings kept.
+
+    ``str.splitlines`` also splits on ``\\r``, form feeds and Unicode
+    separators, which git does not treat as line ends.
+    """
+
+    lines = [f"{line}\n" for line in text.split("\n")]
+    lines[-1] = lines[-1].removesuffix("\n")
+    return lines if lines[-1] else lines[:-1]
+
+
+def _unified_diff(
+    before_text: str,
+    after_text: str,
+    filename: str,
+    *,
+    before_exists: bool = True,
+) -> str:
+    """A patch ``git apply`` reproduces the planned file from.
+
+    Each line keeps its own ending and gets no second one; a line without an
+    ending is followed by git's no-newline marker; a file that does not exist
+    yet is diffed from ``/dev/null``, never from one empty line.
+    """
+
+    if before_text == after_text:
         return ""
-    if not before_lines:
-        before_lines = [""]
     diff_lines = difflib.unified_diff(
-        before_lines,
-        after_lines,
-        fromfile=f"a/{filename}",
+        _patch_lines(before_text),
+        _patch_lines(after_text),
+        fromfile=f"a/{filename}" if before_exists else "/dev/null",
         tofile=f"b/{filename}",
-        lineterm="",
     )
-    return "".join(f"{item}\n" for item in diff_lines)
+    return "".join(
+        line if line.endswith("\n") else f"{line}\n{_NO_NEWLINE_AT_EOF}\n"
+        for line in diff_lines
+    )
 
 
 __all__ = ["SCOPE_ID_PLACEHOLDER", "build_setup_plan"]
