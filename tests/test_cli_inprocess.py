@@ -4718,9 +4718,16 @@ def test_cli_batch_result_none_no_progress(
         src = tmp_path / f"a{idx}.py"
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_fixed_executor(monkeypatch, _FixedFuture(value=None))
-    _run_main(monkeypatch, [str(tmp_path), "--processes", "2", "--no-progress"])
-    out = capsys.readouterr().out
-    assert_contains_all(out, "Failed to process batch item")
+    # A worker that answers with something other than a file result breaks an
+    # engine invariant: an internal error, never a skipped file the run goes
+    # on without (maintainer ruling 2026-10-26).
+    _assert_cli_exit(
+        monkeypatch,
+        [str(tmp_path), "--processes", "2", "--no-progress"],
+        expected_code=5,
+    )
+    out = " ".join(capsys.readouterr().out.split())
+    assert_contains_all(out, "INTERNAL ERROR", "result breaks an engine invariant")
 
 
 def test_cli_batch_result_none_progress(
@@ -4733,9 +4740,9 @@ def test_cli_batch_result_none_progress(
         src.write_text("def f():\n    return 1\n", "utf-8")
     _patch_dummy_progress(monkeypatch)
     _patch_fixed_executor(monkeypatch, _FixedFuture(value=None))
-    _run_main(monkeypatch, [str(tmp_path), "--processes", "2"])
-    out = capsys.readouterr().out
-    assert_contains_all(out, "Worker failed")
+    _assert_cli_exit(monkeypatch, [str(tmp_path), "--processes", "2"], expected_code=5)
+    out = " ".join(capsys.readouterr().out.split())
+    assert_contains_all(out, "INTERNAL ERROR", "result breaks an engine invariant")
 
 
 def test_cli_failed_batch_item_no_progress(

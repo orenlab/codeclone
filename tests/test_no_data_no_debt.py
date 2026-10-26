@@ -32,10 +32,11 @@ import pytest
 
 import codeclone.core.parallelism as core_parallelism
 from codeclone.contracts import HEALTH_WEIGHTS
-from codeclone.core._types import FileProcessResult, ProcessingResult
+from codeclone.core._types import ProcessingResult
 from codeclone.metrics.health import HealthInputs, compute_health
 from codeclone.models import HealthScore
 from codeclone.scanner import discover_python_files
+from tests import _worker_death_probe as probe
 from tests._pipeline_fixtures import analysis_boot, discover_and_process
 
 # ── health: a population that was never observed ────────────────────
@@ -415,10 +416,11 @@ def test_worker_death_retries_the_lost_files_instead_of_dropping_them(
     """Files lost to a dead worker are retried, never silently dropped.
 
     This pin used to require the four lost files to be counted as skipped.
-    The maintainer's ruling of 2026-10-23 on a dead worker replaced
-    "counted as lost" with "retried": a file the pool never returned is run
-    once more in the parent, so a recoverable death no longer truncates the
-    run. The population still closes -- found = analysed + skipped.
+    The maintainer's rulings of 2026-10-23 and 2026-10-26 replaced "counted
+    as lost" with "retried once, in an isolated child process": a file the
+    pool never returned is run again outside the parent, so a recoverable
+    death no longer truncates the run. The population still closes --
+    found = analysed + skipped.
     """
 
     files_found, processing = _dead_pool_run(tmp_path, monkeypatch)
@@ -433,18 +435,15 @@ def test_worker_death_grows_the_truncation_counter_when_the_retry_fails_too(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A file the retry cannot read either must be counted, not dropped."""
+    """A file the retry reads as a typed failure is counted, not dropped.
 
-    def _unreadable(filepath: str, *_args: object, **_kwargs: object) -> object:
-        return FileProcessResult(
-            filepath=filepath,
-            success=False,
-            source_content_digest=None,
-            error="Cannot read file: gone",
-            error_kind="source_read_error",
-        )
+    The isolated retry returning "unreadable" is a confirmed outcome for
+    that file, unlike a retry that dies: it is counted as skipped.
+    """
 
-    monkeypatch.setattr(core_parallelism, "_invoke_process_file", _unreadable)
+    monkeypatch.setattr(
+        core_parallelism, "_invoke_process_file", probe.unreadable_everywhere
+    )
     files_found, processing = _dead_pool_run(tmp_path, monkeypatch)
 
     assert files_found == 4

@@ -4,254 +4,369 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""A worker that dies mid-run must not make any file count twice.
+"""A worker that dies mid-run: isolated recovery, or an internal error.
 
-Maintainer ruling 2026-10-23 on the broken process pool:
+Maintainer ruling 2026-10-26. An incomplete analysis must never look
+complete, whatever made it incomplete. When the pool loses files:
 
-* only the files whose result the parent never accepted are retried;
-* an accepted result is never counted a second time;
-* a result that fails acceptance leaves nothing behind, so the retry
-  recomputes it whole;
-* every run keeps the population identity: found = cached + analysed +
-  skipped, with no file in two of those at once.
+* only results the parent fully accepted are kept, each counted once;
+* the files the pool did not return are retried once each, in one
+  single-use child process -- never in the parent, where a file that kills
+  a worker would kill the run;
+* the first file that child cannot return -- it died, or hung past the
+  deadline -- ends the run with an internal error (exit 5) that names the
+  file, the reason, the attempts and the unverified files. Not a
+  truncation, not an unverified measurement, and no second child: a limit
+  that kills every process does not turn into a chain of spawns;
+* a result the parent cannot accept breaks an engine invariant and ends the
+  run the same way.
 
-The death here is real: a ``ProcessPoolExecutor`` child calls ``os._exit``
-on a marked file, the parent sees ``BrokenProcessPool``. Before the fix the
-sequential fallback re-ran every file, so the batches already accepted were
-counted twice -- 25 files accounted out of 17 found, duplicated clone units,
-and with metrics on ``analyze`` refused the duplicated dead-code rows and the
-CLI died with exit 5.
+The deaths are real: children call ``os._exit``. Every probe records which
+process ran which file, so the parent's own pid can be shown absent.
 """
 
 from __future__ import annotations
 
+import multiprocessing
+import os
+import subprocess
+import sys
+import time
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 import codeclone.core.discovery as core_discovery
 import codeclone.core.parallelism as core_parallelism
+import codeclone.core.worker as core_worker
+from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.cache.store import Cache
 from codeclone.core._types import (
     DEFAULT_BATCH_SIZE,
-    BootstrapResult,
-    DiscoveryResult,
     ProcessingResult,
     _unit_to_group_item,
 )
-from codeclone.core.parallelism import process
+from codeclone.core.parallelism import WorkerRecoveryError, process
 from codeclone.core.pipeline import analyze
+from codeclone.paths.module_identity.inventory import build_module_registry
+from tests import _worker_death_probe as probe
 from tests._pipeline_fixtures import analysis_boot
-from tests._worker_death_probe import (
-    WORKER_KILLER_PREFIX,
-    die_in_worker_on_marked_file,
-)
 
 # Batches of four over seventeen files: [a00-a03] [a04-a07] [killer z00-z02]
 # [z03-z06] [z07]. Two whole batches are accepted before the death, the
 # third breaks the pool, and submitting the fourth raises.
 _MID_RUN_BATCH_SIZE = 4
 _KILLER_INDEX = 8
+_KILLER_NAME = f"{probe.WORKER_KILLER_PREFIX}_mod.py"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_FILES = 17
+#: More spawns than this is a chain, whatever the mechanism; the guard keeps a
+#: broken bound from spawning until the test times out.
+_SPAWN_CHAIN = 3
 
 
-def _write_tree(root: Path) -> list[str]:
+def _write_tree(root: Path) -> None:
     names = [f"a{index:02d}" for index in range(8)]
-    names.append(f"{WORKER_KILLER_PREFIX}_mod")
+    names.append(f"{probe.WORKER_KILLER_PREFIX}_mod")
     names.extend(f"z{index:02d}" for index in range(8))
     for index, name in enumerate(names):
         (root / f"{name}.py").write_text(
             f"def unused_{index}():\n    total = {index}\n    return total\n",
             "utf-8",
         )
-    return names
 
 
-def _boot(root: Path) -> BootstrapResult:
-    boot = analysis_boot(root, min_loc=1, min_stmt=1, skip_metrics=False)
-    boot.args.processes = 2
-    return boot
+class _Run:
+    """One ``process`` call over the tree, with what it spawned and ran."""
 
+    def __init__(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        invoke: Callable[..., object] | None,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+    ) -> None:
+        self.root = tmp_path / "proj"
+        self.root.mkdir()
+        self.probe_dir = tmp_path / "probe"
+        self.probe_dir.mkdir()
+        (self.probe_dir / "attempts.log").write_text("", "utf-8")
+        monkeypatch.setenv(probe.PROBE_DIR_ENV, str(self.probe_dir))
+        _write_tree(self.root)
+        self.boot = analysis_boot(self.root, min_loc=1, min_stmt=1, skip_metrics=False)
+        self.boot.args.processes = 2
+        cache = Cache(self.root / "cache.json", root=self.root)
+        self.discovery = core_discovery.discover(boot=self.boot, cache=cache)
+        killer_index = [
+            Path(path).name == _KILLER_NAME for path in self.discovery.files_to_process
+        ].index(True)
+        # Probe validity: the layout puts the death mid-run, on the pool path.
+        assert killer_index == _KILLER_INDEX
+        assert core_parallelism._should_use_parallel(_FILES, 2)
+        if invoke is not None:
+            monkeypatch.setattr(core_parallelism, "_invoke_process_file", invoke)
+        self.spawns = 0
+        real_spawn = core_parallelism._spawn_isolated_recovery
 
-def _discover(boot: BootstrapResult, root: Path) -> tuple[Cache, DiscoveryResult]:
-    cache = Cache(root / "cache.json", root=root)
-    return cache, core_discovery.discover(boot=boot, cache=cache)
+        def _counting_spawn(args: tuple[object, ...]) -> object:
+            self.spawns += 1
+            if self.spawns > _SPAWN_CHAIN:
+                raise AssertionError("recovery is spawning a chain of processes")
+            return real_spawn(args)
 
-
-def _run(
-    root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    kill: bool,
-    batch_size: int | None,
-) -> tuple[BootstrapResult, DiscoveryResult, ProcessingResult, list[str]]:
-    _write_tree(root)
-    boot = _boot(root)
-    cache, discovery = _discover(boot, root)
-    killer_index = [
-        Path(path).name.startswith(WORKER_KILLER_PREFIX)
-        for path in discovery.files_to_process
-    ].index(True)
-    # Probe validity: the layout must actually put the death mid-run.
-    assert killer_index == _KILLER_INDEX
-    assert core_parallelism._should_use_parallel(len(discovery.files_to_process), 2)
-    if kill:
         monkeypatch.setattr(
-            core_parallelism,
-            "_invoke_process_file",
-            die_in_worker_on_marked_file,
+            core_parallelism, "_spawn_isolated_recovery", _counting_spawn
         )
-    fallbacks: list[str] = []
-    processing = process(
-        boot=boot,
-        discovery=discovery,
-        cache=cache,
-        on_parallel_fallback=lambda exc: fallbacks.append(type(exc).__name__),
-        batch_size=DEFAULT_BATCH_SIZE if batch_size is None else batch_size,
-    )
-    return boot, discovery, processing, fallbacks
+        self.worker_errors: list[str] = []
+        self.fallbacks: list[str] = []
+        self.error: WorkerRecoveryError | None = None
+        self.processing: ProcessingResult | None = None
+        started = time.monotonic()
+        try:
+            self.processing = process(
+                boot=self.boot,
+                discovery=self.discovery,
+                cache=cache,
+                on_worker_error=self.worker_errors.append,
+                on_parallel_fallback=lambda exc: self.fallbacks.append(str(exc)),
+                batch_size=batch_size,
+            )
+        except WorkerRecoveryError as exc:
+            self.error = exc
+        self.elapsed = time.monotonic() - started
+
+    def pids_that_ran(self, name: str) -> list[int]:
+        lines = (self.probe_dir / "attempts.log").read_text("utf-8").splitlines()
+        return [
+            int(pid)
+            for pid, ran in (line.split(" ", 1) for line in lines)
+            if ran == name
+        ]
+
+    def accounting(self) -> dict[str, object]:
+        processing = self.processing
+        assert processing is not None, self.error
+        unit_keys = Counter(
+            (unit["filepath"], unit["qualname"]) for unit in processing.units
+        )
+        dead_keys = Counter(
+            (candidate.filepath, candidate.qualname, candidate.start_line)
+            for candidate in processing.dead_candidates
+        )
+        return {
+            "accounted": (
+                self.discovery.cache_hits
+                + processing.files_analyzed
+                + processing.files_skipped
+            ),
+            "analyzed": processing.files_analyzed,
+            "skipped": processing.files_skipped,
+            "failed_files": processing.failed_files,
+            "units": len(processing.units),
+            "units_counted_twice": sorted(
+                str(key[1]) for key, count in unit_keys.items() if count > 1
+            ),
+            "dead_rows_counted_twice": sorted(
+                str(key[1]) for key, count in dead_keys.items() if count > 1
+            ),
+            "analyzed_functions": processing.analyzed_functions,
+        }
 
 
-def _accounting(
-    discovery: DiscoveryResult, processing: ProcessingResult
-) -> dict[str, object]:
-    units_per_file = Counter(unit["filepath"] for unit in processing.units)
-    unit_keys = Counter(
-        (unit["filepath"], unit["qualname"]) for unit in processing.units
-    )
-    dead_keys = Counter(
-        (candidate.filepath, candidate.qualname, candidate.start_line)
-        for candidate in processing.dead_candidates
-    )
-    return {
-        "found": discovery.files_found,
-        "accounted": (
-            discovery.cache_hits + processing.files_analyzed + processing.files_skipped
-        ),
-        "analyzed": processing.files_analyzed,
-        "skipped": processing.files_skipped,
-        "failed_files": processing.failed_files,
-        "units_counted_twice": sorted(
-            str(qualname) for (_path, qualname), count in unit_keys.items() if count > 1
-        ),
-        "files_without_a_unit": sorted(
-            Path(path).name
-            for path in discovery.files_to_process
-            if units_per_file[path] == 0
-        ),
-        "dead_rows_counted_twice": sorted(
-            key[1] for key, count in dead_keys.items() if count > 1
-        ),
-        "analyzed_functions": processing.analyzed_functions,
-    }
+_COMPLETE: dict[str, object] = {
+    "accounted": _FILES,
+    "analyzed": _FILES,
+    "skipped": 0,
+    "failed_files": (),
+    "units": _FILES,
+    "units_counted_twice": [],
+    "dead_rows_counted_twice": [],
+    "analyzed_functions": _FILES,
+}
 
 
-def _complete(found: int) -> dict[str, object]:
-    return {
-        "found": found,
-        "accounted": found,
-        "analyzed": found,
-        "skipped": 0,
-        "failed_files": (),
-        "units_counted_twice": [],
-        "files_without_a_unit": [],
-        "dead_rows_counted_twice": [],
-        "analyzed_functions": found,
-    }
-
-
-def test_healthy_pool_counts_every_file_once_and_never_falls_back(
+def test_a_healthy_pool_counts_every_file_once_and_spawns_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Positive control: the same layout and batches, no death."""
+    """Positive control: same layout and batches, no death, no recovery."""
 
-    _boot_result, discovery, processing, fallbacks = _run(
-        tmp_path, monkeypatch, kill=False, batch_size=_MID_RUN_BATCH_SIZE
+    run = _Run(tmp_path, monkeypatch, invoke=None, batch_size=_MID_RUN_BATCH_SIZE)
+
+    assert (run.error, run.spawns, run.worker_errors, run.fallbacks) == (
+        None,
+        0,
+        [],
+        [],
     )
-
-    assert fallbacks == []
-    assert _accounting(discovery, processing) == _complete(17)
+    assert run.accounting() == _COMPLETE
 
 
-def test_worker_death_mid_run_counts_every_file_exactly_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "batch_size", [_MID_RUN_BATCH_SIZE, DEFAULT_BATCH_SIZE], ids=["mid-run", "last"]
+)
+def test_a_worker_death_is_recovered_in_one_isolated_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, batch_size: int
 ) -> None:
-    boot, discovery, processing, fallbacks = _run(
-        tmp_path, monkeypatch, kill=True, batch_size=_MID_RUN_BATCH_SIZE
+    run = _Run(
+        tmp_path, monkeypatch, invoke=probe.die_once_in_worker, batch_size=batch_size
     )
 
-    # The probe reached the mechanism: the pool really broke.
-    assert fallbacks == ["BrokenProcessPool"]
-    assert _accounting(discovery, processing) == _complete(17)
+    assert run.error is None
+    assert run.worker_errors, "no worker died; the probe proves nothing"
+    assert run.spawns == 1
+    assert run.fallbacks == []
+    assert run.accounting() == _COMPLETE
+    killer_pids = run.pids_that_ran(_KILLER_NAME)
+    assert len(killer_pids) == 2 and len(set(killer_pids)) == 2
+    assert os.getpid() not in killer_pids
     # The duplicated dead-code rows were what turned this into exit 5.
-    result = analyze(boot=boot, discovery=discovery, processing=processing)
-    assert result.files_analyzed_or_cached == 17
+    assert run.processing is not None
+    result = analyze(boot=run.boot, discovery=run.discovery, processing=run.processing)
+    assert result.files_analyzed_or_cached == _FILES
 
 
-def test_worker_death_in_the_last_batch_retries_the_lost_files(
+def _assert_internal_error(
+    run: _Run, *, reason: str, attempts: int
+) -> WorkerRecoveryError:
+    error = run.error
+    assert error is not None and run.processing is None
+    assert Path(error.filepath).name == _KILLER_NAME
+    assert reason in error.reason, error.reason
+    assert error.attempts == attempts
+    assert Path(error.unverified[0]).name == _KILLER_NAME
+    message = str(error)
+    assert _KILLER_NAME in message
+    assert f"attempts on this file: {attempts}" in message
+    assert f"unverified files: {len(error.unverified)}" in message
+    assert os.getpid() not in run.pids_that_ran(_KILLER_NAME)
+    assert multiprocessing.active_children() == []
+    return error
+
+
+def test_a_second_death_is_an_internal_error_naming_the_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A death with no later submission still leaves files unconfirmed.
-
-    One batch holds all seventeen files, so no ``submit`` raises after the
-    death. The killer and whatever was in flight beside it were never
-    accepted; they are retried, not written off as lost.
-    """
-
-    _boot_result, discovery, processing, fallbacks = _run(
-        tmp_path, monkeypatch, kill=True, batch_size=None
+    run = _Run(
+        tmp_path,
+        monkeypatch,
+        invoke=probe.die_always_in_worker,
+        batch_size=_MID_RUN_BATCH_SIZE,
     )
 
-    assert fallbacks == ["BrokenProcessPool"]
-    assert _accounting(discovery, processing) == _complete(17)
+    _assert_internal_error(run, reason="exited with code 13", attempts=2)
+    assert run.spawns == 1
 
 
-def test_a_result_that_fails_acceptance_leaves_nothing_behind(
+def test_a_hung_retry_is_an_internal_error_after_the_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A refusal half-way through accepting a result must not leave a part.
+    monkeypatch.setattr(core_parallelism, "ISOLATED_RECOVERY_TIMEOUT_SECONDS", 2.0)
 
-    The second unit of one file refuses conversion, once. Before the refusal
-    the parent had already counted the file and kept its first unit; the
-    retry then counted it again. Acceptance now finishes everything that can
-    refuse before it accumulates anything.
-    """
+    run = _Run(tmp_path, monkeypatch, invoke=probe.hang_after_first_death)
 
-    names = _write_tree(tmp_path)
-    target = tmp_path / f"{names[3]}.py"
-    target.write_text(
-        "def first():\n    one = 1\n    return one\n\n\n"
-        "def second():\n    two = 2\n    return two\n",
-        "utf-8",
+    _assert_internal_error(run, reason="no result within 2 s", attempts=2)
+    assert run.spawns == 1
+    assert run.elapsed < probe.HANG_SECONDS / 2
+
+
+def test_a_limit_that_kills_every_process_spawns_one_recovery_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every child dies whatever it runs. Recovery spawns one process, its
+    first file fails, and the run ends -- it does not try file after file."""
+
+    run = _Run(tmp_path, monkeypatch, invoke=probe.die_on_every_file)
+
+    error = run.error
+    assert error is not None and run.processing is None
+    assert run.spawns == 1
+    assert "exited with code 13" in error.reason
+    assert sorted(Path(path).name for path in error.unverified) == sorted(
+        Path(path).name for path in run.discovery.files_to_process
     )
-    boot = _boot(tmp_path)
-    cache, discovery = _discover(boot, tmp_path)
-    real_convert = _unit_to_group_item
+    # Seventeen unverified files: the message names ten and counts the rest.
+    assert str(error).endswith(f"and {_FILES - 10} more)")
+    assert multiprocessing.active_children() == []
+
+
+def test_a_result_for_another_file_is_an_internal_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = _Run(tmp_path, monkeypatch, invoke=probe.answer_for_another_file)
+
+    _assert_internal_error(run, reason="result breaks an engine invariant", attempts=1)
+    assert run.spawns == 0
+
+
+def test_a_result_the_parent_cannot_accept_is_an_internal_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal half-way through acceptance is not retried: it breaks an
+    engine invariant, and the run ends without a result to misread."""
+
     refused: list[str] = []
 
-    def _refuse_once(unit: object) -> object:
-        qualname = getattr(unit, "qualname", "")
-        if qualname.endswith(":second") and not refused:
-            refused.append(qualname)
-            raise RuntimeError("unit refused once")
-        return real_convert(unit)  # type: ignore[arg-type]
+    def _refuse_the_killer(unit: object) -> object:
+        if str(getattr(unit, "filepath", "")).endswith(_KILLER_NAME) and not refused:
+            refused.append(str(getattr(unit, "qualname", "")))
+            raise RuntimeError("unit refused")
+        return _unit_to_group_item(unit)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(core_parallelism, "_unit_to_group_item", _refuse_once)
-    errors: list[str] = []
-    processing = process(
-        boot=boot,
-        discovery=discovery,
-        cache=cache,
-        on_worker_error=errors.append,
-    )
+    monkeypatch.setattr(core_parallelism, "_unit_to_group_item", _refuse_the_killer)
+
+    run = _Run(tmp_path, monkeypatch, invoke=None)
 
     assert refused, "the refusal never fired; the probe proves nothing"
-    assert errors == ["unit refused once"]
-    accounting = _accounting(discovery, processing)
-    expected = _complete(17)
-    expected["analyzed_functions"] = 18
-    assert accounting == expected
-    assert processing.analyzed_lines == sum(
-        len(Path(path).read_text("utf-8").splitlines())
-        for path in discovery.files_to_process
+    _assert_internal_error(
+        run, reason="result breaks an engine invariant: unit refused", attempts=1
+    )
+    assert run.spawns == 0
+
+
+def test_the_recovery_deadline_dwarfs_the_cost_of_the_largest_file() -> None:
+    """The deadline is derived, not chosen: a fresh child's start-up plus the
+    slowest file of this repository, with ample headroom. Measured here, on
+    whatever machine runs the suite, so the rule is checked, not the number.
+    """
+
+    started = time.monotonic()
+    subprocess.run(
+        [sys.executable, "-c", "import codeclone.core.parallelism"],
+        check=True,
+        cwd=str(_REPO_ROOT),
+        timeout=120,
+    )
+    startup = time.monotonic() - started
+    largest = max(
+        (path for path in (_REPO_ROOT / "tests").glob("test_*.py")),
+        key=lambda path: path.stat().st_size,
+    )
+    registry = build_module_registry(root=_REPO_ROOT)
+    core_worker._install_module_registry(registry)
+    started = time.monotonic()
+    result = core_worker._invoke_process_file(
+        str(largest),
+        str(_REPO_ROOT),
+        NormalizationConfig(),
+        10,
+        6,
+        collect_structural_findings=True,
+        collect_api_surface=True,
+        api_include_private_modules=False,
+        collect_near_miss=False,
+        collect_renamed_structure=False,
+        block_min_loc=20,
+        block_min_stmt=8,
+        segment_min_loc=20,
+        segment_min_stmt=10,
+    )
+    worst_file = time.monotonic() - started
+
+    assert result.success, result.error
+    assert (
+        10 * (startup + worst_file)
+        <= core_parallelism.ISOLATED_RECOVERY_TIMEOUT_SECONDS
     )
