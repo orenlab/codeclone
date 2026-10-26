@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Literal
 
 COMMENT_MARKER = "<!-- codeclone-report -->"
-DEFAULT_CODECLONE_PACKAGE_VERSION = "2.0.2"
+DEFAULT_CODECLONE_PACKAGE_VERSION = "2.0.3"
 LOCKED_REQUIREMENTS_FILE = "requirements.txt"
 
 

@@ -5,6 +5,10 @@
 `2.0.3` is a security release and the last planned release of the 2.x line.
 Upgrade to it now; plan the move to 3.0.
 
+`2.0.3` is the last planned release of the 2.x line. It bounds and pins what
+CodeClone installs, so the release keeps installing the same, known-good bytes
+after 2.x stops receiving patches. Analysis behavior is unchanged.
+
 ### Security
 
 - The Codex plugin launcher, the Claude Desktop bundle and the VS Code
@@ -87,6 +91,26 @@ Upgrade to it now; plan the move to 3.0.
   the extension, plugin and Action READMEs link the `v2.0.3` documentation
   instead of site pages that no longer exist.
 
+### Dependencies
+
+- Cap every runtime dependency below its next major version: `orjson<4`,
+  `packaging<27`, `pygments<3`, `rich<16`, `tomli<3`. Lower bounds are
+  unchanged and already above every known advisory.
+- Raise the `mcp` extra to `mcp>=1.30.0,<2`, the first 1.x release without
+  known advisories.
+- Refresh `uv.lock` to releases at least 14 days old (`exclude-newer`), with
+  reviewed security exceptions for `certifi`, `filelock` and `virtualenv`.
+- Refresh 8 npm packages in the VS Code extension lock after byte-level
+  verification; the extension bundle itself ships no npm packages.
+
+### GitHub Action
+
+- Install the shipped version from `requirements.txt` next to the action: the
+  release wheel and every runtime dependency at an exact version, each file
+  pinned by SHA-256, with `pip install --require-hashes --only-binary :all:`.
+- Move the composite action to the Node 24 releases of `setup-python`,
+  `upload-sarif` and `github-script`, pinned to exact commits.
+
 ### Internal
 
 - Publish `server.json` to the MCP Registry after the PyPI release, using a
@@ -100,6 +124,14 @@ Upgrade to it now; plan the move to 3.0.
 - `ty check codeclone .github/actions benchmarks` reports no diagnostics: the
   57 findings of ty 0.0.84 were fixed in the code and annotations, with no
   suppressions and no change in behaviour.
+- Build the release wheel reproducibly (fixed timestamps and file modes,
+  hash-pinned build requirements) and refuse to publish a wheel whose SHA-256
+  differs from the one the Action pins.
+- Pin every action in the workflows to an exact commit and install CI
+  dependencies with `uv sync --locked --no-build`.
+- Bump the Python package and composite GitHub Action default install version to
+  `2.0.3`.
+
 
 ## [2.0.2] - 2026-05-19
 
