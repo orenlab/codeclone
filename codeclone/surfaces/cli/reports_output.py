@@ -300,6 +300,21 @@ def _report_path_origins(argv: Sequence[str]) -> dict[str, ReportPathOrigin | No
         "--sarif": "sarif",
         "--text": "text",
     }
+
+    def report_field(flag: str) -> str | None:
+        # argparse accepted this argv, and it accepts any unique prefix of a
+        # long option (``allow_abbrev``): ``--htm`` is ``--html``. A prefix
+        # shared with another option was refused as ambiguous before this
+        # scan runs, so a long option that prefixes a report flag is that
+        # flag. A token that is not a long option (a value, the root) never
+        # is, not even an empty one that every name starts with.
+        if not flag.startswith("--"):
+            return None
+        return next(
+            (field for name, field in flag_to_field.items() if name.startswith(flag)),
+            None,
+        )
+
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -307,12 +322,12 @@ def _report_path_origins(argv: Sequence[str]) -> dict[str, ReportPathOrigin | No
             break
         if "=" in token:
             flag, _value = token.split("=", maxsplit=1)
-            field_name = flag_to_field.get(flag)
+            field_name = report_field(flag)
             if field_name is not None:
                 origins[field_name] = "explicit"
             index += 1
             continue
-        field_name = flag_to_field.get(token)
+        field_name = report_field(token)
         if field_name is None:
             index += 1
             continue
