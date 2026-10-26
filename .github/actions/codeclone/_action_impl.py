@@ -185,24 +185,29 @@ def resolve_install_target(
     if action_root == workspace_root:
         return InstallTarget(requirement=str(action_root), source="repo")
 
-    locked_requirements = str(Path(action_path) / LOCKED_REQUIREMENTS_FILE)
     normalized_version = package_version.strip()
     if normalized_version:
         return InstallTarget(
             requirement=f"codeclone=={normalized_version}",
             source="pypi-version",
-            requirements_file=(
-                locked_requirements
-                if normalized_version == DEFAULT_CODECLONE_PACKAGE_VERSION
-                else ""
-            ),
+            requirements_file=_locked_requirements(action_path, normalized_version),
         )
 
     return InstallTarget(
         requirement=f"codeclone=={DEFAULT_CODECLONE_PACKAGE_VERSION}",
         source="pypi-default",
-        requirements_file=locked_requirements,
+        requirements_file=_locked_requirements(
+            action_path, DEFAULT_CODECLONE_PACKAGE_VERSION
+        ),
     )
+
+
+def _locked_requirements(action_path: str, version: str) -> str:
+    """Return the hash-locked install set when ``version`` is the shipped one."""
+
+    if version != DEFAULT_CODECLONE_PACKAGE_VERSION:
+        return ""
+    return str(Path(action_path) / LOCKED_REQUIREMENTS_FILE)
 
 
 def run_codeclone(inputs: ActionInputs) -> RunResult:
