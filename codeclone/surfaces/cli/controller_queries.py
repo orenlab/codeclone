@@ -54,7 +54,10 @@ def validate_controller_query_flags(
     if strictness_explicit and not patch_verify:
         _contract_error(printer, ui.ERR_STRICTNESS_PATCH_VERIFY_ONLY)
     session_stats = bool_attr(args, "session_stats")
-    audit = bool_attr(args, "audit")
+    # Both spellings run the same pre-analysis query, so both are checked:
+    # with ``--audit`` alone here, ``--audit-json --patch-verify`` answered
+    # the audit and exited 0 without verifying anything.
+    audit = bool_attr(args, "audit") or bool_attr(args, "audit_json")
     if session_stats and (blast_radius or patch_verify or audit):
         _contract_error(printer, ui.ERR_SESSION_STATS_COMBINED)
     if audit and (blast_radius or patch_verify):
