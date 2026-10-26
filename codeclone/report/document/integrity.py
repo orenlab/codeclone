@@ -950,6 +950,20 @@ def _tier_digests(
     }
 
 
+def _digest_equal(computed: str, stored: str) -> bool:
+    """Constant-time equality where a non-ASCII stored value is a mismatch.
+
+    ``hmac.compare_digest`` raises ``TypeError`` for a ``str`` holding a
+    non-ASCII character, and the stored digest is read from an untrusted
+    document. A computed digest is lowercase hex, so a stored value that is
+    not ASCII cannot equal it.
+    """
+
+    if not stored.isascii():
+        return False
+    return hmac.compare_digest(computed, stored)
+
+
 def _tier_mismatch(
     digests: Mapping[str, object],
     expected: Mapping[str, ReportDigest],
@@ -958,8 +972,8 @@ def _tier_mismatch(
 
     for name in ("analysis_facts", "comparison", "evaluation"):
         actual_value = _digest_value(digests, name)
-        if actual_value is None or not hmac.compare_digest(
-            actual_value, expected[name].value
+        if actual_value is None or not _digest_equal(
+            expected[name].value, actual_value
         ):
             return f"report {name} digest mismatch"
     return None
@@ -1077,9 +1091,8 @@ def _verify_envelope(document: Mapping[str, object]) -> str | None:
         payload=_document_with_envelope_sentinel(document),
     )
     actual_envelope = _digest_value(digests, "envelope")
-    if actual_envelope is None or not hmac.compare_digest(
-        actual_envelope,
-        expected_envelope.value,
+    if actual_envelope is None or not _digest_equal(
+        expected_envelope.value, actual_envelope
     ):
         return "report envelope digest mismatch"
     return None

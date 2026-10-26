@@ -236,12 +236,25 @@ def lane_digest_matches(name: str, lane: BaselineLaneInput) -> bool:
         descriptor=lane.descriptor,
         payload=lane.payload,
     )
-    return hmac.compare_digest(actual.value, lane.digest.value)
+    return _digest_equal(actual.value, lane.digest.value)
 
 
 def root_digest_matches(container: BaselineContainerV3Input) -> bool:
     actual = compute_input_root_digest(container)
-    return hmac.compare_digest(actual.value, container.meta.root_digest.value)
+    return _digest_equal(actual.value, container.meta.root_digest.value)
+
+
+def _digest_equal(computed: str, stored: str) -> bool:
+    """Constant-time equality where a non-ASCII stored value is a mismatch.
+
+    ``hmac.compare_digest`` raises ``TypeError`` for a ``str`` holding a
+    non-ASCII character. The stored digest is untrusted input; a computed one
+    is lowercase hex, so a stored value that is not ASCII cannot equal it.
+    """
+
+    if not stored.isascii():
+        return False
+    return hmac.compare_digest(computed, stored)
 
 
 def lane_document(lane: BaselineLane) -> dict[str, object]:
