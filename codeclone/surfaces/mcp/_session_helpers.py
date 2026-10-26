@@ -32,6 +32,7 @@ from ...domain.source_scope import (
     SOURCE_KIND_OTHER,
 )
 from ...models import MetricsDiff
+from ...utils.display_text import markdown_code
 from ._session_runtime import resolve_cache_path
 from ._session_shared import (
     _COMPACT_ITEM_EMPTY_VALUES,
@@ -895,7 +896,7 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
                 (
                     f"- **{str(item.get('severity', 'info')).upper()}** "
                     f"{item.get('kind', 'finding')} in "
-                    f"`{_finding_display_location(item)}`"
+                    f"{markdown_code(_finding_display_location(item))}"
                 )
                 for item in changed_items[:10]
             ]
@@ -907,7 +908,7 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
         lines.extend(
             [
                 f"- {item.get('kind', 'finding')} in "
-                f"`{_finding_display_location(item)}`"
+                f"{markdown_code(_finding_display_location(item))}"
                 for item in resolved[:10]
             ]
         )
@@ -915,5 +916,5 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
     if not blocking_gates:
         lines.append("- none")
     else:
-        lines.extend([f"- `{reason}`" for reason in blocking_gates])
+        lines.extend([f"- {markdown_code(reason)}" for reason in blocking_gates])
     return "\n".join(lines)

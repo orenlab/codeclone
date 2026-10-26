@@ -174,8 +174,34 @@ runs:
       env:
         INSTALL_SPEC: ${{ steps.resolve-install.outputs.install-spec }}
         INSTALL_SOURCE: ${{ steps.resolve-install.outputs.install-source }}
+        # The runner's own pip may vendor a CA bundle that still trusts the
+        # eMudhra chains revoked in October 2026, so it never downloads here:
+        # pip 26.2.2 is fetched directly, checked against its published
+        # SHA-256, and installed from the local file.
+        PIP_BOOTSTRAP_URL: https://files.pythonhosted.org/packages/3f/06/3e4420302363fbb71be3c7f35ce042f54bfca330e3e66b3a2e3c4cca579f/pip-26.2.2-py3-none-any.whl
+        PIP_BOOTSTRAP_SHA256: fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70
       run: |
-        python -m pip install --upgrade pip
+        pip_wheel="${RUNNER_TEMP}/pip-26.2.2-py3-none-any.whl"
+        curl --fail --silent --show-error --location --retry 3 --proto '=https' \
+          --output "${pip_wheel}" "${PIP_BOOTSTRAP_URL}"
+        PIP_BOOTSTRAP_WHEEL="${pip_wheel}" python - <<'PY'
+        import hashlib
+        import os
+        import sys
+
+        wheel = os.environ["PIP_BOOTSTRAP_WHEEL"]
+        expected = os.environ["PIP_BOOTSTRAP_SHA256"]
+        with open(wheel, "rb") as handle:
+            actual = hashlib.sha256(handle.read()).hexdigest()
+        if actual != expected:
+            print(
+                f"Refusing to install pip from {wheel}: its SHA-256 is {actual}, "
+                f"expected {expected}.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        PY
+        python -m pip install --no-index --no-deps --disable-pip-version-check "${pip_wheel}"
         echo "Installing CodeClone from ${INSTALL_SOURCE}: ${INSTALL_SPEC}"
         python -m pip install "${INSTALL_SPEC}"
 

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from typing import NoReturn
 
 from ... import __version__
 from ... import ui_messages as ui
@@ -31,6 +33,7 @@ from ...core.pipeline import analyze
 from ...core.reporting import gate, report
 from ...models import MetricsDiff
 from ...report.html import build_html_report
+from . import analysis_population as cli_population
 from . import baseline_state as cli_baseline_state
 from . import changed_scope as cli_changed_scope
 from . import console as cli_console
@@ -234,7 +237,7 @@ def _enforce_gating(
     boot: BootstrapResult,
     analysis: AnalysisResult,
     processing: PipelineProcessingResult,
-    source_read_contract_failure: bool,
+    incomplete_analysis_failures: Sequence[str],
     baseline_failure_code: ExitCode | None,
     metrics_baseline_failure_code: ExitCode | None,
     new_func: set[str],
@@ -249,7 +252,7 @@ def _enforce_gating(
         boot=boot,
         analysis=analysis,
         processing=processing,
-        source_read_contract_failure=source_read_contract_failure,
+        incomplete_analysis_failures=incomplete_analysis_failures,
         baseline_failure_code=baseline_failure_code,
         metrics_baseline_failure_code=metrics_baseline_failure_code,
         new_func=new_func,
@@ -262,6 +265,55 @@ def _enforce_gating(
         print_verbose_clone_hashes_fn=_print_verbose_clone_hashes,
         clone_threshold_total=clone_threshold_total,
     )
+
+
+def _allowed_syntax_errors_or_exit(args: object) -> frozenset[str]:
+    raw_paths = getattr(args, "allow_syntax_error", None) or ()
+    try:
+        return cli_population.allowed_relative_paths(
+            raw_paths, cli_startup.repository_roots(args)
+        )
+    except cli_population.ExclusionPathError as exc:
+        _exit_syntax_exclusion_refused(exc)
+
+
+def _exit_syntax_exclusion_refused(exc: cli_population.ExclusionPathError) -> NoReturn:
+    _console().print(
+        ui.fmt_contract_error(
+            ui.fmt_syntax_exclusion_refused(path=exc.path, reason=exc.reason)
+        )
+    )
+    sys.exit(ExitCode.CONTRACT_ERROR)
+
+
+def _print_gate_population_notes(population: cli_population.GatePopulation) -> None:
+    printer = _console()
+    for path, kind in population.not_excludable:
+        printer.print(
+            ui.fmt_cli_runtime_warning(
+                ui.fmt_syntax_exclusion_not_excludable(path=path, kind=kind)
+            )
+        )
+    for path in population.unused:
+        printer.print(
+            ui.fmt_cli_runtime_warning(ui.fmt_syntax_exclusion_unused(path=path))
+        )
+
+
+def _print_analysis_scope(
+    population: cli_population.GatePopulation, *, declared: int, verified: int
+) -> None:
+    """Show, apart from the summary, that the verified scope is not the full one."""
+
+    if not population.excluded:
+        return
+    printer = _console()
+    for line in ui.analysis_scope_lines(
+        declared=declared,
+        verified=verified,
+        excluded=[path for path, _kind in population.excluded],
+    ):
+        printer.print(line, markup=False)
 
 
 def _main_impl() -> None:
@@ -288,6 +340,7 @@ def _main_impl() -> None:
     args = ap.parse_args()
 
     root_path = _resolve_existing_root_path(args=args, printer=_console())
+    allowed_syntax_errors = _allowed_syntax_errors_or_exit(args)
     pyproject_config = _load_pyproject_config_or_exit(
         root_path=root_path,
         load_pyproject_config_fn=load_pyproject_config,
@@ -371,10 +424,25 @@ def _main_impl() -> None:
         cache=cache,
     )
 
-    source_read_contract_failure = (
-        bool(processing_result.source_read_failures)
-        and gating_mode_enabled(args)
-        and not args.update_baseline
+    # Every file found and not analysed is missing from the population the
+    # gates judge. In gating mode each one ends the run in the same contract
+    # error as unreadable source, unless it is a syntax error the caller
+    # excluded by name (cli/analysis_population.py owns that decision).
+    try:
+        gate_population = cli_population.resolve_gate_population(
+            discovered=discovery_result.all_file_paths,
+            failures=processing_result.failures,
+            traversal_failures=discovery_result.skipped_warnings,
+            allowed=allowed_syntax_errors,
+            resolved_root=root_path,
+        )
+    except cli_population.ExclusionPathError as exc:
+        _exit_syntax_exclusion_refused(exc)
+    _print_gate_population_notes(gate_population)
+    incomplete_analysis_failures = (
+        gate_population.blocking
+        if gating_mode_enabled(args) and not args.update_baseline
+        else ()
     )
     shared_baseline_payload = (
         baseline_inputs.shared_baseline_payload
@@ -457,6 +525,11 @@ def _main_impl() -> None:
         print_metrics_fn=_print_metrics,
     )
 
+    _print_analysis_scope(
+        gate_population,
+        declared=discovery_result.files_found,
+        verified=processing_result.files_analyzed + discovery_result.cache_hits,
+    )
     report_artifacts = report(
         boot=boot,
         discovery=discovery_result,
@@ -470,6 +543,7 @@ def _main_impl() -> None:
         coverage_adoption_diff_available=diff_context.coverage_adoption_diff_available,
         api_surface_diff_available=diff_context.api_surface_diff_available,
         include_report_document=bool(changed_paths),
+        excluded_files=gate_population.excluded,
     )
     changed_clone_gate = resolve_changed_clone_gate(
         args=args,
@@ -495,7 +569,7 @@ def _main_impl() -> None:
         boot=boot,
         analysis=analysis_result,
         processing=processing_result,
-        source_read_contract_failure=source_read_contract_failure,
+        incomplete_analysis_failures=incomplete_analysis_failures,
         baseline_failure_code=baseline_state.failure_code,
         metrics_baseline_failure_code=metrics_baseline_state.failure_code,
         new_func=(
@@ -514,6 +588,8 @@ def _main_impl() -> None:
             changed_clone_gate.total_clone_groups if changed_clone_gate else None
         ),
     )
+    if gate_population.excluded and gating_mode_enabled(args):
+        _console().print(ui.GATE_PASS_FOR_ANALYZED_SCOPE, markup=False)
 
     notice_new_clones_count = (
         len(changed_clone_gate.new_func) + len(changed_clone_gate.new_block)

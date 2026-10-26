@@ -72,6 +72,13 @@ Refs:
 
 - Legacy top-level baselines (`functions`/`blocks` at root) are untrusted and require regeneration.
 - Baseline writes are atomic (`*.tmp` + `os.replace`).
+- `--update-baseline` / `--update-metrics-baseline` never write through a link
+  the repository planted: a baseline path spelled inside the analysed root that
+  a symbolic link (the file itself or a directory on the way) leads outside it is
+  refused with a contract error (exit `2`) and nothing is written. Pass the
+  outside path explicitly with `--baseline` / `--metrics-baseline` to write
+  there. Reading a baseline through such a link still works, so a monorepo can
+  share one baseline between packages.
 - Baseline diff is set-based and deterministic.
 
 Refs:

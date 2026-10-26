@@ -101,7 +101,7 @@ from ...report.gates.evaluator import evaluate_gates as _evaluate_report_gates
 from ...report.gates.evaluator import summarize_metrics_diff as _summarize_metrics_diff
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
-from ...utils.git_diff import validate_git_diff_ref
+from ...utils.git_diff import run_git_diff_name_only, validate_git_diff_ref
 from .payloads import paginate, resolve_finding_id, short_id
 
 AnalysisMode = Literal["full", "clones_only"]
@@ -878,14 +878,7 @@ def _git_diff_lines_payload(
     except ValueError as exc:
         raise MCPGitDiffError(str(exc)) from exc
     try:
-        completed = subprocess.run(
-            ["git", "diff", "--name-only", validated_ref, "--"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        completed = run_git_diff_name_only(root_path, validated_ref, timeout=30)
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise MCPGitDiffError(
             f"Unable to resolve changed paths from git diff ref '{validated_ref}'."

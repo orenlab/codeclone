@@ -115,6 +115,27 @@ class FileProcessResult:
     structural_findings: list[StructuralFindingGroup] | None = None
 
 
+#: The one skip reason a trusted caller may exclude, file by file, from a gate:
+#: the interpreter running CodeClone rejected the file's syntax. Every other
+#: reason -- and any reason not proven -- fails a gate.
+SKIP_KIND_SYNTAX_ERROR = "syntax_error"
+#: Parsing the file ran out of time: a resource limit, never excludable.
+SKIP_KIND_PARSE_TIMEOUT = "parse_timeout"
+#: A worker process failed without returning a result for the file.
+SKIP_KIND_WORKER_CRASH = "worker_crash"
+#: A failed result that named no reason.
+SKIP_KIND_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class FileFailure:
+    """A file that was found and not analysed, with the reason it was not."""
+
+    filepath: str
+    kind: str
+    message: str
+
+
 @dataclass(frozen=True, slots=True)
 class ProcessingResult:
     units: tuple[GroupItem, ...]
@@ -140,6 +161,7 @@ class ProcessingResult:
     api_modules: tuple[ModuleApiSurface, ...] = ()
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
     source_stats_by_file: tuple[tuple[str, int, int, int, int], ...] = ()
+    failures: tuple[FileFailure, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

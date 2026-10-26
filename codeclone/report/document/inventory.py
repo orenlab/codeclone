@@ -94,14 +94,24 @@ def _build_inventory_payload(
         )
         if path is not None
     ]
+    skipped = _as_int(files_map.get("skipped"))
     return {
         "files": {
             "total_found": _as_int(files_map.get("total_found"), len(file_list)),
             "analyzed": _as_int(files_map.get("analyzed")),
             "cached": cached_files,
-            "skipped": _as_int(files_map.get("skipped")),
+            "skipped": skipped,
             "source_io_skipped": _as_int(files_map.get("source_io_skipped")),
+            "verified": _as_int(
+                files_map.get("verified"),
+                _as_int(files_map.get("analyzed")) + cached_files,
+            ),
+            "excluded": _as_int(files_map.get("excluded")),
+            "full_scope_verified": bool(
+                files_map.get("full_scope_verified", skipped == 0)
+            ),
         },
+        "excluded_files": _excluded_files_payload(inventory_map.get("excluded_files")),
         "code": _derive_inventory_code_counts(
             metrics_payload=metrics_payload,
             inventory_code=code_map,
@@ -113,6 +123,20 @@ def _build_inventory_payload(
             "items": file_registry,
         },
     }
+
+
+def _excluded_files_payload(value: object) -> list[dict[str, str]]:
+    """Every file the trusted caller excluded, with its reason, by path."""
+
+    rows = [
+        {
+            "path": str(row.get("path", "")),
+            "reason": str(row.get("reason", "")),
+            "authorized_by": str(row.get("authorized_by", "")),
+        }
+        for row in map(_as_mapping, _as_sequence(value))
+    ]
+    return sorted(rows, key=lambda row: (row["path"], row["reason"]))
 
 
 def _baseline_is_trusted(meta: Mapping[str, object]) -> bool:

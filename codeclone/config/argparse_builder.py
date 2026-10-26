@@ -48,6 +48,12 @@ def _add_option(
         )
         if option.value_type is not None:
             argument_kwargs["type"] = option.value_type
+    elif option.cli_kind == "append":
+        argument_kwargs.update(
+            dest=option.dest,
+            action="append",
+            metavar=option.metavar,
+        )
     elif option.cli_kind == "optional_path":
         argument_kwargs.update(
             dest=option.dest,

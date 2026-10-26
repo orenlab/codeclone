@@ -19,6 +19,8 @@ from ..primitives.escape import _escape_html, _meta_display
 from ..widgets.glossary import glossary_tip
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .._context import ReportContext
 
 _as_mapping = _coerce.as_mapping
@@ -132,6 +134,38 @@ def build_topbar_provenance_summary(ctx: ReportContext) -> tuple[str, str, str]:
     return status_label, bl_color, tooltip
 
 
+def _analysis_scope_rows(inventory: Mapping[str, object]) -> list[tuple[str, object]]:
+    """The verified scope, when the caller excluded files from it.
+
+    The row renderer escapes every value, so an excluded path stays text.
+    """
+
+    excluded = [
+        _as_mapping(row) for row in _as_sequence(inventory.get("excluded_files"))
+    ]
+    if not excluded:
+        return []
+    files = _as_mapping(inventory.get("files"))
+    return [
+        ("Analysis scope", f"{files.get('total_found')} files"),
+        ("Analyzed", files.get("verified")),
+        ("Excluded (explicitly authorized)", files.get("excluded")),
+        ("Gates", "evaluated over the analyzed scope only"),
+        (
+            "Full scope verified",
+            "YES" if files.get("full_scope_verified") is True else "NO",
+        ),
+        (
+            "Excluded files",
+            "; ".join(
+                f"{row.get('path')} ({row.get('reason')}, authorized by "
+                f"{row.get('authorized_by')})"
+                for row in excluded
+            ),
+        ),
+    ]
+
+
 def render_meta_panel(ctx: ReportContext) -> str:
     """Build the collapsible Report Provenance panel."""
     meta = ctx.meta
@@ -190,6 +224,7 @@ def render_meta_panel(ctx: ReportContext) -> str:
         ("Health score", _meta_pick(meta.get("health_score"))),
         ("Health grade", _meta_pick(meta.get("health_grade"))),
         ("Source IO skipped", _meta_pick(meta.get("files_skipped_source_io"))),
+        *_analysis_scope_rows(ctx.inventory_map),
     ]
 
     _bl_status = _meta_pick(meta.get("baseline_status"), baseline_meta.get("status"))

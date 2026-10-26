@@ -13,7 +13,7 @@ directly, including `Coverage Join` facts and the optional `coverage` help topic
 |------------------------------|----------------------------------------------------|
 | `.codex-plugin/plugin.json`  | Plugin metadata and prompts                        |
 | `.mcp.json`                  | Local stdio MCP definition                         |
-| `scripts/launch_mcp`         | Shell-free workspace-first launcher bootstrap      |
+| `scripts/launch_mcp`         | Shell-free trusted-launcher bootstrap              |
 | `skills/codeclone-review/`   | Conservative-first full review skill               |
 | `skills/codeclone-hotspots/` | Quick hotspot discovery skill                      |
 | `assets/`                    | Plugin branding                                    |
@@ -23,31 +23,26 @@ user-facing label stays in `interface.displayName` as `CodeClone`.
 
 ## Install
 
-The plugin prefers a workspace launcher first:
+The plugin starts only a trusted launcher, in this order:
 
-1. `./.venv/bin/codeclone-mcp`
-2. the current Poetry environment launcher
-3. `codeclone-mcp` from `PATH`
+1. the absolute path in `CODECLONE_MCP_COMMAND`, when you set it
+2. `codeclone-mcp` from an absolute `PATH` directory
+
+Opening a repository is not consent to run programs from it: the launcher never starts a `codeclone-mcp` from the opened workspace (`.venv`, `venv`, a Poetry environment, or a relative `PATH` entry). If none is found, the launcher exits
+with a setup message instead of guessing.
 
 The bundled Codex launcher is a small repo-local Python wrapper, not a shell
-snippet. It keeps the same workspace-first order without relying on `sh -lc`.
+snippet, so it does this without relying on `sh -lc`.
 
-Recommended workspace-local setup:
-
-```bash
-uv venv
-uv pip install --python .venv/bin/python "codeclone[mcp]"
-.venv/bin/codeclone-mcp --help
-```
-
-If your workspace uses Poetry, install CodeClone into that Poetry environment.
-
-Global fallback:
+Recommended setup:
 
 ```bash
 uv tool install "codeclone[mcp]"
 codeclone-mcp --help
 ```
+
+To use CodeClone from a specific virtual environment instead, set
+`CODECLONE_MCP_COMMAND` to the absolute path of its `codeclone-mcp`.
 
 Codex discovers the plugin from `.agents/plugins/marketplace.json`.
 It does not rewrite `~/.codex/config.toml`.

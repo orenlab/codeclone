@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from ...domain.findings import FAMILY_CLONE, FAMILY_DEAD_CODE, FAMILY_STRUCTURAL
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
+from ...utils.display_text import markdown_code
 from .._formatting import format_spread_text
 
 if TYPE_CHECKING:
@@ -65,6 +66,50 @@ def _text(value: object) -> str:
     return text or "(none)"
 
 
+def _code_text(value: object) -> str:
+    """Repository text as one owner-made code span.
+
+    An absent value keeps the bare absence marker: in a code span it would
+    read as a name the repository chose.
+    """
+
+    if value is None or not str(value).strip():
+        return "(none)"
+    return markdown_code(_text(value))
+
+
+def _analysis_scope_lines(inventory: Mapping[str, object]) -> list[str]:
+    """The verified scope, when the caller excluded files from it.
+
+    Gates are evaluated over the analyzed files only; the excluded files are
+    named with the reason and the authority that excluded them.
+    """
+
+    excluded = [
+        _as_mapping(row) for row in _as_sequence(inventory.get("excluded_files"))
+    ]
+    if not excluded:
+        return []
+    files = _as_mapping(inventory.get("files"))
+    full_scope = "YES" if files.get("full_scope_verified") is True else "NO"
+    return [
+        "#### Analysis scope",
+        "",
+        f"- Analysis scope: {_text(files.get('total_found'))} files",
+        f"- Analyzed: {_text(files.get('verified'))}",
+        f"- Excluded: {_text(files.get('excluded'))} (explicitly authorized)",
+        "- Gates: evaluated over the analyzed scope only",
+        f"- Full scope verified: {full_scope}",
+        "- Excluded files:",
+        *(
+            f"  - {_code_text(row.get('path'))} ({_text(row.get('reason'))}, "
+            f"authorized by {_code_text(row.get('authorized_by'))})"
+            for row in excluded
+        ),
+        "",
+    ]
+
+
 def _source_scope_text(scope: Mapping[str, object]) -> str:
     dominant = _text(scope.get("dominant_kind"))
     impact = _text(scope.get("impact_scope"))
@@ -88,9 +133,10 @@ def _location_text(item: Mapping[str, object]) -> str:
         line_part = f":{start_line}"
         if end_line > 0 and end_line != start_line:
             line_part += f"-{end_line}"
+    location = markdown_code(f"{relative_path}{line_part}")
     if qualname:
-        return f"`{relative_path}{line_part}` :: `{qualname}`"
-    return f"`{relative_path}{line_part}`"
+        return f"{location} :: {markdown_code(qualname)}"
+    return location
 
 
 def _append_anchor(lines: list[str], anchor_id: str, title: str, level: int) -> None:
@@ -135,7 +181,9 @@ def _append_facts_block(
     if not facts:
         return
     lines.append(f"- {title}:")
-    lines.extend(f"  - `{key}`: {_text(facts[key])}" for key in sorted(facts))
+    lines.extend(
+        f"  - {markdown_code(key)}: {_text(facts[key])}" for key in sorted(facts)
+    )
 
 
 def _append_findings_section(
@@ -154,7 +202,7 @@ def _append_findings_section(
         _append_kv_bullets(
             lines,
             (
-                ("Finding ID", f"`{_text(group.get('id'))}`"),
+                ("Finding ID", _code_text(group.get("id"))),
                 ("Family", group.get("family")),
                 ("Category", group.get("category")),
                 ("Kind", group.get("kind")),
@@ -199,7 +247,7 @@ def _append_suppressed_clone_findings(
         _append_kv_bullets(
             lines,
             (
-                ("Finding ID", f"`{_text(group.get('id'))}`"),
+                ("Finding ID", _code_text(group.get("id"))),
                 ("Category", group.get("category")),
                 ("Clone Type", group.get("clone_type")),
                 ("Severity", group.get("severity")),
@@ -353,6 +401,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             ),
         ),
     )
+    lines.extend(_analysis_scope_lines(inventory))
 
     _append_anchor(lines, *_anchor("findings-summary"))
     _append_kv_bullets(
@@ -415,9 +464,9 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
             _append_kv_bullets(
                 lines,
                 (
-                    ("Finding", f"`{_text(suggestion.get('finding_id'))}`"),
+                    ("Finding", _code_text(suggestion.get("finding_id"))),
                     ("Summary", suggestion.get("summary")),
-                    ("Location", suggestion.get("location_label")),
+                    ("Location", _code_text(suggestion.get("location_label"))),
                     ("Effort", action.get("effort")),
                 ),
             )

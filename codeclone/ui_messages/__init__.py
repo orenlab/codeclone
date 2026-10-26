@@ -12,6 +12,7 @@ import shlex
 import sys
 import textwrap
 import traceback
+from collections.abc import Sequence
 from pathlib import Path
 
 from .. import __version__
@@ -37,6 +38,7 @@ from ..domain.quality import (
     HEALTH_GRADE_D,
     HEALTH_GRADE_F,
 )
+from ..utils.display_text import display_text
 
 BANNER_SUBTITLE = "Structural review layer"
 
@@ -111,6 +113,12 @@ HELP_FAIL_COHESION = (
 )
 HELP_FAIL_CYCLES = "Exit with code 3 if circular module dependencies are detected."
 HELP_FAIL_DEAD_CODE = "Exit with code 3 if high-confidence dead code is detected."
+HELP_ALLOW_SYNTAX_ERROR = (
+    "In gating mode, let one file that this Python cannot parse stay out of the "
+    "analysis instead of failing the run with a contract error. Name each file; "
+    "repeat the flag for several. Only syntax errors can be excluded; the files "
+    "are listed as excluded, not verified."
+)
 HELP_FAIL_HEALTH = (
     "Exit with code 3 if the overall health score falls below the threshold.\n"
     "If enabled without a value, uses 60."
@@ -301,9 +309,25 @@ ERR_TIMESTAMPED_REPORT_PATHS_REQUIRES_REPORT = (
     "[error]--timestamped-report-paths requires at least one report output "
     "flag.[/error]"
 )
-ERR_UNREADABLE_SOURCE_IN_GATING = (
-    "One or more source files could not be read in CI/gating mode.\n"
-    "Unreadable source files: {count}."
+ERR_SYNTAX_EXCLUSION_REFUSED = (
+    "--allow-syntax-error {path} is refused: {reason}. Each exclusion must name "
+    "exactly one Python file of the analysed root by its path."
+)
+WARN_SYNTAX_EXCLUSION_NOT_EXCLUDABLE = (
+    "--allow-syntax-error {path}: this file was not analyzed because of "
+    "{kind}, which cannot be excluded; it still fails a gate."
+)
+WARN_SYNTAX_EXCLUSION_UNUSED = (
+    "--allow-syntax-error {path}: this file was analyzed, so nothing was excluded."
+)
+GATE_PASS_FOR_ANALYZED_SCOPE = (
+    "Gate: PASS for analyzed scope. Full scope verified: NO "
+    "(files excluded by --allow-syntax-error were not analyzed)."
+)
+ERR_INCOMPLETE_ANALYSIS_IN_GATING = (
+    "One or more source files could not be read in CI/gating mode or could not "
+    "be analyzed, so no gate is evaluated over this incomplete analysis.\n"
+    "Source files not analyzed: {count}."
 )
 
 WARN_LEGACY_CACHE = (
@@ -420,8 +444,39 @@ def fmt_coverage_join_ignored(error: object) -> str:
     return WARN_COVERAGE_JOIN_IGNORED.format(error=error)
 
 
-def fmt_unreadable_source_in_gating(*, count: int) -> str:
-    return ERR_UNREADABLE_SOURCE_IN_GATING.format(count=count)
+def fmt_incomplete_analysis_in_gating(*, count: int) -> str:
+    return ERR_INCOMPLETE_ANALYSIS_IN_GATING.format(count=count)
+
+
+def fmt_syntax_exclusion_refused(*, path: str, reason: str) -> str:
+    return ERR_SYNTAX_EXCLUSION_REFUSED.format(path=path, reason=reason)
+
+
+def fmt_syntax_exclusion_not_excludable(*, path: str, kind: str) -> str:
+    return WARN_SYNTAX_EXCLUSION_NOT_EXCLUDABLE.format(path=path, kind=kind)
+
+
+def fmt_syntax_exclusion_unused(*, path: str) -> str:
+    return WARN_SYNTAX_EXCLUSION_UNUSED.format(path=path)
+
+
+def analysis_scope_lines(
+    *, declared: int, verified: int, excluded: Sequence[str]
+) -> list[str]:
+    """The scope block a run with explicit exclusions prints, plain text.
+
+    Excluded paths are repository text: every control character is replaced
+    (``display_text``), so a name cannot forge a line of this block.
+    """
+
+    return [
+        f"Analysis scope: {declared} files",
+        f"Analyzed:       {verified}",
+        f"Excluded:       {len(excluded)} (explicitly authorized)",
+        f"Full scope verified: {'YES' if declared == verified else 'NO'}",
+        "Excluded:",
+        *(f"  {display_text(path)}" for path in excluded),
+    ]
 
 
 def fmt_processing_changed(count: int) -> str:

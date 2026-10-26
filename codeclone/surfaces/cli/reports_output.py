@@ -9,13 +9,19 @@ from __future__ import annotations
 import sys
 import webbrowser
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from pathlib import Path
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 from ... import ui_messages as ui
 from ...contracts import ExitCode
 from . import state as cli_state
 from .attrs import bool_attr, optional_text_attr
+from .startup import (
+    RepositoryRoots,
+    repository_roots,
+    spelled_inside_resolves_outside,
+)
 from .types import (
     CLIArgsLike,
     OutputPaths,
@@ -155,6 +161,38 @@ def write_report_outputs(
     return html_report_path
 
 
+#: Why a report is not written to a path whose last component is a link.
+_REASON_OUTPUT_IS_SYMLINK = (
+    "it is a symbolic link, and a report is never written through one"
+)
+
+#: Why a report is not written to a path spelled inside the repository that a
+#: linked directory leads outside it, and what the user can do instead.
+_REASON_OUTPUT_LEAVES_REPOSITORY = (
+    "a directory on the way to it is a symbolic link that leads outside the "
+    "repository; pass the real outside path explicitly, or remove the link"
+)
+
+
+class _OutputPathIsSymlinkError(OSError):
+    """A report path whose last component is a symbolic link."""
+
+
+class _OutputPathLeavesRepositoryError(OSError):
+    """A report path spelled inside the repository that resolves outside it."""
+
+
+def _resolve_report_target(out: Path, roots: RepositoryRoots) -> Path:
+    """The path a report would be written to, unless a link would redirect it."""
+
+    if out.is_symlink():
+        raise _OutputPathIsSymlinkError(_REASON_OUTPUT_IS_SYMLINK)
+    resolved = out.resolve()
+    if spelled_inside_resolves_outside(out, resolved, roots):
+        raise _OutputPathLeavesRepositoryError(_REASON_OUTPUT_LEAVES_REPOSITORY)
+    return resolved
+
+
 def _validate_output_path(
     path: str,
     *,
@@ -163,24 +201,41 @@ def _validate_output_path(
     console: PrinterLike,
     invalid_message: Callable[..., str],
     invalid_path_message: Callable[..., str],
+    roots: RepositoryRoots,
 ) -> Path:
+    """Resolve a report path first, then decide whether it may be written.
+
+    The suffix used to be checked on the path as spelled and the write went to
+    the path as resolved, so ``reports/out.txt`` committed as a link to a
+    dotfile passed the ``.txt`` check and overwrote the dotfile. A path whose
+    last component is a symbolic link is refused outright, whether the
+    repository's configuration or the user's command line named it: the user
+    typed a path inside their checkout, not the link's target. A path spelled
+    inside the repository that a linked directory leads out of it is refused
+    for the same reason. The suffix is then checked on the resolved path, the
+    one the report is actually written to.
+    """
+
     out = Path(path).expanduser()
-    if out.suffix.lower() != expected_suffix:
-        console.print(
-            ui.fmt_contract_error(
-                invalid_message(label=label, path=out, expected_suffix=expected_suffix)
-            )
-        )
-        sys.exit(ExitCode.CONTRACT_ERROR)
     try:
-        return out.resolve()
+        resolved = _resolve_report_target(out, roots)
     except OSError as exc:
-        console.print(
-            ui.fmt_contract_error(
-                invalid_path_message(label=label, path=out, error=exc)
-            )
+        _exit_contract_error(
+            console, invalid_path_message(label=label, path=out, error=exc)
         )
-        sys.exit(ExitCode.CONTRACT_ERROR)
+    if resolved.suffix.lower() != expected_suffix:
+        _exit_contract_error(
+            console,
+            invalid_message(label=label, path=out, expected_suffix=expected_suffix),
+        )
+    return resolved
+
+
+def _exit_contract_error(console: PrinterLike, message: str) -> NoReturn:
+    """Print *message* as a contract error and exit with its code."""
+
+    console.print(ui.fmt_contract_error(message))
+    sys.exit(ExitCode.CONTRACT_ERROR)
 
 
 def _report_path_origins(argv: Sequence[str]) -> dict[str, ReportPathOrigin | None]:
@@ -258,25 +313,33 @@ def _resolve_output_paths(
         ("text", "text_out", ".txt", "text"),
     )
 
+    roots = repository_roots(args)
     for field_name, arg_name, expected_suffix, label in output_specs:
         raw_value = optional_text_attr(args, arg_name)
         if not raw_value:
             continue
-        path = _validate_output_path(
-            raw_value,
+        validate = partial(
+            _validate_output_path,
             expected_suffix=expected_suffix,
             label=label,
             console=printer,
             invalid_message=ui.fmt_invalid_output_extension,
             invalid_path_message=ui.fmt_invalid_output_path,
+            roots=roots,
         )
+        path = validate(raw_value)
         if (
             args.timestamped_report_paths
             and report_path_origins.get(field_name) == "default"
         ):
-            path = _timestamped_report_path(
-                path,
-                report_generated_at_utc=report_generated_at_utc,
+            # The timestamped name is a new last component: judged the same way.
+            path = validate(
+                str(
+                    _timestamped_report_path(
+                        path,
+                        report_generated_at_utc=report_generated_at_utc,
+                    )
+                )
             )
         resolved[field_name] = path
 

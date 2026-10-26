@@ -8,7 +8,7 @@ Repo-local discovery via `.agents/plugins/marketplace.json`.
 | File                         | Purpose                                            |
 |------------------------------|----------------------------------------------------|
 | `.codex-plugin/plugin.json`  | Plugin metadata, prompts, instructions             |
-| `.mcp.json`                  | Workspace-first MCP launcher definition            |
+| `.mcp.json`                  | Trusted-launcher MCP definition                    |
 | `scripts/launch_mcp`         | Shell-free launcher wrapper for Codex              |
 | `skills/codeclone-review/`   | Conservative-first full review skill               |
 | `skills/codeclone-hotspots/` | Quick hotspot discovery skill                      |
@@ -17,17 +17,14 @@ Repo-local discovery via `.agents/plugins/marketplace.json`.
 ## Install
 
 ```bash
-uv venv
-uv pip install --python .venv/bin/python "codeclone[mcp]"
-.venv/bin/codeclone-mcp --help
-```
-
-Global fallback:
-
-```bash
 uv tool install "codeclone[mcp]"
 codeclone-mcp --help
 ```
+
+The plugin starts `CODECLONE_MCP_COMMAND` (an absolute path) when you set it,
+otherwise `codeclone-mcp` from an absolute `PATH` directory. Opening a repository is not consent to run programs from it: the launcher never starts a `codeclone-mcp` from the opened workspace (`.venv`, `venv`, a Poetry environment, or a relative `PATH` entry).
+To use a project virtual environment, set `CODECLONE_MCP_COMMAND` to the
+absolute path of its `codeclone-mcp`.
 
 Manual MCP registration without the plugin:
 
@@ -47,7 +44,8 @@ not mutate `~/.codex/config.toml` or install a second server binary.
 
 - if you already registered `codeclone-mcp` manually, keep only one setup path
   to avoid duplicate MCP surfaces
-- the bundled `.mcp.json` prefers `.venv`, then a Poetry env, then `PATH`
+- the bundled launcher starts `CODECLONE_MCP_COMMAND` or an absolute `PATH`
+  entry only, never a launcher from the opened workspace
 - the bundled launcher stays shell-free and local-stdio-only
 
 For the underlying interface contract, see:

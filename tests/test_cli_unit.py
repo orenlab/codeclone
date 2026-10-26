@@ -1093,7 +1093,7 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
             boot=cast("BootstrapResult", object()),
             analysis=analysis,
             processing=cast(Any, Namespace(source_read_failures=[])),
-            source_read_contract_failure=False,
+            incomplete_analysis_failures=(),
             baseline_failure_code=None,
             metrics_baseline_failure_code=None,
             new_func=set(),
@@ -1151,7 +1151,7 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
         boot=cast("BootstrapResult", object()),
         analysis=analysis,
         processing=cast(Any, Namespace(source_read_failures=[])),
-        source_read_contract_failure=False,
+        incomplete_analysis_failures=(),
         baseline_failure_code=None,
         metrics_baseline_failure_code=None,
         new_func=set(),
@@ -1208,7 +1208,9 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
         cli,
         "_run_analysis_stages",
         lambda **_kwargs: (
-            SimpleNamespace(files_found=1, cache_hits=0),
+            SimpleNamespace(
+                files_found=1, cache_hits=0, skipped_warnings=(), all_file_paths=()
+            ),
             SimpleNamespace(
                 files_analyzed=1,
                 files_skipped=0,
@@ -1217,6 +1219,7 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
                 analyzed_methods=0,
                 analyzed_classes=0,
                 source_read_failures=(),
+                failures=(),
             ),
             SimpleNamespace(
                 func_groups={},
@@ -2005,7 +2008,7 @@ def test_enforce_gating_requires_coverage_input_for_hotspot_gate(
             boot=cast("BootstrapResult", object()),
             analysis=cast(Any, SimpleNamespace(coverage_join=None)),
             processing=cast(Any, Namespace(source_read_failures=[])),
-            source_read_contract_failure=False,
+            incomplete_analysis_failures=(),
             baseline_failure_code=None,
             metrics_baseline_failure_code=None,
             new_func=set(),
@@ -2039,7 +2042,7 @@ def test_enforce_gating_requires_valid_coverage_input_for_hotspot_gate(
                 ),
             ),
             processing=cast(Any, Namespace(source_read_failures=[])),
-            source_read_contract_failure=False,
+            incomplete_analysis_failures=(),
             baseline_failure_code=None,
             metrics_baseline_failure_code=None,
             new_func=set(),

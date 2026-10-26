@@ -3,7 +3,7 @@
 ## Purpose
 
 Define the canonical report contract for the current 2.0 release line: report
-schema `2.11` plus deterministic text/Markdown/SARIF/HTML projections.
+schema `2.12` plus deterministic text/Markdown/SARIF/HTML projections.
 
 ## Public surface
 
@@ -123,6 +123,13 @@ Refs:
 
 - Canonical payload is serialized with sorted keys for digest computation.
 - Inventory file registry is normalized to relative paths.
+- Schema `2.12` adds the analysis scope to `inventory`: `files.verified`
+  (analyzed plus cached), `files.excluded` (files the caller excluded with
+  `--allow-syntax-error`), `files.full_scope_verified` (`true` only when no
+  found file was skipped) and `excluded_files` (each excluded file's
+  root-relative `path`, `reason` and `authorized_by`). An excluded file is never
+  counted as analyzed. A `2.12` document adds fields only; readers of `2.11`
+  that ignore unknown keys keep working, but do not show the exclusions.
 - Structural findings are normalized, deduplicated, and sorted before serialization.
 
 Refs:

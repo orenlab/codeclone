@@ -31,6 +31,7 @@ from ..contracts import (
 CliKind = Literal[
     "positional",
     "value",
+    "append",
     "optional_path",
     "bool_optional",
     "store_true",
@@ -431,6 +432,17 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         default=False,
         help_text=ui.HELP_FAIL_DEAD_CODE,
         pyproject_type=bool,
+    ),
+    # Command line only, never a pyproject key: an exclusion from a gate is the
+    # trusted caller's word, not the analysed repository's.
+    _option(
+        dest="allow_syntax_error",
+        group="Quality gates",
+        cli_kind="append",
+        flags=("--allow-syntax-error",),
+        default=None,
+        metavar="FILE",
+        help_text=ui.HELP_ALLOW_SYNTAX_ERROR,
     ),
     _option(
         dest="fail_health",

@@ -121,11 +121,11 @@ def test_load_pyproject_config_normalizes_relative_and_absolute_paths(
 ) -> None:
     _write_pyproject(
         tmp_path / "pyproject.toml",
-        """
+        f"""
 [tool.codeclone]
 min_loc = 5
 cache_path = ".cache/codeclone/cache.json"
-json_out = "/tmp/report.json"
+json_out = "{tmp_path / "abs" / "report.json"}"
 md_out = "reports/report.md"
 sarif_out = "reports/report.sarif"
 """.strip(),
@@ -133,7 +133,7 @@ sarif_out = "reports/report.sarif"
     loaded = loader_mod.load_pyproject_config(tmp_path)
     assert loaded["min_loc"] == 5
     assert loaded["cache_path"] == str(tmp_path / ".cache/codeclone/cache.json")
-    assert loaded["json_out"] == "/tmp/report.json"
+    assert loaded["json_out"] == str(tmp_path / "abs" / "report.json")
     assert loaded["md_out"] == str(tmp_path / "reports/report.md")
     assert loaded["sarif_out"] == str(tmp_path / "reports/report.sarif")
 
@@ -230,14 +230,17 @@ def test_normalize_path_config_value_behaviour(tmp_path: Path) -> None:
         value="relative/cache.json",
         root_path=tmp_path,
     ) == str(tmp_path / "relative/cache.json")
-    assert (
+    assert loader_mod.normalize_path_config_value(
+        key="cache_path",
+        value=str(tmp_path / "absolute-cache.json"),
+        root_path=tmp_path,
+    ) == str(tmp_path / "absolute-cache.json")
+    with pytest.raises(ConfigValidationError, match="must stay under the repository"):
         loader_mod.normalize_path_config_value(
             key="cache_path",
-            value="/tmp/absolute-cache.json",
+            value=str(tmp_path.parent / "absolute-cache.json"),
             root_path=tmp_path,
         )
-        == "/tmp/absolute-cache.json"
-    )
     patterns = ("tests/fixtures/golden_*",)
     assert (
         loader_mod.normalize_path_config_value(

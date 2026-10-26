@@ -66,6 +66,17 @@ Refs:
     - `--changed-only`
     - `--diff-against`
     - `--paths-from-git-diff`
+- In gating mode every file that was found and not analysed fails the run with
+  a contract error (exit `2`): over the size limit, unreadable, a parse timeout,
+  an internal error, a file that could not be stat'ed while walking the tree,
+  or a syntax error. `--allow-syntax-error FILE` (repeatable, command line only,
+  never read from `pyproject.toml`) excludes one file that this Python rejected
+  for its syntax; FILE must name exactly one discovered file by its path inside
+  the analysed root (no `..`, globs or directories, or the run is refused). An
+  exclusion never covers any other reason. A run with exclusions prints its
+  analysis scope (declared, analyzed, excluded, "Full scope verified: NO"), and
+  the report records each excluded file with its reason
+  (`inventory.excluded_files`, report schema `2.12`).
 - Contract errors use `CONTRACT ERROR:`.
 - Gating failures use `GATING FAILURE:`.
 - Internal errors use `fmt_internal_error` and include traceback only in debug mode.
@@ -84,7 +95,9 @@ Refs:
 - `--timestamped-report-paths` requires at least one requested report output.
 - `--changed-only` requires a diff source.
 - Browser-open failure after successful HTML write is warning-only.
-- In gating mode, unreadable source files are contract errors with higher priority than clone/metric gate failures.
+- In gating mode, any source file that was found and not analysed (and not
+  explicitly excluded with `--allow-syntax-error` for a syntax error) is a
+  contract error with higher priority than clone/metric gate failures.
 
 Refs:
 
@@ -106,7 +119,8 @@ Refs:
 | Invalid changed-scope flag combination                            | contract             | `2`  |
 | Baseline untrusted in CI/gating                                   | contract             | `2`  |
 | Coverage/API regression gate without required baseline capability | contract             | `2`  |
-| Unreadable source in CI/gating                                    | contract             | `2`  |
+| Unreadable or unanalysed source in CI/gating                      | contract             | `2`  |
+| `--allow-syntax-error` path that names no single discovered file  | contract             | `2`  |
 | New clones with `--fail-on-new`                                   | gating               | `3`  |
 | Threshold or metrics gate exceeded                                | gating               | `3`  |
 | Unexpected exception                                              | internal             | `5`  |

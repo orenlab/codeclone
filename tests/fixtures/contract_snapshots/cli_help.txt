@@ -14,7 +14,7 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--fail-coupling [CBO_MAX]] [--fail-cohesion [LCOM4_MAX]]
                  [--fail-cycles | --no-fail-cycles]
                  [--fail-dead-code | --no-fail-dead-code]
-                 [--fail-health [SCORE_MIN]]
+                 [--allow-syntax-error FILE] [--fail-health [SCORE_MIN]]
                  [--fail-on-typing-regression | --no-fail-on-typing-regression]
                  [--fail-on-docstring-regression | --no-fail-on-docstring-regression]
                  [--fail-on-api-break | --no-fail-on-api-break]
@@ -114,6 +114,8 @@ Quality gates:
                         Exit with code 3 if circular module dependencies are detected.
   --fail-dead-code, --no-fail-dead-code
                         Exit with code 3 if high-confidence dead code is detected.
+  --allow-syntax-error FILE
+                        In gating mode, let one file that this Python cannot parse stay out of the analysis instead of failing the run with a contract error. Name each file; repeat the flag for several. Only syntax errors can be excluded; the files are listed as excluded, not verified.
   --fail-health [SCORE_MIN]
                         Exit with code 3 if the overall health score falls below the threshold.
                         If enabled without a value, uses 60.

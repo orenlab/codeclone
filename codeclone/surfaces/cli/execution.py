@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -29,6 +29,7 @@ from ...core._types import AnalysisResult, BootstrapResult, DiscoveryResult
 from ...core._types import ProcessingResult as PipelineProcessingResult
 from ...core.reporting import GatingResult
 from ...models import MetricsDiff
+from ...utils.display_text import display_text
 from . import state as cli_state
 from .attrs import bool_attr
 from .console import PlainConsole
@@ -192,7 +193,7 @@ def enforce_gating(
     boot: BootstrapResult,
     analysis: AnalysisResult,
     processing: PipelineProcessingResult,
-    source_read_contract_failure: bool,
+    incomplete_analysis_failures: Sequence[str],
     baseline_failure_code: ExitCode | None,
     metrics_baseline_failure_code: ExitCode | None,
     new_func: set[str],
@@ -207,18 +208,18 @@ def enforce_gating(
 ) -> None:
     printer = require_status_console(cli_state.get_console())
 
-    if source_read_contract_failure:
+    if incomplete_analysis_failures:
         printer.print(
             ui.fmt_contract_error(
-                ui.fmt_unreadable_source_in_gating(
-                    count=len(processing.source_read_failures)
+                ui.fmt_incomplete_analysis_in_gating(
+                    count=len(incomplete_analysis_failures)
                 )
             )
         )
-        for failure in processing.source_read_failures[:10]:
-            printer.print(f"  • {failure}")
-        if len(processing.source_read_failures) > 10:
-            printer.print(f"  ... and {len(processing.source_read_failures) - 10} more")
+        for failure in incomplete_analysis_failures[:10]:
+            printer.print(f"  • {display_text(failure)}", markup=False)
+        if len(incomplete_analysis_failures) > 10:
+            printer.print(f"  ... and {len(incomplete_analysis_failures) - 10} more")
         sys.exit(ExitCode.CONTRACT_ERROR)
 
     if baseline_failure_code is not None:

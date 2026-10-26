@@ -1901,7 +1901,7 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
         cast(Any, mcp_shared_mod).subprocess,
         "run",
         lambda *args, **kwargs: SimpleNamespace(
-            stdout="pkg/a.py\npkg/b.py\npkg/a.py\n"
+            returncode=0, stdout="pkg/a.py\npkg/b.py\npkg/a.py\n"
         ),
     )
     assert mcp_shared_mod._git_diff_lines_payload(

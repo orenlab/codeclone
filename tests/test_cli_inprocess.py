@@ -3245,9 +3245,17 @@ def test_cli_discovery_skip_oserror(
             python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
         )
         args.extend(["--baseline", str(baseline)])
-    _run_main(monkeypatch, args)
+    if "--ci" in extra_args:
+        # A file the walk found but could not stat is missing from the gated
+        # population: a gated run refuses it instead of passing over it.
+        with pytest.raises(SystemExit) as exc:
+            _run_main(monkeypatch, args)
+        assert exc.value.code == 2
+    else:
+        _run_main(monkeypatch, args)
     out = capsys.readouterr().out
     if "--ci" in extra_args:
+        assert "CONTRACT ERROR:" in out
         files_found = _compact_summary_metric(out, "found")
         files_analyzed = _compact_summary_metric(out, "analyzed")
         cache_hits = _compact_summary_metric(out, "cached")

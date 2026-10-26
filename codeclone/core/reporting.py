@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 
 from ..contracts import DEFAULT_COVERAGE_MIN
 from ..models import MetricsDiff
@@ -67,6 +67,7 @@ def report(
     coverage_adoption_diff_available: bool = False,
     api_surface_diff_available: bool = False,
     include_report_document: bool = False,
+    excluded_files: Sequence[tuple[str, str]] = (),
 ) -> ReportArtifacts:
     contents: dict[str, str | None] = {
         "html": None,
@@ -85,7 +86,18 @@ def report(
             "cached": discovery.cache_hits,
             "skipped": processing.files_skipped,
             "source_io_skipped": len(processing.source_read_failures),
+            # ``total_found`` is the declared scope; ``verified`` is what was
+            # analysed or reused from cache. The caller's explicit exclusions
+            # are a subset of ``skipped``; the full declared scope is verified
+            # only when nothing was skipped.
+            "verified": processing.files_analyzed + discovery.cache_hits,
+            "excluded": len(excluded_files),
+            "full_scope_verified": processing.files_skipped == 0,
         },
+        "excluded_files": [
+            {"path": path, "reason": reason, "authorized_by": "--allow-syntax-error"}
+            for path, reason in sorted(excluded_files)
+        ],
         "code": {
             "parsed_lines": processing.analyzed_lines + discovery.cached_lines,
             "functions": processing.analyzed_functions + discovery.cached_functions,

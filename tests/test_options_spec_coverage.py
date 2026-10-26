@@ -26,6 +26,8 @@ def _cli_sample(option: OptionSpec) -> tuple[tuple[str, ...], object]:
         return ((option.flags[0],), True)
     if option.cli_kind == "store_false":
         return ((option.flags[0],), False)
+    if option.cli_kind == "append":
+        return ((option.flags[0], "sample-value"), ["sample-value"])
     if option.value_type is int:
         return ((option.flags[0], "7"), 7)
     return ((option.flags[0], "sample-value"), "sample-value")

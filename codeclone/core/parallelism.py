@@ -28,8 +28,11 @@ from ._types import (
     DEFAULT_RUNTIME_PROCESSES,
     PARALLEL_MIN_FILES_FLOOR,
     PARALLEL_MIN_FILES_PER_WORKER,
+    SKIP_KIND_UNKNOWN,
+    SKIP_KIND_WORKER_CRASH,
     BootstrapResult,
     DiscoveryResult,
+    FileFailure,
     FileProcessResult,
     ProcessingResult,
     _block_to_group_item,
@@ -148,6 +151,7 @@ def process(
     }
     failed_files: list[str] = []
     source_read_failures: list[str] = []
+    failures: list[FileFailure] = []
     root_str = str(boot.root)
     processes = _resolve_process_count(boot.args.processes)
     min_loc = int(boot.args.min_loc)
@@ -244,6 +248,13 @@ def process(
         files_skipped += 1
         failure = f"{result.filepath}: {result.error}"
         failed_files.append(failure)
+        failures.append(
+            FileFailure(
+                filepath=result.filepath,
+                kind=result.error_kind or SKIP_KIND_UNKNOWN,
+                message=failure,
+            )
+        )
         if result.error_kind == "source_read_error":
             source_read_failures.append(failure)
 
@@ -302,6 +313,13 @@ def process(
                         except Exception as exc:  # pragma: no cover - worker crash
                             files_skipped += 1
                             failed_files.append(f"{filepath}: {exc}")
+                            failures.append(
+                                FileFailure(
+                                    filepath=filepath,
+                                    kind=SKIP_KIND_WORKER_CRASH,
+                                    message=f"{filepath}: {exc}",
+                                )
+                            )
                             if on_worker_error is not None:
                                 on_worker_error(str(exc))
                         if on_advance is not None:
@@ -369,6 +387,7 @@ def process(
         analyzed_classes=analyzed_classes,
         failed_files=tuple(sorted(failed_files)),
         source_read_failures=tuple(sorted(source_read_failures)),
+        failures=tuple(sorted(failures, key=lambda item: (item.filepath, item.kind))),
         structural_findings=tuple(all_structural_findings),
         source_stats_by_file=tuple(
             (filepath, *stats)

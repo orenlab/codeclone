@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 
 from ...domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ...utils.coerce import as_int, as_mapping, as_sequence
+from ...utils.display_text import display_text
 from .._formatting import format_spread_text
 
 _as_int = as_int
@@ -711,6 +712,35 @@ def _append_findings_sections(
     )
 
 
+def _analysis_scope_lines(inventory: Mapping[str, object]) -> list[str]:
+    """The verified scope, when the caller excluded files from it.
+
+    Excluded paths are repository text: control characters are replaced, so a
+    name cannot forge a line of the report.
+    """
+
+    excluded = [as_mapping(row) for row in as_sequence(inventory.get("excluded_files"))]
+    if not excluded:
+        return []
+    files = as_mapping(inventory.get("files"))
+    full_scope = "YES" if files.get("full_scope_verified") is True else "NO"
+    return [
+        f"Analysis scope: {format_meta_text_value(files.get('total_found'))} files",
+        f"Analyzed: {format_meta_text_value(files.get('verified'))}",
+        f"Excluded: {format_meta_text_value(files.get('excluded'))} "
+        "(explicitly authorized)",
+        "Gates: evaluated over the analyzed scope only",
+        f"Full scope verified: {full_scope}",
+        "Excluded files:",
+        *(
+            f"  {display_text(row.get('path', ''))} "
+            f"({display_text(row.get('reason', ''))}, authorized by "
+            f"{display_text(row.get('authorized_by', ''))})"
+            for row in excluded
+        ),
+    ]
+
+
 def render_text_report_document(payload: Mapping[str, object]) -> str:
     meta_payload = _as_mapping(payload.get("meta"))
     baseline = _as_mapping(meta_payload.get("baseline"))
@@ -827,6 +857,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
             "File registry: "
             f"encoding={format_meta_text_value(file_registry.get('encoding'))} "
             f"count={len(_as_sequence(file_registry.get('items')))}",
+            *_analysis_scope_lines(inventory_payload),
             "",
             "FINDINGS SUMMARY",
             f"Total groups: {format_meta_text_value(findings_summary.get('total'))}",

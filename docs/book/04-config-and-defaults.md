@@ -163,6 +163,25 @@ overrides via `--foo/--no-foo` (e.g. `--no-skip-metrics`).
 Path values loaded from `pyproject.toml` are normalized relative to resolved
 scan root when provided as relative paths.
 
+A path set in `pyproject.toml` must stay inside the repository. It is checked
+after symbolic links are followed, so `../notes.md`, an absolute path elsewhere,
+`~/...`, and a path through a linked directory that leads out of the repository
+are all refused with a contract error (exit `2`) before anything is written or
+read. This covers the report outputs, `baseline`, `metrics_baseline`,
+`cache_path` and `coverage_xml`. To write a report or a baseline outside the
+repository, pass the path with the command-line flag (`--html`, `--json`,
+`--md`, `--sarif`, `--text`, `--baseline`, `--metrics-baseline`, `--coverage`,
+`--cache-path`); a path you give on the command line is accepted wherever it
+points.
+
+A report is never written through a symbolic link: a report path whose last
+component is a link, or a path spelled inside the repository that a linked
+directory leads outside it, is refused with a contract error whether it came
+from `pyproject.toml` or from the command line.
+
+A `pyproject.toml` nested too deeply to read is a contract error (exit `2`), not
+an internal error.
+
 `golden_fixture_paths` is different:
 
 - entries are repo-relative glob patterns, not filesystem paths

@@ -3,13 +3,13 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from ..findings.clones.golden_fixtures import (
     GoldenFixturePatternError,
     normalize_golden_fixture_patterns,
 )
-from .spec import CONFIG_KEY_SPECS, PATH_CONFIG_KEYS, ConfigKeySpec
+from .spec import CONFIG_KEY_SPECS, OPTIONS, PATH_CONFIG_KEYS, ConfigKeySpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Set
@@ -88,6 +88,10 @@ def load_pyproject_config(
         ) from exc
     except ValueError as exc:
         raise ConfigValidationError(f"Invalid TOML in {config_path}: {exc}") from exc
+    except RecursionError as exc:
+        raise ConfigValidationError(
+            f"Invalid TOML in {config_path}: values are nested too deeply to read."
+        ) from exc
 
     if not isinstance(payload, dict):
         raise ConfigValidationError(
@@ -133,6 +137,25 @@ def load_pyproject_config(
     return validated
 
 
+#: Why a path the repository's own ``pyproject.toml`` names may not leave it,
+#: and what the user can do instead.
+_ERR_PATH_OUTSIDE_REPOSITORY = (
+    "tool.codeclone.{key} = {value!r} must stay under the repository root, "
+    "because a path in the repository's own pyproject.toml may only point "
+    "inside the repository; choose a path inside the repository{remedy}."
+)
+_REMEDY_COMMAND_LINE_FLAG = ", or pass the outside path on the command line with {flag}"
+
+#: The command-line flag that carries each path key: the user's own word, the
+#: only way a path outside the repository is accepted. Read from the option
+#: table so the remedy names the spelling ``--help`` documents.
+_PATH_KEY_FLAGS: Final[Mapping[str, str]] = {
+    spec.pyproject_key: spec.flags[0]
+    for spec in OPTIONS
+    if spec.path_value and spec.pyproject_key is not None and spec.flags
+}
+
+
 def normalize_path_config_value(
     *,
     key: str,
@@ -140,15 +163,57 @@ def normalize_path_config_value(
     root_path: Path,
     path_config_keys: Set[str] | frozenset[str] = PATH_CONFIG_KEYS,
 ) -> object:
+    """Anchor a path from ``pyproject.toml`` at the repository and keep it there.
+
+    The value is the repository author's word, not the user's: a repository
+    that named ``../victim/notes.md`` or ``~/.bashrc`` here made a plain
+    ``codeclone .`` overwrite that file. So the path is resolved first -- every
+    existing component, symbolic links included -- and refused unless the
+    result lies under the repository root. The refusal happens while the
+    configuration is read, before anything is written or created. A path
+    outside the repository is still accepted from the command line, which
+    never passes through here.
+
+    The returned spelling is unchanged (the root joined to the value, not the
+    resolved path), so a consumer that refuses a symbolic link at the final
+    component still sees it.
+    """
+
     if key not in path_config_keys:
         return value
     if not isinstance(value, str):
         return value
 
     path = Path(value).expanduser()
+    _refuse_path_outside_repository(path, root_path=root_path, key=key, value=value)
     if path.is_absolute():
         return str(path)
     return str(root_path / path)
+
+
+def _refuse_path_outside_repository(
+    path: Path, *, root_path: Path, key: str, value: str
+) -> None:
+    """Resolve *path* under the repository root, or refuse the key by name."""
+
+    candidate = path if path.is_absolute() else root_path / path
+    try:
+        resolved_root = root_path.resolve(strict=True)
+        resolved = candidate.resolve()
+    except (OSError, RuntimeError) as exc:
+        raise ConfigValidationError(
+            f"Invalid value for tool.codeclone.{key}: cannot resolve {value!r}: {exc}"
+        ) from exc
+    if resolved.is_relative_to(resolved_root):
+        return
+    flag = _PATH_KEY_FLAGS.get(key)
+    raise ConfigValidationError(
+        _ERR_PATH_OUTSIDE_REPOSITORY.format(
+            key=key,
+            value=value,
+            remedy=_REMEDY_COMMAND_LINE_FLAG.format(flag=flag) if flag else "",
+        )
+    )
 
 
 def _validated_config_instance(

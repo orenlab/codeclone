@@ -58,7 +58,9 @@ The plugin surface is additive:
 
 - `.mcp.json` contributes a local stdio MCP server definition
 - `plugins/codeclone/scripts/launch_mcp.py` resolves the local launcher without shell wrapping
-- that launcher prefers a workspace `.venv`, then a Poetry env, then `PATH`
+- that launcher starts `CODECLONE_MCP_COMMAND` (an absolute path) or
+  `codeclone-mcp` from an absolute `PATH` directory, never a launcher from the
+  opened workspace (`.venv`, `venv`, Poetry, a relative `PATH` entry)
 - the skills contribute workflow guidance and starter prompts
 - `README.md` documents local usage and boundaries inside the repository tree
 - Codex remains free to use direct `mcp add` config alongside or instead of the

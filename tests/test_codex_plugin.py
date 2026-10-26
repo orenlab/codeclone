@@ -132,8 +132,8 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     assert "# CodeClone for Codex" in readme_text
     assert "codex mcp add codeclone -- codeclone-mcp --transport stdio" in readme_text
     assert "does not rewrite `~/.codex/config.toml`" in readme_text
-    assert "The plugin prefers a workspace launcher first" in readme_text
-    assert "the current Poetry environment launcher" in readme_text
+    assert "The plugin starts only a trusted launcher" in readme_text
+    assert "never starts a `codeclone-mcp` from the opened workspace" in readme_text
     assert "without relying on `sh -lc`" in readme_text
     assert 'uv tool install "codeclone[mcp]"' in readme_text
 

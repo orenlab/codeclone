@@ -18,6 +18,7 @@ remain stable.
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -238,6 +239,7 @@ def render_pr_comment(report: dict[str, object], *, exit_code: int) -> str:
             f"CodeClone `{ctx.codeclone_version}`"
         ),
         "",
+        *_analysis_scope_lines(report, exit_code=exit_code),
         "### Review snapshot",
         "| Area | Signal | Review note |",
         "|------|--------|-------------|",
@@ -376,6 +378,63 @@ def _percent_from_permille(value: object) -> str:
     """Format a permille JSON value as a percentage string."""
 
     return f"{_float(value) / 10.0:.1f}%"
+
+
+#: C0 (except the tab), DEL and C1 controls and their visible replacements.
+_CONTROL_REPLACEMENTS = {
+    code: "\u2421" if code == 0x7F else chr(0x2400 + code) if code < 0x20 else "\ufffd"
+    for code in (*range(0x20), 0x7F, *range(0x80, 0xA0))
+    if code != 0x09
+}
+_BACKTICK_RUN = re.compile(r"`+")
+
+
+def _markdown_code(value: object) -> str:
+    """Repository text as one inert Markdown code span.
+
+    A copy of ``codeclone.utils.display_text.markdown_code``: the Action may
+    run an older installed CodeClone, so it cannot import the helper. A test
+    pins both to the same output.
+    """
+
+    text = str(value).translate(_CONTROL_REPLACEMENTS)
+    longest = max((len(run) for run in _BACKTICK_RUN.findall(text)), default=0)
+    fence = "`" * (longest + 1)
+    if (
+        text.startswith("`")
+        or text.endswith("`")
+        or (text.startswith(" ") and text.endswith(" ") and bool(text.strip(" ")))
+    ):
+        text = f" {text} "
+    return f"{fence}{text}{fence}"
+
+
+def _analysis_scope_lines(report: dict[str, object], *, exit_code: int) -> list[str]:
+    """The verified scope, when the caller excluded files from the analysis."""
+
+    inventory = _mapping(report.get("inventory"))
+    rows = inventory.get("excluded_files")
+    excluded = [_mapping(row) for row in rows] if isinstance(rows, list) else []
+    if not excluded:
+        return []
+    files = _mapping(inventory.get("files"))
+    gate = "PASS for analyzed scope" if exit_code == 0 else _status_label(exit_code)[1]
+    full_scope = "YES" if files.get("full_scope_verified") is True else "NO"
+    return [
+        "### Analysis scope",
+        f"- Analysis scope: {_int(files.get('total_found'))} files",
+        f"- Analyzed: {_int(files.get('verified'))}",
+        f"- Excluded: {_int(files.get('excluded'))} (explicitly authorized)",
+        f"- Gate: {gate}",
+        f"- Full scope verified: {full_scope}",
+        "- Excluded files:",
+        *(
+            f"  - {_markdown_code(_str(row.get('path')))} "
+            f"({_markdown_code(_str(row.get('reason')))})"
+            for row in excluded
+        ),
+        "",
+    ]
 
 
 def _table_cell(value: object) -> str:

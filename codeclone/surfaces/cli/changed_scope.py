@@ -14,7 +14,7 @@ from pathlib import Path
 from ... import ui_messages as ui
 from ...contracts import ExitCode
 from ...utils import coerce as _coerce
-from ...utils.git_diff import validate_git_diff_ref
+from ...utils.git_diff import run_git_diff_name_only, validate_git_diff_ref
 from . import state as cli_state
 from .attrs import bool_attr, optional_text_attr, set_bool_attr
 from .types import ChangedCloneGate, require_status_console
@@ -100,16 +100,9 @@ def _git_diff_changed_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str,
         console.print(ui.fmt_contract_error(str(exc)))
         sys.exit(ExitCode.CONTRACT_ERROR)
     try:
-        completed = subprocess.run(
-            ["git", "diff", "--name-only", validated_ref, "--"],
-            cwd=str(root_path),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        completed = run_git_diff_name_only(root_path, validated_ref, timeout=30)
     except (
-        FileNotFoundError,
+        OSError,
         subprocess.CalledProcessError,
         subprocess.TimeoutExpired,
     ) as exc:
