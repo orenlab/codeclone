@@ -32,6 +32,7 @@ import pytest
 
 import codeclone.core.parallelism as core_parallelism
 from codeclone.contracts import HEALTH_WEIGHTS
+from codeclone.core._types import FileProcessResult, ProcessingResult
 from codeclone.metrics.health import HealthInputs, compute_health
 from codeclone.models import HealthScore
 from codeclone.scanner import discover_python_files
@@ -388,12 +389,10 @@ class _DeadPoolExecutor(ThreadPoolExecutor):
         return future
 
 
-def test_worker_death_grows_the_truncation_counter(
+def _dead_pool_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Files lost to a dead worker must be counted, not silently dropped."""
-
+) -> tuple[int, ProcessingResult]:
     for index in range(4):
         _write(tmp_path / f"mod_{index}.py", f"def f{index}():\n    return {index}\n")
     boot = analysis_boot(tmp_path, min_loc=1, min_stmt=1, skip_metrics=True)
@@ -406,8 +405,49 @@ def test_worker_death_grows_the_truncation_counter(
         root=tmp_path,
         warm=False,
     )
+    return discovery.files_found, processing
 
-    assert discovery.files_found == 4
+
+def test_worker_death_retries_the_lost_files_instead_of_dropping_them(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Files lost to a dead worker are retried, never silently dropped.
+
+    This pin used to require the four lost files to be counted as skipped.
+    The maintainer's ruling of 2026-10-23 on a dead worker replaced
+    "counted as lost" with "retried": a file the pool never returned is run
+    once more in the parent, so a recoverable death no longer truncates the
+    run. The population still closes -- found = analysed + skipped.
+    """
+
+    files_found, processing = _dead_pool_run(tmp_path, monkeypatch)
+
+    assert files_found == 4
+    assert processing.files_analyzed == 4
+    assert processing.files_skipped == 0
+    assert processing.failed_files == ()
+
+
+def test_worker_death_grows_the_truncation_counter_when_the_retry_fails_too(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A file the retry cannot read either must be counted, not dropped."""
+
+    def _unreadable(filepath: str, *_args: object, **_kwargs: object) -> object:
+        return FileProcessResult(
+            filepath=filepath,
+            success=False,
+            source_content_digest=None,
+            error="Cannot read file: gone",
+            error_kind="source_read_error",
+        )
+
+    monkeypatch.setattr(core_parallelism, "_invoke_process_file", _unreadable)
+    files_found, processing = _dead_pool_run(tmp_path, monkeypatch)
+
+    assert files_found == 4
     assert processing.files_analyzed == 0
     assert processing.files_skipped == 4
     assert len(processing.failed_files) == 4

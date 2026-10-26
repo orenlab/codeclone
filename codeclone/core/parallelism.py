@@ -285,8 +285,15 @@ def process(
                 raise RuntimeError(
                     "successful file processing requires stat and source digest"
                 )
-            if result.phase_snapshot is not None:
-                batch_snapshot = batch_snapshot.merge(result.phase_snapshot)
+            # Everything that can refuse runs before anything is accumulated:
+            # a result that fails acceptance must leave no part of itself
+            # behind, so the retry that follows recomputes it whole instead
+            # of counting half of it twice.
+            unit_items = [_unit_to_group_item(unit) for unit in result.units or ()]
+            block_items = [_block_to_group_item(block) for block in result.blocks or ()]
+            segment_items = [
+                _segment_to_group_item(segment) for segment in result.segments or ()
+            ]
             source_stats_payload = SourceStatsDict(
                 lines=result.lines,
                 functions=result.functions,
@@ -308,6 +315,8 @@ def process(
                 # row cannot claim a lane this extraction did not fill.
                 materialized_api_surface=collect_api_surface,
             )
+            if result.phase_snapshot is not None:
+                batch_snapshot = batch_snapshot.merge(result.phase_snapshot)
             files_analyzed += 1
             analyzed_lines += result.lines
             analyzed_functions += result.functions
@@ -320,16 +329,9 @@ def process(
                 result.classes,
             )
             source_digest_by_file[result.filepath] = result.source_content_digest.value
-            if result.units:
-                all_units.extend(_unit_to_group_item(unit) for unit in result.units)
-            if result.blocks:
-                all_blocks.extend(
-                    _block_to_group_item(block) for block in result.blocks
-                )
-            if result.segments:
-                all_segments.extend(
-                    _segment_to_group_item(segment) for segment in result.segments
-                )
+            all_units.extend(unit_items)
+            all_blocks.extend(block_items)
+            all_segments.extend(segment_items)
             if result.structural_findings:
                 all_structural_findings.extend(result.structural_findings)
             if not boot.args.skip_metrics and result.file_metrics is not None:
@@ -404,63 +406,75 @@ def process(
                 on_advance()
 
     def _run_files() -> None:
-        nonlocal files_skipped
-        if _should_use_parallel(len(files_to_process), processes):
-            try:
-                executor_context = ProcessPoolExecutor(
-                    max_workers=processes,
-                    initializer=_install_module_registry,
-                    initargs=(registry,),
-                )
-                with executor_context as executor:
-                    for idx in range(0, len(files_to_process), batch_size):
-                        batch = files_to_process[idx : idx + batch_size]
-                        futures = [
-                            executor.submit(
-                                _invoke_process_file,
-                                filepath,
-                                root_str,
-                                boot.config,
-                                min_loc,
-                                min_stmt,
-                                collect_structural_findings=collect_structural_findings,
-                                collect_api_surface=collect_api_surface,
-                                api_include_private_modules=api_include_private_modules,
-                                collect_near_miss=collect_near_miss,
-                                collect_renamed_structure=collect_renamed_structure,
-                                block_min_loc=block_min_loc,
-                                block_min_stmt=block_min_stmt,
-                                segment_min_loc=segment_min_loc,
-                                segment_min_stmt=segment_min_stmt,
-                                phase_ledger=_phase_ledger_for_file(),
-                                neutral_reuse=neutral_reuse_by_file.get(filepath),
-                            )
-                            for filepath in batch
-                        ]
-                        future_to_path = {
-                            id(future): filepath
-                            for future, filepath in zip(futures, batch, strict=True)
-                        }
-                        for future in as_completed(futures):
-                            filepath = future_to_path[id(future)]
-                            try:
-                                _accept_result(future.result())
-                            except Exception as exc:  # pragma: no cover - worker crash
-                                files_skipped += 1
-                                failed_files.append(f"{filepath}: {exc}")
-                                if on_worker_error is not None:
-                                    on_worker_error(str(exc))
-                            if on_advance is not None:
-                                on_advance()
-                record_counter("registry_worker_installs", processes)
-            except (OSError, RuntimeError, PermissionError) as exc:
-                if on_parallel_fallback is not None:
-                    on_parallel_fallback(exc)
-                _run_sequential(files_to_process)
-                record_counter("registry_worker_installs", 1)
-        else:
+        if not _should_use_parallel(len(files_to_process), processes):
             _run_sequential(files_to_process)
             record_counter("registry_worker_installs", 1)
+            return
+        # Only a file whose result the parent accepted is settled. A file the
+        # pool lost -- its worker died, or its result failed acceptance -- is
+        # retried below, and a settled file is never run or counted again
+        # (maintainer ruling 2026-10-23). ``pool_failure`` is None exactly
+        # when every file settled.
+        settled: set[str] = set()
+        pool_failure: Exception | None = None
+        try:
+            executor_context = ProcessPoolExecutor(
+                max_workers=processes,
+                initializer=_install_module_registry,
+                initargs=(registry,),
+            )
+            with executor_context as executor:
+                for idx in range(0, len(files_to_process), batch_size):
+                    batch = files_to_process[idx : idx + batch_size]
+                    futures = [
+                        executor.submit(
+                            _invoke_process_file,
+                            filepath,
+                            root_str,
+                            boot.config,
+                            min_loc,
+                            min_stmt,
+                            collect_structural_findings=collect_structural_findings,
+                            collect_api_surface=collect_api_surface,
+                            api_include_private_modules=api_include_private_modules,
+                            collect_near_miss=collect_near_miss,
+                            collect_renamed_structure=collect_renamed_structure,
+                            block_min_loc=block_min_loc,
+                            block_min_stmt=block_min_stmt,
+                            segment_min_loc=segment_min_loc,
+                            segment_min_stmt=segment_min_stmt,
+                            phase_ledger=_phase_ledger_for_file(),
+                            neutral_reuse=neutral_reuse_by_file.get(filepath),
+                        )
+                        for filepath in batch
+                    ]
+                    future_to_path = {
+                        id(future): filepath
+                        for future, filepath in zip(futures, batch, strict=True)
+                    }
+                    for future in as_completed(futures):
+                        filepath = future_to_path[id(future)]
+                        try:
+                            _accept_result(future.result())
+                        except Exception as exc:
+                            pool_failure = pool_failure or exc
+                            if on_worker_error is not None:
+                                on_worker_error(str(exc))
+                            continue
+                        settled.add(filepath)
+                        if on_advance is not None:
+                            on_advance()
+            record_counter("registry_worker_installs", processes)
+        except (OSError, RuntimeError, PermissionError) as exc:
+            pool_failure = exc
+        if pool_failure is None:
+            return
+        if on_parallel_fallback is not None:
+            on_parallel_fallback(pool_failure)
+        _run_sequential(
+            [filepath for filepath in files_to_process if filepath not in settled]
+        )
+        record_counter("registry_worker_installs", 1)
 
     with span(name="analysis.registry_bind") as registry_span:
         with span(name="analysis.relative_imports") as relative_span:
