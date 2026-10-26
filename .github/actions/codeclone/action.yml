@@ -165,6 +165,7 @@ runs:
                 {
                     "install-spec": target.requirement,
                     "install-source": target.source,
+                    "install-requirements": target.requirements_file,
                 },
             )
         PY
@@ -174,6 +175,7 @@ runs:
       env:
         INSTALL_SPEC: ${{ steps.resolve-install.outputs.install-spec }}
         INSTALL_SOURCE: ${{ steps.resolve-install.outputs.install-source }}
+        INSTALL_REQUIREMENTS: ${{ steps.resolve-install.outputs.install-requirements }}
         # The runner's own pip may vendor a CA bundle that still trusts the
         # eMudhra chains revoked in October 2026, so it never downloads here:
         # pip 26.2.2 is fetched directly, checked against its published
@@ -203,7 +205,14 @@ runs:
         PY
         python -m pip install --no-index --no-deps --disable-pip-version-check "${pip_wheel}"
         echo "Installing CodeClone from ${INSTALL_SOURCE}: ${INSTALL_SPEC}"
-        python -m pip install "${INSTALL_SPEC}"
+        if [ -n "${INSTALL_REQUIREMENTS}" ]; then
+          # The shipped version installs exactly the wheels pinned by SHA-256 in
+          # requirements.txt: no resolution beyond that set, no source builds.
+          python -m pip install --require-hashes --only-binary :all: \
+            --disable-pip-version-check -r "${INSTALL_REQUIREMENTS}"
+        else
+          python -m pip install "${INSTALL_SPEC}"
+        fi
 
     - name: Verify baseline
       if: ${{ inputs.require-baseline == 'true' }}

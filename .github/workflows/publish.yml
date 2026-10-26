@@ -40,6 +40,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
+          version: "0.13.4"
           enable-cache: true
 
       - name: Verify release tag matches project version
@@ -63,10 +64,23 @@ jobs:
           fi
 
       - name: Build distributions
-        run: uv run --with build python -m build --sdist --wheel
+        env:
+          # Fixed archive timestamps, file modes and hash-pinned build requirements
+          # make the wheel byte-reproducible, so the GitHub Action pins its SHA-256.
+          SOURCE_DATE_EPOCH: "315532800"
+        run: |
+          umask 0022
+          find codeclone -type f -exec chmod 0644 {} +
+          chmod 0644 pyproject.toml LICENSE LICENSE-MIT docs/README-pypi.md
+          uv build --sdist --wheel \
+            --build-constraints .github/release-build-constraints.txt \
+            --require-hashes
+
+      - name: Verify the wheel is the one the GitHub Action pins
+        run: python scripts/action_requirements.py verify-wheel dist/codeclone-*.whl
 
       - name: Validate distributions
-        run: uv run --with twine twine check dist/*
+        run: uv run --with twine==7.0.0 twine check dist/*
 
       - name: Upload distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

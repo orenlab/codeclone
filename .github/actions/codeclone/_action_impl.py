@@ -27,6 +27,7 @@ from typing import Literal
 
 COMMENT_MARKER = "<!-- codeclone-report -->"
 DEFAULT_CODECLONE_PACKAGE_VERSION = "2.0.2"
+LOCKED_REQUIREMENTS_FILE = "requirements.txt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,10 +66,16 @@ class RunResult:
 
 @dataclass(frozen=True, slots=True)
 class InstallTarget:
-    """Resolved package requirement used by the action installer."""
+    """Resolved package requirement used by the action installer.
+
+    ``requirements_file`` names the hash-locked install set shipped with the
+    action. It is set only when the requested version is the one the action
+    ships, and is empty otherwise.
+    """
 
     requirement: str
     source: Literal["repo", "pypi-version", "pypi-default"]
+    requirements_file: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +174,9 @@ def resolve_install_target(
     When the action itself is executed from the same checkout as the workspace,
     installing from the repository keeps local action smoke tests honest.
     Otherwise the action installs either the explicitly requested PyPI version
-    or the stable default package version.
+    or the stable default package version. The default version installs from
+    the hash-locked requirements file next to the action, so a release tag
+    installs the same wheels every time.
     """
 
     action_root = Path(action_path).resolve().parents[2]
@@ -176,16 +185,23 @@ def resolve_install_target(
     if action_root == workspace_root:
         return InstallTarget(requirement=str(action_root), source="repo")
 
+    locked_requirements = str(Path(action_path) / LOCKED_REQUIREMENTS_FILE)
     normalized_version = package_version.strip()
     if normalized_version:
         return InstallTarget(
             requirement=f"codeclone=={normalized_version}",
             source="pypi-version",
+            requirements_file=(
+                locked_requirements
+                if normalized_version == DEFAULT_CODECLONE_PACKAGE_VERSION
+                else ""
+            ),
         )
 
     return InstallTarget(
         requirement=f"codeclone=={DEFAULT_CODECLONE_PACKAGE_VERSION}",
         source="pypi-default",
+        requirements_file=locked_requirements,
     )
 
 

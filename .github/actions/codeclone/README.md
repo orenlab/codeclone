@@ -148,6 +148,14 @@ Released action tags pin the PyPI package version in action metadata. For
 example, `@v2.0.2` installs `codeclone==2.0.2` unless you override
 `package-version`.
 
+The version a tag ships is installed from
+[`requirements.txt`](requirements.txt) next to the action: the release wheel and
+every runtime dependency at an exact version, each file pinned by SHA-256, with
+`pip install --require-hashes --only-binary :all:`. Nothing is resolved at run
+time and nothing is built from source, so a tag installs the same bytes for as
+long as PyPI serves them. Any other `package-version` is installed by name and
+resolves its dependencies at run time.
+
 Explicit prerelease or smoke-test override:
 
 ```yaml
