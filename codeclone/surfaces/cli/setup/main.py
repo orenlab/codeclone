@@ -17,6 +17,7 @@ from ....contracts import ExitCode
 from ....ui_messages import setup as setup_ui
 from ....utils.json_io import json_text
 from ..console import make_query_console
+from ..startup import expand_user_path
 from ..types import PrinterLike
 from .engine.apply import apply_setup_plan
 from .engine.discover import build_setup_snapshot
@@ -47,7 +48,13 @@ _APPLY_ONLY_FLAGS: tuple[tuple[str, str], ...] = (
 def setup_main(argv: list[str]) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    root_path = Path(args.root).expanduser().resolve()
+    try:
+        root_path = expand_user_path(args.root).resolve()
+    except OSError as exc:
+        print(
+            f"Repository root cannot be resolved: {args.root} ({exc})", file=sys.stderr
+        )
+        return int(ExitCode.CONTRACT_ERROR)
     command = args.command or "status"
 
     usage_error = _precheck_error(command, root_path, args)

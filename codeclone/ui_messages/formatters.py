@@ -225,6 +225,17 @@ def fmt_invalid_baseline_scope_id(*, path: Path, error: object) -> str:
     return ERR_INVALID_BASELINE_SCOPE_ID.format(path=esc(path), error=esc(error))
 
 
+_ERR_INVALID_CACHE_PATH: Final = (
+    "[error]Invalid cache path: {path} ({error}).[/error]\n"
+    "[dim]Pass a writable file path to --cache-path, or omit it to use "
+    "the default cache under .codeclone/.[/dim]"
+)
+
+
+def fmt_invalid_cache_path(*, path: object, error: object) -> str:
+    return _ERR_INVALID_CACHE_PATH.format(path=esc(path), error=esc(error))
+
+
 def fmt_report_write_failed(*, label: str, path: Path, error: object) -> str:
     return ERR_REPORT_WRITE_FAILED.format(
         label=label, path=esc(path), error=esc(error), flag=_report_flag(label)

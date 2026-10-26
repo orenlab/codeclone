@@ -17,6 +17,7 @@ from ...contracts import ExitCode
 from ...utils.display_text import display_text
 from . import state as cli_state
 from .attrs import bool_attr, int_attr, optional_text_attr, set_bool_attr
+from .startup import exit_contract_error, expand_user_path
 from .types import PrinterLike, require_status_console
 
 
@@ -146,7 +147,14 @@ def resolve_cache_path(
 ) -> Path:
     cache_path_arg = optional_text_attr(args, "cache_path")
     if from_args and cache_path_arg:
-        return Path(cache_path_arg).expanduser()
+        try:
+            return expand_user_path(cache_path_arg)
+        except OSError as exc:
+            exit_contract_error(
+                ui.fmt_invalid_cache_path(path=cache_path_arg, error=exc),
+                printer=require_status_console(console),
+                cause=exc,
+            )
 
     from ...paths.workspace import default_cache_path, emit_legacy_workspace_warnings
 

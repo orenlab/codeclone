@@ -101,6 +101,7 @@ from .memory_render import (
     render_status_report,
     render_vacuum_report,
 )
+from .startup import expand_user_path
 from .subcommand_parsers import (
     CommandDeclaration,
     OptionApplier,
@@ -155,7 +156,11 @@ def memory_main(argv: list[str]) -> int:
     console = memory_console()
     parser = _build_parser()
     args = parser.parse_args(argv)
-    root_path = Path(args.root).expanduser().resolve()
+    try:
+        root_path = expand_user_path(args.root).resolve()
+    except OSError:
+        console.print(ui.fmt_memory_root_not_found(path=args.root))
+        return int(ExitCode.CONTRACT_ERROR)
     if not root_path.is_dir():
         console.print(ui.fmt_memory_root_not_found(path=root_path))
         return int(ExitCode.CONTRACT_ERROR)

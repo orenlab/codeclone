@@ -65,6 +65,9 @@ def _build_catalog() -> dict[str, str]:
         "fmt_invalid_baseline_path": ui.fmt_invalid_baseline_path(
             path=_PINNED_PATH, error="not a file"
         ),
+        "fmt_invalid_cache_path": ui.fmt_invalid_cache_path(
+            path="~nobody/cache.db", error="Could not determine home directory."
+        ),
         "fmt_baseline_write_failed": ui.fmt_baseline_write_failed(
             path=_PINNED_PATH, error="disk full"
         ),

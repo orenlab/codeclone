@@ -18,7 +18,7 @@ from ... import ui_messages as ui
 from ...contracts import DEFAULT_ROOT, ExitCode
 from . import state as cli_state
 from .attrs import bool_attr, optional_text_attr, text_attr
-from .startup import resolve_root_path
+from .startup import expand_user_path, resolve_root_path
 from .types import (
     CLIArgsLike,
     OutputPaths,
@@ -262,8 +262,9 @@ def _validate_output_path(
     to.
     """
 
-    out = Path(path).expanduser()
+    out = Path(path)
     try:
+        out = expand_user_path(path)
         resolved = _resolve_report_target(out, roots)
     except OSError as exc:
         _exit_contract_error(

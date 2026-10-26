@@ -27,13 +27,29 @@ class ResolvedBaselineInputs:
     metrics_baseline_exists: bool
 
 
+def expand_user_path(raw_path: str | Path) -> Path:
+    """``Path.expanduser`` whose refusal is an ``OSError`` like every other.
+
+    ``~name`` for a user the system does not know raises ``RuntimeError``
+    ("Could not determine home directory."), not ``OSError``. Every path flag
+    already turns an ``OSError`` into a typed contract error; this refusal
+    went past all of them into the internal-error handler (exit 5) or out as
+    a raw traceback.
+    """
+
+    try:
+        return Path(raw_path).expanduser()
+    except RuntimeError as exc:
+        raise OSError(str(exc)) from exc
+
+
 def resolve_runtime_path_arg(
     *,
     root_path: Path,
     raw_path: str,
     from_cli: bool,
 ) -> Path:
-    candidate_path = Path(raw_path).expanduser()
+    candidate_path = expand_user_path(raw_path)
     if from_cli or candidate_path.is_absolute():
         return candidate_path.resolve()
     return (root_path / candidate_path).resolve()
@@ -146,11 +162,13 @@ def resolve_baseline_inputs(
     baseline_path_from_args: bool,
     printer: StatusConsole,
 ) -> ResolvedBaselineInputs:
-    baseline_arg_path = Path(text_attr(args, "baseline")).expanduser()
+    raw_baseline = text_attr(args, "baseline")
+    baseline_arg_path = Path(raw_baseline)
     try:
+        baseline_arg_path = expand_user_path(raw_baseline)
         baseline_path = resolve_runtime_path_arg(
             root_path=root_path,
-            raw_path=text_attr(args, "baseline"),
+            raw_path=raw_baseline,
             from_cli=baseline_path_from_args,
         )
         baseline_exists = baseline_path.exists()
