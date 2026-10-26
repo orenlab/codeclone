@@ -373,6 +373,15 @@ def _build_catalog() -> dict[str, str]:
             )
         ),
         "fmt_internal_error": ui.fmt_internal_error(ValueError("boom")),
+        "fmt_execution_unavailable": ui.fmt_execution_unavailable(
+            "Could not start the worker process pool: a process or thread limit "
+            "was reached ([Errno 35] Resource temporarily unavailable). The "
+            "environment may restrict creating child processes.",
+            steps=(
+                "Run sequentially: pass --processes 1, or set processes = 1 "
+                "under [tool.codeclone] in pyproject.toml.",
+            ),
+        ),
         "version_output": ui.version_output("2.1.0"),
         "banner_title": ui.banner_title("2.1.0"),
         "fmt_memory_db_not_found": ui.fmt_memory_db_not_found(
@@ -649,6 +658,18 @@ def test_errno_brackets_survive_the_runtime_warning_pipeline() -> None:
     rendered = _render_rich(warning, no_color=True)
     assert "[Errno 2]" in rendered, (
         f"the [Errno 2] detail was eaten by markup handling: {rendered!r}"
+    )
+
+
+def test_errno_brackets_survive_the_execution_unavailable_frame() -> None:
+    """In the message and in a step alike: both are quoted text."""
+
+    frame = ui.fmt_execution_unavailable(
+        str(_PINNED_ERROR), steps=(f"Retry once {_PINNED_ERROR} is gone.",)
+    )
+    rendered = _render_rich(frame, no_color=True)
+    assert rendered.count("[Errno 2]") == 2, (
+        f"an [Errno 2] detail was eaten by markup handling: {rendered!r}"
     )
 
 

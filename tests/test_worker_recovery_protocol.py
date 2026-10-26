@@ -243,7 +243,7 @@ def test_a_result_that_is_not_a_file_result_is_never_confirmed(
     assert error is not None
     assert run.accepted == []
     assert Path(str(error.culprit)).name == "a.py"
-    assert "engine invariant: expected a file result, got str" in error.reason
+    assert "engine invariant: expected a file result, got str" in error.failure
     run.assert_released()
 
 
@@ -257,7 +257,7 @@ def test_a_message_that_is_not_a_message_has_an_unknown_culprit(
     error = run.error
     assert error is not None
     assert error.culprit is None
-    assert "isolated process sent str" in error.reason
+    assert "isolated process sent str" in error.failure
     assert run.names(error.not_processed) == ("a.py", "b.py", "c.py")
     run.assert_released()
 
@@ -275,7 +275,7 @@ def test_a_start_for_another_file_has_an_unknown_culprit(
     assert error is not None
     assert run.accepted == ["a.py"]
     assert error.culprit is None
-    assert "expected the start of" in error.reason
+    assert "expected the start of" in error.failure
     assert run.names(error.not_processed) == ("b.py", "c.py")
     run.assert_released()
 
@@ -294,7 +294,7 @@ def test_a_result_cut_short_is_never_confirmed(
     assert error is not None
     assert run.accepted == []
     assert Path(str(error.culprit)).name == "a.py"
-    assert "engine invariant: expected the result of" in error.reason
+    assert "engine invariant: expected the result of" in error.failure
     assert run.names(error.not_processed) == ("b.py", "c.py")
     run.assert_released()
 
@@ -320,7 +320,7 @@ def test_a_death_mid_queue_splits_confirmed_culprit_and_unprocessed(
     assert error is not None
     assert run.accepted == ["a.py"]
     assert Path(str(error.culprit)).name == "b.py"
-    assert "exited with code 13" in error.reason
+    assert "exited with code 13" in error.failure
     assert error.attempts == 2
     assert run.names(error.confirmed) == ("a.py",)
     assert run.names(error.not_processed) == ("c.py",)
@@ -374,7 +374,7 @@ def test_one_hung_file_times_out_mid_queue(
     assert error is not None
     assert run.accepted == ["a.py"]
     assert Path(str(error.culprit)).name == "b.py"
-    assert "no result within 2 s" in error.reason
+    assert "no result within 2 s" in error.failure
     assert run.names(error.not_processed) == ("c.py",)
     assert run.elapsed < probe.HANG_SECONDS / 2
     run.assert_released()
@@ -403,19 +403,41 @@ def test_a_result_for_another_file_is_not_confirmed(
     assert error is not None
     assert run.accepted == ["a.py"]
     assert Path(str(error.culprit)).name == "b.py"
-    assert "engine invariant" in error.reason
+    assert "engine invariant" in error.failure
     run.assert_released()
 
 
+@pytest.mark.parametrize(
+    ("process", "words", "failure"),
+    [
+        (
+            probe.RefusedProcess,
+            "Resource temporarily unavailable",
+            {"reason": "process_creation_unavailable", "errno": "EAGAIN"},
+        ),
+        (
+            probe.UnstartableProcess,
+            "the start method is misconfigured",
+            {"reason": "process_creation_failed"},
+        ),
+    ],
+    ids=["refused-by-the-os", "unproven-cause"],
+)
 def test_a_recovery_process_that_cannot_start_is_an_internal_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    process: type[probe.RefusedProcess],
+    words: str,
+    failure: dict[str, str],
 ) -> None:
-    """The operating system refuses the process -- a process limit, say."""
+    """The process never starts -- refused by the operating system (a
+    process limit, say), or for a cause nobody proved. Exit 5 either way; the
+    recovery failure says which, as data."""
 
     monkeypatch.setattr(
         recovery,
         "multiprocessing",
-        SimpleNamespace(Pipe=multiprocessing.Pipe, Process=probe.RefusedProcess),
+        SimpleNamespace(Pipe=multiprocessing.Pipe, Process=process),
     )
     run = _Recovery(tmp_path, monkeypatch, probe.run_in_child)
 
@@ -423,8 +445,11 @@ def test_a_recovery_process_that_cannot_start_is_an_internal_error(
     assert error is not None
     assert run.accepted == []
     assert error.culprit is None
-    assert "recovery process could not start" in error.reason
-    assert "Resource temporarily unavailable" in error.reason
+    assert "recovery process could not start" in error.failure
+    assert words in error.failure
+    recovery_failure = error.diagnosis()["recovery_failure"]
+    assert isinstance(recovery_failure, dict)
+    assert {key: recovery_failure[key] for key in failure} == failure
     assert run.names(error.not_processed) == ("a.py", "b.py", "c.py")
     assert run.leaked_descriptors == 0
     assert multiprocessing.active_children() == []

@@ -8,14 +8,15 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Sequence
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed
 from functools import partial
+from typing import ClassVar, Final, NoReturn, TypeVar
 
 from ..analysis.phase_ledger import PhaseLedger, PhaseSnapshot
 from ..cache.entries import SourceStatsDict
 from ..cache.reuse import clone_artifact_channels
 from ..cache.store import Cache
-from ..contracts.errors import DiagnosedUserError
+from ..contracts.errors import ExecutionUnavailableError
 from ..models import (
     ClassMetrics,
     DeadCandidate,
@@ -61,27 +62,98 @@ from ._types import (
     structural_findings_required,
 )
 from .worker import _install_module_registry, _invoke_process_file
-from .worker_recovery import WorkerRecoveryError, checked_result, recover_in_isolation
+from .worker_recovery import (
+    WorkerRecoveryError,
+    checked_result,
+    lost_task_failure,
+    process_creation_failure,
+    process_creation_refusal,
+    recover_in_isolation,
+)
+
+_T = TypeVar("_T")
+
+#: The step that runs the analysis without a pool, for the user's terminal.
+SEQUENTIAL_MODE_STEP: Final = (
+    "Run sequentially: pass --processes 1, or set processes = 1 under "
+    "[tool.codeclone] in pyproject.toml."
+)
 
 
-class ParallelProcessingUnavailableError(DiagnosedUserError):
-    """Parallel mode was chosen and its worker pool could not start.
+class ParallelProcessingUnavailableError(ExecutionUnavailableError):
+    """The worker pool could not start, and the environment is proven to be why.
 
-    Nothing was analysed. The run does not quietly continue in this process
-    instead (maintainer ruling 2026-10-26): a mode the user never chose
-    would be measuring their repository, and a sandbox or limit that refuses
-    a pool is something they can see and decide about. Running sequentially
-    is one explicit setting away.
+    Execution unavailable (exit 4): no worker ran, and the errno the
+    operating system set while the pool created its processes says it or a
+    sandbox refused (``worker_recovery.PROCESS_CREATION_REFUSALS``). Nothing
+    was analysed, and the run does not quietly continue in this process
+    instead: sequential mode is the user's explicit choice, one setting away.
     """
 
-    def __init__(self, cause: BaseException) -> None:
+    reason: ClassVar[str] = "process_pool_unavailable"
+
+    def __init__(self, cause: BaseException, *, explanation: str) -> None:
         super().__init__(
-            f"Parallel processing could not start: {cause}",
-            remediation=(
-                "Run sequentially: pass --processes 1, or set processes = 1 "
-                "under [tool.codeclone] in pyproject.toml.",
-            ),
+            f"Could not start the worker process pool: {explanation} ({cause}). "
+            "The environment may restrict creating child processes.",
+            steps=(SEQUENTIAL_MODE_STEP,),
         )
+        self.explanation = explanation
+
+    def remedy(self) -> dict[str, object]:
+        return {"action": "use_sequential_mode", "processes": 1}
+
+
+class _ProcessCreationRefused(Exception):
+    """The environment refused an operation that creates processes."""
+
+    def __init__(self, cause: OSError, explanation: str) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.explanation = explanation
+
+
+def _creating_processes(operation: Callable[[], _T]) -> _T:
+    """Run one operation that creates processes -- the pool's construction,
+    a ``submit`` that starts its workers -- naming a refusal the environment
+    proves. The errno table is read here and nowhere else: the same errno
+    raised by anything else is not a refused pool."""
+
+    try:
+        return operation()
+    except OSError as error:
+        explanation = process_creation_refusal(error)
+        if explanation is None:
+            raise
+        raise _ProcessCreationRefused(error, explanation) from error
+
+
+def _pool_ran_no_file(pool_error: BaseException) -> NoReturn:
+    """The pool failed before it ran any file. Exit 4 only on positive proof
+    that the environment refused to create its processes; anything else
+    stays the error it is."""
+
+    if isinstance(pool_error, _ProcessCreationRefused):
+        raise ParallelProcessingUnavailableError(
+            pool_error.cause, explanation=pool_error.explanation
+        ) from pool_error.cause
+    raise pool_error
+
+
+def _primary_failure(
+    losses: Sequence[BaseException], pool_error: BaseException | None
+) -> dict[str, object]:
+    """Why recovery is needed: the first task the pool lost, or the failure
+    of the pool itself -- kept ahead of any failure recovery meets."""
+
+    if losses:
+        return lost_task_failure(losses[0])
+    if isinstance(pool_error, _ProcessCreationRefused):
+        return process_creation_failure(pool_error.cause)
+    return {
+        "reason": "pool_failed",
+        "detail": f"{type(pool_error).__name__}: {pool_error}",
+    }
 
 
 def _parallel_min_files(processes: int) -> int:
@@ -446,7 +518,8 @@ def process(
             raise WorkerRecoveryError(
                 root=root_str,
                 culprit=filepath,
-                reason=f"result breaks an engine invariant: {exc}",
+                failure=f"result breaks an engine invariant: {exc}",
+                primary_failure={"reason": "engine_invariant", "detail": str(exc)},
                 attempts=1,
                 confirmed=_confirmed(settled),
                 not_processed=[
@@ -466,25 +539,34 @@ def process(
         # was given and did not return.
         settled: set[str] = set()
         lost: set[str] = set()
+        losses: list[BaseException] = []
         pool_error: Exception | None = None
         try:
-            executor_context = ProcessPoolExecutor(
-                max_workers=processes,
-                initializer=_install_module_registry,
-                initargs=(registry,),
+            # A direct call, so the launch stays visible to the inventory of
+            # modules that start processes.
+            executor_context = _creating_processes(
+                lambda: ProcessPoolExecutor(
+                    max_workers=processes,
+                    initializer=_install_module_registry,
+                    initargs=(registry,),
+                )
             )
             with executor_context as executor:
-                for idx in range(0, len(files_to_process), batch_size):
-                    batch = files_to_process[idx : idx + batch_size]
-                    futures = [
-                        executor.submit(
+
+                def _submit(filepath: str) -> Future[FileProcessResult]:
+                    # ``submit`` starts the workers: it creates processes.
+                    return _creating_processes(
+                        lambda: executor.submit(
                             worker,
                             filepath,
                             phase_ledger=_phase_ledger_for_file(),
                             neutral_reuse=neutral_reuse_by_file.get(filepath),
                         )
-                        for filepath in batch
-                    ]
+                    )
+
+                for idx in range(0, len(files_to_process), batch_size):
+                    batch = files_to_process[idx : idx + batch_size]
+                    futures = [_submit(filepath) for filepath in batch]
                     future_to_path = {
                         id(future): filepath
                         for future, filepath in zip(futures, batch, strict=True)
@@ -495,6 +577,7 @@ def process(
                             result = future.result()
                         except Exception as exc:
                             lost.add(filepath)
+                            losses.append(exc)
                             if on_worker_error is not None:
                                 on_worker_error(str(exc))
                             continue
@@ -503,13 +586,12 @@ def process(
                         if on_advance is not None:
                             on_advance()
             record_counter("registry_worker_installs", processes)
-        except (OSError, RuntimeError, PermissionError) as exc:
+        except (_ProcessCreationRefused, OSError, RuntimeError) as exc:
             pool_error = exc
         if pool_error is not None and not settled and not lost:
-            # The pool never ran a file: parallelism is unavailable here, and
-            # no file is suspected of anything. Nothing runs in this process
-            # in its place -- sequential mode is the user's explicit choice.
-            raise ParallelProcessingUnavailableError(pool_error) from pool_error
+            # The pool never ran a file, and nothing runs in this process in
+            # its place -- sequential mode is the user's explicit choice.
+            _pool_ran_no_file(pool_error)
         unsettled = [path for path in files_to_process if path not in settled]
         if unsettled:
             recover_in_isolation(
@@ -525,6 +607,7 @@ def process(
                 on_advance=on_advance,
                 root=root_str,
                 already_confirmed=_confirmed(settled),
+                primary_failure=_primary_failure(losses, pool_error),
             )
             record_counter("registry_worker_installs", 1)
 

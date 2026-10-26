@@ -215,6 +215,7 @@ Exit codes:
      CI/gating mode.
   3  Gating failure: new clones, threshold violations, or metrics
      quality gate failures.
+  4  Unverified: the environment prevented the analysis from running.
   5  Internal error: unexpected exception.
 
 Repository: https://github.com/orenlab/codeclone

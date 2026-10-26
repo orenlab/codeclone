@@ -5,6 +5,7 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 
 from collections.abc import Sequence
+from typing import ClassVar
 
 
 class CodeCloneError(Exception):
@@ -73,6 +74,68 @@ class DiagnosedUserError(CodeCloneError):
         self.remediation: tuple[str, ...] = tuple(step for step in steps if step)
 
 
+class ExecutionUnavailableError(CodeCloneError):
+    """The analysis could not run in this environment: exit 4, unverified.
+
+    The third answer ``main`` gives a failed run, beside the other two. A
+    contract error (:class:`DiagnosedUserError`, exit 2) says the input was
+    wrong; an internal error (exit 5) says CodeClone may be. This says
+    neither: the environment refused something the analysis needs -- a worker
+    process pool -- and the cause it reported proves it (maintainer rulings
+    2026-10-26). Nothing was measured, so nothing passed, no report is
+    complete and no baseline was written.
+
+    A MARKER on the class, for the reason :class:`DiagnosedUserError` is one:
+    every surface reads the class, so a new family is routed the day it is
+    written -- and no surface needs to know the layer that raises it. Only a
+    cause proven to be the environment's may be raised as one; an unproven
+    cause stays the error it is, so exit 4 never hides a possible defect.
+
+    ``reason`` is the machine-readable cause, one wire word per family.
+    ``steps`` are the human steps that make the analysis run here, read on the
+    user's terminal; :meth:`remedy` is the same remedy as data, for a client
+    that acts on it.
+    """
+
+    __slots__ = ("steps",)
+
+    reason: ClassVar[str] = "execution_unavailable"
+
+    def __init__(self, *args: object, steps: Sequence[str] = ()) -> None:
+        super().__init__(*args)
+        self.steps: tuple[str, ...] = tuple(step for step in steps if step)
+
+    def remedy(self) -> dict[str, object]:
+        """The step that makes the analysis run here, as data; ``{}`` if none."""
+
+        return {}
+
+
+class IncompleteAnalysisError(CodeCloneError):
+    """The analysis could not be completed, and CodeClone cannot rule out a
+    defect of its own: exit 5, an internal error.
+
+    Distinct from :class:`ExecutionUnavailableError` on purpose. There, a
+    cause the environment reported proves the whole failure. Here something
+    failed that nobody explained -- a worker that crashed, a recovery that
+    could not finish -- so calling it unverified would hide a possible
+    defect, even when a later step was refused by the environment.
+
+    A secondary failure must not erase the primary one (maintainer law
+    2026-10-26): :meth:`diagnosis` keeps every failure met, the first one
+    first, as data a client can read; the message says the same in words.
+    A marker on the class, as the other two are, so a surface reads it
+    without importing the layer that raises it.
+    """
+
+    reason: str = "analysis_incomplete"
+
+    def diagnosis(self) -> dict[str, object]:
+        """The failures met, the first one first, as data; ``{}`` if none."""
+
+        return {}
+
+
 class ContractInvariantError(CodeCloneError):
     """A shipped contract constant violates the invariant it is published with.
 
@@ -109,7 +172,9 @@ __all__ = [
     "CodeCloneError",
     "ContractInvariantError",
     "DiagnosedUserError",
+    "ExecutionUnavailableError",
     "FileProcessingError",
+    "IncompleteAnalysisError",
     "ParseError",
     "ValidationError",
 ]

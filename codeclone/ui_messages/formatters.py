@@ -13,7 +13,7 @@ import shlex
 import sys
 import textwrap
 import traceback
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -37,7 +37,12 @@ from .labels import (
     SUMMARY_COMPACT_PATCH_VERIFY,
     SUMMARY_COMPACT_SECURITY_SURFACES,
 )
-from .markers import BANNER_SUBTITLE, MARKER_CONTRACT_ERROR, MARKER_INTERNAL_ERROR
+from .markers import (
+    BANNER_SUBTITLE,
+    MARKER_CONTRACT_ERROR,
+    MARKER_INTERNAL_ERROR,
+    MARKER_UNVERIFIED,
+)
 from .runtime import (
     ACTION_API_SURFACE_BASELINE,
     ACTION_CI,
@@ -1259,6 +1264,27 @@ def fmt_diagnosed_user_error(error: DiagnosedUserError) -> str:
         return fmt_contract_error(message)
     steps = tuple(f"- {esc(step)}" for step in error.remediation)
     return fmt_contract_error("\n".join((message, "", "Next steps:", *steps)))
+
+
+EXECUTION_UNAVAILABLE_NOTE = (
+    "Nothing was analysed: no verdict, report or baseline was written."
+)
+
+
+def fmt_execution_unavailable(message: str, *, steps: Sequence[str] = ()) -> str:
+    """Render exit 4: the analysis could not run in this environment.
+
+    Neither of the other frames fits. A contract error says the input was
+    wrong, and it was not. The internal envelope asks for a bug report over a
+    cause the operating system named. This frame says the run measured
+    nothing, and gives the steps that make it run here.
+    """
+
+    lines = [esc(message.strip()) or "<no message>", EXECUTION_UNAVAILABLE_NOTE]
+    if steps:
+        lines.extend(("", "Next steps:", *(f"- {esc(step)}" for step in steps)))
+    body = "\n".join(lines)
+    return f"\n{_INDENT}{MARKER_UNVERIFIED}\n{_indent_block(body)}"
 
 
 def fmt_internal_error(

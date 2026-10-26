@@ -28,6 +28,7 @@ process ran which file, so the parent's own pid can be shown absent.
 
 from __future__ import annotations
 
+import errno
 import multiprocessing
 import os
 import subprocess
@@ -35,7 +36,9 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Callable
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -45,6 +48,7 @@ import codeclone.core.worker as core_worker
 import codeclone.core.worker_recovery as core_recovery
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.cache.store import Cache
+from codeclone.contracts.errors import ExecutionUnavailableError
 from codeclone.core._types import (
     DEFAULT_BATCH_SIZE,
     ProcessingResult,
@@ -226,7 +230,7 @@ def _assert_internal_error(
     error = run.error
     assert error is not None and run.processing is None
     assert Path(str(error.culprit)).name == _KILLER_NAME
-    assert reason in error.reason, error.reason
+    assert reason in error.failure, error.failure
     assert error.attempts == attempts
     assert Path(error.unverified[0]).name == _KILLER_NAME
     message = str(error)
@@ -255,6 +259,126 @@ def test_a_second_death_is_an_internal_error_naming_the_file(
     assert run.spawns == 1
 
 
+@pytest.mark.parametrize(
+    ("invoke", "first", "words"),
+    [
+        (probe.die_once_in_worker, "worker_crashed", "worker crashed (cause unknown)"),
+        (probe.raise_once_in_worker, "worker_failed", "worker failed: RuntimeError"),
+    ],
+    ids=["crash", "task-error"],
+)
+def test_a_refused_recovery_keeps_the_worker_crash_as_the_first_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., object],
+    first: str,
+    words: str,
+) -> None:
+    """A secondary failure must not erase the primary one (maintainer law
+    2026-10-26). A worker died for a cause nobody knows; then the operating
+    system refused the recovery process (EAGAIN). Exit 5, not 4: the first
+    failure is unexplained, so the environment is not proven to be the whole
+    story -- and the diagnosis keeps both failures, the crash first. It does
+    not offer sequential mode as the fix: that would only avoid the pool,
+    and leave the crash unexplained."""
+
+    monkeypatch.setattr(
+        core_recovery,
+        "multiprocessing",
+        SimpleNamespace(Pipe=multiprocessing.Pipe, Process=probe.RefusedProcess),
+    )
+
+    run = _Run(tmp_path, monkeypatch, invoke=invoke, batch_size=_MID_RUN_BATCH_SIZE)
+
+    error = run.error
+    assert error is not None and run.processing is None
+    assert run.worker_errors, "no task was lost; the probe proves nothing"
+    assert not isinstance(error, ExecutionUnavailableError)
+    assert error.reason == "worker_recovery_failed"
+    diagnosis = error.diagnosis()
+    primary = diagnosis["primary_failure"]
+    assert isinstance(primary, dict)
+    assert primary["reason"] == first
+    if first == "worker_crashed":
+        assert primary["cause"] == "unknown"
+    recovery = diagnosis["recovery_failure"]
+    assert isinstance(recovery, dict)
+    assert (recovery["reason"], recovery["errno"]) == (
+        "process_creation_unavailable",
+        "EAGAIN",
+    )
+    message = " ".join(str(error).split())
+    assert words in message
+    assert "Resource temporarily unavailable" in message
+    assert message.index(words) < message.index("Resource temporarily unavailable")
+    assert "processes 1" not in message and "processes=1" not in message
+    assert multiprocessing.active_children() == []
+
+
+@pytest.mark.parametrize(
+    ("pool_failure", "first"),
+    [
+        (
+            BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable"),
+            {
+                "reason": "process_creation_unavailable",
+                "errno": "EAGAIN",
+                "detail": str(
+                    BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+                ),
+            },
+        ),
+        (
+            RuntimeError("cannot schedule new futures after shutdown"),
+            {
+                "reason": "pool_failed",
+                "detail": "RuntimeError: cannot schedule new futures after shutdown",
+            },
+        ),
+    ],
+    ids=["refused-by-the-os", "pool-failed"],
+)
+def test_a_pool_refused_after_workers_ran_is_not_unverified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pool_failure: BaseException,
+    first: dict[str, str],
+) -> None:
+    """Exit 4 needs a pool that ran no file. Here the first batch was
+    analysed, then the pool failed -- the operating system refused the next
+    workers (EAGAIN), or the pool broke for a cause nobody proved -- and the
+    recovery process was refused too: exit 5, with the pool's failure kept as
+    the first one."""
+
+    class _RefusesTheSecondBatch(ProcessPoolExecutor):
+        submitted = 0
+
+        def submit(self, fn: Callable[..., object], /, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            type(self).submitted += 1
+            if type(self).submitted > _MID_RUN_BATCH_SIZE:
+                raise pool_failure
+            return super().submit(fn, *args, **kwargs)
+
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _RefusesTheSecondBatch)
+    monkeypatch.setattr(
+        core_recovery,
+        "multiprocessing",
+        SimpleNamespace(Pipe=multiprocessing.Pipe, Process=probe.RefusedProcess),
+    )
+
+    run = _Run(tmp_path, monkeypatch, invoke=None, batch_size=_MID_RUN_BATCH_SIZE)
+
+    error = run.error
+    assert error is not None and run.processing is None
+    assert not isinstance(error, ExecutionUnavailableError)
+    assert len(error.confirmed) == _MID_RUN_BATCH_SIZE
+    diagnosis = error.diagnosis()
+    assert diagnosis["primary_failure"] == first
+    recovery = diagnosis["recovery_failure"]
+    assert isinstance(recovery, dict)
+    assert recovery["reason"] == "process_creation_unavailable"
+
+
 def test_a_hung_retry_is_an_internal_error_after_the_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -278,7 +402,7 @@ def test_a_limit_that_kills_every_process_spawns_one_recovery_only(
     error = run.error
     assert error is not None and run.processing is None
     assert run.spawns == 1
-    assert "exited with code 13" in error.reason
+    assert "exited with code 13" in error.failure
     assert sorted(Path(path).name for path in error.unverified) == sorted(
         Path(path).name for path in run.discovery.files_to_process
     )

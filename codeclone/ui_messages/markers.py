@@ -20,5 +20,7 @@ BANNER_SUBTITLE = "structural change control for Python"
 # body is indented under them by ``fmt_contract_error`` / ``fmt_internal_error``.
 MARKER_CONTRACT_ERROR = f"[error]{GLYPH_FAIL} CONTRACT ERROR[/error]"
 MARKER_INTERNAL_ERROR = f"[error]{GLYPH_FAIL} INTERNAL ERROR[/error]"
+# Exit 4: the analysis did not run, so nothing it would have said is known.
+MARKER_UNVERIFIED = f"[error]{GLYPH_FAIL} UNVERIFIED[/error]"
 
 REPORT_BLOCK_GROUP_DISPLAY_NAME_ASSERT_PATTERN = "Assert pattern block"

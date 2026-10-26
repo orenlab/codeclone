@@ -84,6 +84,18 @@ def die_once_in_worker(
     return _real(filepath, *args, **kwargs)
 
 
+def raise_once_in_worker(
+    filepath: str, *args: object, **kwargs: object
+) -> FileProcessResult:
+    """The marked file raises in the first worker that runs it: the task is
+    lost with an error of its own, and the worker lives on."""
+
+    _record(filepath)
+    if _in_child() and _is_killer(filepath) and _first_attempt(filepath):
+        raise RuntimeError("the task failed in its worker")
+    return _real(filepath, *args, **kwargs)
+
+
 def die_always_in_worker(
     filepath: str, *args: object, **kwargs: object
 ) -> FileProcessResult:
@@ -230,6 +242,14 @@ class RefusedProcess:
 
     def start(self) -> None:
         raise OSError(errno.EAGAIN, "Resource temporarily unavailable")
+
+
+class UnstartableProcess(RefusedProcess):
+    """A process that fails to start for a cause nobody proved to be the
+    environment's."""
+
+    def start(self) -> None:
+        raise RuntimeError("the start method is misconfigured")
 
 
 def speak(

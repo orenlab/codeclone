@@ -1042,6 +1042,10 @@ class ExitCode(IntEnum):
     SUCCESS = 0
     CONTRACT_ERROR = 2
     GATING_FAILURE = 3
+    #: The analysis could not run here: the environment refused what it needs
+    #: (a worker process pool). Nothing was measured, so nothing passed and
+    #: nothing was published -- not invalid input, and not proof of a defect.
+    UNVERIFIED = 4
     INTERNAL_ERROR = 5
 
 
@@ -1060,6 +1064,7 @@ def cli_help_epilog() -> str:
             "     CI/gating mode.",
             "  3  Gating failure: new clones, threshold violations, or metrics",
             "     quality gate failures.",
+            "  4  Unverified: the environment prevented the analysis from running.",
             "  5  Internal error: unexpected exception.",
             "",
             f"Repository: {REPOSITORY_URL}",

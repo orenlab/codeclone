@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -1320,28 +1321,142 @@ def test_cli_cache_status_string_fallback(
     assert _report_meta_cache(payload)["status"] == expected_status
 
 
+def _refusing_executor(error: BaseException) -> type[_FailingExecutor]:
+    """A pool whose start fails with ``error``, raised where the real one is."""
+
+    class _Refusing(_FailingExecutor):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            raise error
+
+    return _Refusing
+
+
+def _parallel_tree(root: Path) -> None:
+    for idx in range(_parallel_min_files(2) + 1):
+        (root / f"a{idx}.py").write_text("def f():\n    return 1\n", "utf-8")
+
+
 @pytest.mark.parametrize("no_progress", [False, True], ids=["progress", "no-progress"])
-def test_cli_parallel_pool_that_cannot_start_is_a_contract_error(
+def test_cli_parallel_pool_the_environment_refuses_is_unverified(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     no_progress: bool,
 ) -> None:
-    """The pool cannot start: a diagnosed error with the step that resolves
-    it, never a quiet sequential run (maintainer ruling 2026-10-26; this
-    used to print "falling back to sequential" and carry on)."""
+    """The operating system refuses the pool -- here the error a real process
+    limit raises (measured on spawn, forkserver and fork): exit 4, the
+    analysis did not run, and the step that runs it sequentially. Neither a
+    quiet sequential run nor a contract error (maintainer rulings 2026-10-26)."""
 
-    for idx in range(_parallel_min_files(2) + 1):
-        src = tmp_path / f"a{idx}.py"
-        src.write_text("def f():\n    return 1\n", "utf-8")
-    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
+    _parallel_tree(tmp_path)
+    refused = BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+    monkeypatch.setattr(
+        core_parallelism, "ProcessPoolExecutor", _refusing_executor(refused)
+    )
     args = [str(tmp_path), "--processes", "2"]
     if no_progress:
         args.append("--no-progress")
-    _assert_cli_exit(monkeypatch, args, expected_code=2)
+    _assert_cli_exit(monkeypatch, args, expected_code=4)
     out = " ".join(capsys.readouterr().out.split())
-    assert_contains_all(out, "Parallel processing could not start", "--processes 1")
-    assert "falling back" not in out
+    assert_contains_all(
+        out, "UNVERIFIED", "Could not start the worker process pool", "--processes 1"
+    )
+    assert_contains_none(out, "CONTRACT ERROR", "INTERNAL ERROR", "falling back")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("pool bootstrap broke"),
+        OSError(errno.EINVAL, "Invalid argument"),
+        PermissionError("refused, with no errno to prove by whom"),
+    ],
+    ids=["runtime-error", "unexplained-errno", "no-errno"],
+)
+def test_cli_pool_start_failure_without_a_proven_environment_cause_is_internal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error: BaseException,
+) -> None:
+    """Exit 4 never masks an internal error: a pool start that fails for a
+    cause nobody proved to be the environment's ends as exit 5, with the
+    original error, and never as UNVERIFIED."""
+
+    _parallel_tree(tmp_path)
+    monkeypatch.setattr(
+        core_parallelism, "ProcessPoolExecutor", _refusing_executor(error)
+    )
+    _assert_cli_exit(
+        monkeypatch,
+        [str(tmp_path), "--processes", "2", "--no-progress"],
+        expected_code=5,
+    )
+    out = " ".join(capsys.readouterr().out.split())
+    assert_contains_all(out, "INTERNAL ERROR", type(error).__name__, str(error))
+    assert_contains_none(out, "UNVERIFIED", "Could not start the worker process pool")
+
+
+@pytest.mark.parametrize(
+    "where",
+    ["report-write-enospc", "cache-save-eacces"],
+)
+def test_cli_an_errno_outside_process_creation_is_never_unverified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    where: str,
+) -> None:
+    """The errno table reads process creation and nothing else. The pool ran;
+    then writing the report met ENOSPC, or saving the cache met EACCES --
+    errnos the table lists for a refused pool. Neither is "unverified": each
+    keeps the answer it had before exit 4 existed."""
+
+    _parallel_tree(tmp_path)
+
+    pools: list[_DummyExecutor] = []
+
+    def _pool(**_settings: object) -> _DummyExecutor:
+        """A pool that started: it runs each task in this process."""
+
+        pools.append(_DummyExecutor())
+        return pools[-1]
+
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _pool)
+    monkeypatch.setattr(core_parallelism, "as_completed", lambda futures: futures)
+    report = tmp_path / "out" / "report.json"
+    real_write_bytes = Path.write_bytes
+
+    def _full_disk(self: Path, data: bytes) -> int:
+        if self == report:
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_write_bytes(self, data)
+
+    def _denied(self: Cache) -> None:
+        raise PermissionError(errno.EACCES, "Permission denied")
+
+    if where == "report-write-enospc":
+        monkeypatch.setattr(Path, "write_bytes", _full_disk)
+    else:
+        monkeypatch.setattr(Cache, "save", _denied)
+    with pytest.raises(SystemExit) as exited:
+        _run_main(
+            monkeypatch,
+            [str(tmp_path), "--processes", "2", "--no-progress", "--json", str(report)],
+        )
+
+    out = " ".join(capsys.readouterr().out.split())
+    # Probe validity: the pool started and ran the files.
+    assert len(pools) == 1, out
+    assert exited.value.code != 4, out
+    assert "UNVERIFIED" not in out
+    assert "Could not start the worker process pool" not in out
+    expected = (
+        ExitCode.CONTRACT_ERROR
+        if where == "report-write-enospc"
+        else ExitCode.INTERNAL_ERROR
+    )
+    assert exited.value.code == expected, out
 
 
 def test_cli_explicit_sequential_mode_never_starts_a_pool(

@@ -26,7 +26,7 @@ from ...contracts import (
     ExitCode,
     observed_population,
 )
-from ...contracts.errors import DiagnosedUserError
+from ...contracts.errors import DiagnosedUserError, ExecutionUnavailableError
 from ...core._types import (
     AnalysisResult,
     BootstrapResult,
@@ -934,6 +934,13 @@ def main() -> None:
         # rather than the day somebody notices it in a bug report.
         _console().print(ui.fmt_diagnosed_user_error(exc))
         raise SystemExit(ExitCode.CONTRACT_ERROR) from exc
+    except ExecutionUnavailableError as exc:
+        # The marker, like the diagnosed families above: the environment
+        # refused, by a cause it reported -- neither invalid input nor an
+        # internal defect. An unproven failure is never raised as one; it is
+        # the internal error below.
+        _console().print(ui.fmt_execution_unavailable(str(exc), steps=exc.steps))
+        raise SystemExit(ExitCode.UNVERIFIED) from exc
     except Exception as exc:
         _console().print(
             ui.fmt_internal_error(

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import builtins
+import errno
 from argparse import Namespace
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
@@ -29,6 +30,10 @@ from codeclone.cache.reuse import (
 )
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.canonical.identity import DEAD_CODE_CANDIDATE_KINDS
+from codeclone.contracts.errors import (
+    ExecutionUnavailableError,
+    IncompleteAnalysisError,
+)
 from codeclone.core._types import (
     DEFAULT_RUNTIME_PROCESSES,
     AnalysisResult,
@@ -51,6 +56,7 @@ from codeclone.core.parallelism import (
 )
 from codeclone.core.pipeline import analyze
 from codeclone.core.reporting import GatingResult, report
+from codeclone.core.worker_recovery import WorkerRecoveryError
 from codeclone.domain.findings import SYMBOL_KIND_IMPORT
 from codeclone.metrics.coverage_join import CoverageJoinParseError
 from codeclone.models import (
@@ -84,11 +90,22 @@ from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
 class _FailExec:
+    """A pool whose start fails with :attr:`error` where the real one starts
+    its processes: in its constructor (its process-shared primitives, the
+    resource tracker, the fork server) or at the first ``submit`` (the
+    workers themselves), as :attr:`at` says."""
+
+    error: BaseException = BlockingIOError(
+        errno.EAGAIN, "Resource temporarily unavailable"
+    )
+    at = "construct"
+
     def __init__(self, *args: object, **kwargs: object) -> None:
-        return None
+        if self.at == "construct":
+            raise self.error
 
     def __enter__(self) -> _FailExec:
-        raise RuntimeError("executor unavailable")
+        return self
 
     def __exit__(
         self,
@@ -97,6 +114,9 @@ class _FailExec:
         tb: object | None,
     ) -> Literal[False]:
         return False
+
+    def submit(self, *args: object, **kwargs: object) -> object:
+        raise self.error
 
 
 class _UnexpectedExec:
@@ -895,8 +915,16 @@ def _build_report_case(
 
 
 def _pool_that_cannot_start(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[pytest.ExceptionInfo[ParallelProcessingUnavailableError], list[str]]:
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error: BaseException,
+    *,
+    at: str = "construct",
+) -> tuple[BaseException, list[str]]:
+    """Run ``process`` over a batch large enough for the pool, with a pool
+    whose start fails with ``error``; return what ``process`` raised and
+    every file that was analysed anyway."""
+
     boot, discovery, cache, _filepaths = _build_large_batch_case(tmp_path)
     analysed: list[str] = []
     stub = _stub_process_file(expected_root=str(tmp_path))
@@ -905,26 +933,147 @@ def _pool_that_cannot_start(
         analysed.append(filepath)
         return stub(filepath, *args, **kwargs)  # type: ignore[operator]
 
+    monkeypatch.setattr(_FailExec, "error", error)
+    monkeypatch.setattr(_FailExec, "at", at)
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailExec)
     monkeypatch.setattr(core_worker, "process_file", _recording)
-    with pytest.raises(ParallelProcessingUnavailableError) as raised:
+    with pytest.raises(BaseException) as raised:
         process(boot=boot, discovery=discovery, cache=cache)
-    return raised, analysed
+    return raised.value, analysed
 
 
-def test_process_parallel_pool_that_cannot_start_is_a_typed_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+#: What a pool start fails with when the environment refuses it, and the
+#: cause the error must name. EAGAIN is what a real process limit raised on
+#: spawn, forkserver and fork alike (measured 2026-10-26).
+_ENVIRONMENT_REFUSALS = (
+    (BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable"), "limit"),
+    (OSError(errno.ENOMEM, "Cannot allocate memory"), "memory"),
+    (OSError(errno.EMFILE, "Too many open files"), "open files"),
+    (PermissionError(errno.EPERM, "Operation not permitted"), "refused"),
+    (OSError(errno.ENOSYS, "Function not implemented"), "semaphores"),
+)
+
+
+@pytest.mark.parametrize(
+    ("error", "named"),
+    _ENVIRONMENT_REFUSALS,
+    ids=["eagain", "enomem", "emfile", "eperm", "enosys"],
+)
+def test_process_pool_the_environment_refuses_is_execution_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: OSError, named: str
 ) -> None:
-    """No hidden fallback (maintainer ruling 2026-10-26): parallel mode whose
-    pool cannot start does not quietly analyse in this process. It used to
-    fall back to sequential analysis here; now it stops, a user error with
-    the one step that resolves it."""
+    """No hidden fallback, and no blame: a pool the operating system or a
+    sandbox refuses stops the run before any file is analysed, as execution
+    unavailable -- exit 4 -- naming the cause it proved (maintainer rulings
+    2026-10-26)."""
 
-    raised, analysed = _pool_that_cannot_start(tmp_path, monkeypatch)
+    raised, analysed = _pool_that_cannot_start(tmp_path, monkeypatch, error)
 
     assert analysed == []
-    assert "executor unavailable" in str(raised.value)
-    assert any("--processes 1" in step for step in raised.value.remediation)
+    assert isinstance(raised, ParallelProcessingUnavailableError)
+    assert raised.reason == "process_pool_unavailable"
+    assert raised.__cause__ is error
+    assert named in raised.explanation
+    assert str(error) in str(raised)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("executor unavailable"),
+        OSError(errno.EINVAL, "Invalid argument"),
+        PermissionError("refused, with no errno to prove by whom"),
+        ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused"),
+    ],
+    ids=["runtime-error", "einval", "no-errno", "econnrefused"],
+)
+def test_process_pool_start_failure_of_unproven_cause_is_not_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: BaseException
+) -> None:
+    """An unknown cause is not the environment's by default: the original
+    error leaves ``process`` unchanged, for the internal-error path (exit 5),
+    and nothing was analysed in its place."""
+
+    raised, analysed = _pool_that_cannot_start(tmp_path, monkeypatch, error)
+
+    assert analysed == []
+    assert raised is error
+    assert not isinstance(raised, ParallelProcessingUnavailableError)
+
+
+def test_process_pool_whose_workers_the_environment_refuses_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pool is built, and its first ``submit`` -- where the workers are
+    started -- is refused: the same proven environment refusal."""
+
+    refused = BlockingIOError(errno.EAGAIN, "Resource temporarily unavailable")
+    raised, analysed = _pool_that_cannot_start(
+        tmp_path, monkeypatch, refused, at="submit"
+    )
+
+    assert analysed == []
+    assert isinstance(raised, ParallelProcessingUnavailableError)
+    assert raised.__cause__ is refused
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        OSError(errno.ENOSPC, "No space left on device"),
+        PermissionError(errno.EACCES, "Permission denied"),
+    ],
+    ids=["enospc", "eacces"],
+)
+def test_an_errno_raised_beside_process_creation_is_never_pool_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: OSError
+) -> None:
+    """The errno table reads only the operations that create processes. The
+    pool starts and takes its tasks; the same errno raised by anything else
+    -- here while the results are awaited, before any file is settled --
+    is not a refused pool: it leaves ``process`` unchanged, for exit 5."""
+
+    boot, discovery, cache, _filepaths = _build_large_batch_case(tmp_path)
+
+    class _StartedPool:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def __enter__(self) -> _StartedPool:
+            return self
+
+        def __exit__(self, *exc_info: object) -> Literal[False]:
+            return False
+
+        def submit(self, *args: object, **kwargs: object) -> object:
+            return object()
+
+    def _awaiting_fails(*_args: object, **_kwargs: object) -> object:
+        raise error
+
+    monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _StartedPool)
+    monkeypatch.setattr(core_parallelism, "as_completed", _awaiting_fails)
+    with pytest.raises(BaseException) as raised:
+        process(boot=boot, discovery=discovery, cache=cache)
+
+    assert raised.value is error
+    assert not isinstance(raised.value, ExecutionUnavailableError)
+
+
+def test_only_a_proven_environment_refusal_answers_exit_four() -> None:
+    """The exit-4 marker has one family, the pool the environment refused;
+    the internal errors of the run are not of it, so none of them can leave
+    as "unverified" instead of exit 5."""
+
+    families: list[type[BaseException]] = list(
+        ExecutionUnavailableError.__subclasses__()
+    )
+    assert families == [ParallelProcessingUnavailableError]
+    for internal in (WorkerRecoveryError, RuntimeError, OSError):
+        assert not issubclass(internal, ExecutionUnavailableError), internal
+    # The recovery error is an internal one, and the two markers never meet.
+    assert issubclass(WorkerRecoveryError, IncompleteAnalysisError)
+    assert not issubclass(ParallelProcessingUnavailableError, IncompleteAnalysisError)
 
 
 def test_process_small_batch_skips_parallel_executor(

@@ -29,14 +29,18 @@ recovery ends, the child is reaped and every descriptor it held is closed.
 
 from __future__ import annotations
 
+import errno
 import multiprocessing
 import os
 from collections.abc import Callable, Collection, Mapping, Sequence
+from concurrent.futures.process import BrokenProcessPool
 from multiprocessing.connection import Connection
 from multiprocessing.process import BaseProcess
+from types import MappingProxyType
 from typing import Final, NoReturn
 
 from ..analysis.phase_ledger import PhaseLedger
+from ..contracts.errors import IncompleteAnalysisError
 from ..models import ModuleRegistryHandle, RehydratedCacheNeutral
 from ._types import FileProcessResult
 from .worker import _install_module_registry
@@ -55,6 +59,95 @@ _RESULT: Final = "result"
 _DONE: Final = "done"
 _FILE_SAMPLE: Final = 10
 _CHILD_EXIT_GRACE_SECONDS: Final = 5.0
+
+
+#: Why the operating system refused to create a process, by ``errno``, when
+#: the cause is proven to be the environment's and not CodeClone's: each is a
+#: limit or a refusal it imposes on starting processes or on the
+#: process-shared primitives a worker pool needs (maintainer rulings
+#: 2026-10-26). Read ONLY for an operation that creates processes -- a pool's
+#: construction and its ``submit``, the recovery child's start -- and only off
+#: the errno the operating system set: an ``OSError`` raised without one, or
+#: by anything else, proves nothing about the environment. EAGAIN is what a
+#: real process limit raised on spawn, forkserver and fork alike (measured
+#: 2026-10-26); EWOULDBLOCK is the same number on Linux and macOS.
+PROCESS_CREATION_REFUSALS: Final[Mapping[int, str]] = MappingProxyType(
+    {
+        errno.EAGAIN: "a process or thread limit was reached",
+        errno.ENOMEM: "there was not enough memory to start a worker process",
+        errno.EMFILE: "the per-process limit on open files was reached",
+        errno.ENFILE: "the system-wide limit on open files was reached",
+        errno.EPERM: (
+            "the operating system or a sandbox refused to start a worker process"
+        ),
+        errno.EACCES: (
+            "the operating system or a sandbox refused a resource the pool needs"
+        ),
+        errno.ENOSYS: (
+            "the platform does not provide the process-shared semaphores the pool needs"
+        ),
+        errno.ENOSPC: (
+            "there was no room for the process-shared semaphores the pool needs"
+        ),
+    }
+)
+
+
+def process_creation_refusal(error: BaseException) -> str | None:
+    """Why the environment refused to create a process, if ``error`` -- raised
+    by an operation that creates one -- proves it did.
+
+    ``None`` for every other failure, an unknown one included: an unproven
+    cause is never called the environment's, because that would hide what
+    may be CodeClone's own defect.
+    """
+
+    if isinstance(error, OSError) and error.errno is not None:
+        return PROCESS_CREATION_REFUSALS.get(error.errno)
+    return None
+
+
+def _named(error: BaseException) -> str:
+    return f"{type(error).__name__}: {error}"
+
+
+def process_creation_failure(error: BaseException) -> dict[str, object]:
+    """A failed process creation, as a failure the diagnosis can carry: the
+    errno's name when it proves the environment refused, the error as it is
+    otherwise."""
+
+    if isinstance(error, OSError) and process_creation_refusal(error) is not None:
+        return {
+            "reason": "process_creation_unavailable",
+            "errno": errno.errorcode.get(error.errno or 0, str(error.errno)),
+            "detail": str(error),
+        }
+    return {"reason": "process_creation_failed", "detail": _named(error)}
+
+
+def lost_task_failure(error: BaseException) -> dict[str, object]:
+    """Why the pool did not return a file: its worker crashed -- for a cause
+    nobody knows -- or the task failed with an error of its own."""
+
+    if isinstance(error, BrokenProcessPool):
+        return {"reason": "worker_crashed", "cause": "unknown", "detail": str(error)}
+    return {"reason": "worker_failed", "detail": _named(error)}
+
+
+_FAILURE_WORDS: Final = MappingProxyType(
+    {
+        "worker_crashed": "worker crashed (cause unknown): {detail}",
+        "worker_failed": "worker failed: {detail}",
+        "process_creation_unavailable": "process creation refused: {detail}",
+        "process_creation_failed": "process creation failed: {detail}",
+        "pool_failed": "worker pool failed: {detail}",
+    }
+)
+
+
+def _describe(failure: Mapping[str, object]) -> str:
+    template = _FAILURE_WORDS.get(str(failure.get("reason")), "{reason}: {detail}")
+    return template.format(reason=failure.get("reason"), detail=failure.get("detail"))
 
 
 def _display_path(path: str, root: str) -> str:
@@ -88,7 +181,7 @@ def checked_result(result: object, filepath: str) -> FileProcessResult:
     return result
 
 
-class WorkerRecoveryError(Exception):
+class WorkerRecoveryError(IncompleteAnalysisError):
     """The run cannot be completed: an internal error, exit 5.
 
     Raised when the isolated retry of a file the pool lost dies, hangs past
@@ -97,7 +190,15 @@ class WorkerRecoveryError(Exception):
     report is produced, so no partial analysis can look complete and no
     baseline can be published from it. The message names three classes of
     files -- confirmed, the culprit (or UNKNOWN), and not processed -- with
-    the reason and the attempts made on the culprit.
+    the attempts made on the culprit.
+
+    A secondary failure must not erase the primary one (maintainer law
+    2026-10-26): ``primary_failure`` is why recovery was needed at all -- a
+    worker that crashed for a cause nobody knows, or a pool that failed --
+    and ``recovery_failure`` why recovery did not finish. Both are kept, the
+    first first, in the message and in :meth:`diagnosis`. Exit 5 even when
+    the recovery was refused by the environment: the first failure is still
+    unexplained, so the environment is not proven to be the whole story.
     """
 
     def __init__(
@@ -105,27 +206,56 @@ class WorkerRecoveryError(Exception):
         *,
         root: str,
         culprit: str | None,
-        reason: str,
+        failure: str,
         attempts: int,
         confirmed: Sequence[str],
         not_processed: Sequence[str],
+        primary_failure: Mapping[str, object] | None = None,
+        recovery_failure: Mapping[str, object] | None = None,
     ) -> None:
         self.culprit = culprit
-        self.reason = reason
+        self.failure = failure
         self.attempts = attempts
         self.confirmed = tuple(confirmed)
         self.not_processed = tuple(not_processed)
+        self.primary_failure = (
+            None if primary_failure is None else dict(primary_failure)
+        )
+        self.recovery_failure = (
+            None if recovery_failure is None else dict(recovery_failure)
+        )
+        self.reason = (
+            "worker_recovery_failed"
+            if recovery_failure is not None
+            else "engine_invariant"
+        )
+        self._culprit_shown = None if culprit is None else _display_path(culprit, root)
         head = (
-            f"{_display_path(culprit, root)}: {reason}; "
-            f"attempts on this file: {attempts}"
-            if culprit is not None
-            else f"{UNKNOWN_CULPRIT} culprit: {reason}"
+            f"{self._culprit_shown}: {failure}; attempts on this file: {attempts}"
+            if self._culprit_shown is not None
+            else f"{UNKNOWN_CULPRIT} culprit: {failure}"
+        )
+        # The first failure leads whenever a second one followed it.
+        first = (
+            f"{_describe(self.primary_failure)}; then "
+            if self.primary_failure is not None and self.recovery_failure is not None
+            else ""
         )
         super().__init__(
-            f"analysis incomplete: {head}; "
+            f"analysis incomplete: {first}{head}; "
             f"confirmed: {_sample(self.confirmed, root)}; "
             f"not processed: {_sample(self.not_processed, root)}"
         )
+
+    def diagnosis(self) -> dict[str, object]:
+        return {
+            "primary_failure": self.primary_failure,
+            "recovery_failure": self.recovery_failure,
+            "culprit": self._culprit_shown,
+            "attempts": self.attempts,
+            "confirmed": len(self.confirmed),
+            "not_processed": len(self.not_processed),
+        }
 
     @property
     def unverified(self) -> tuple[str, ...]:
@@ -199,23 +329,39 @@ class _Progress:
 
 
 class _NoMessage(Exception):
-    """The child sent nothing usable: it died, hung, or broke the protocol."""
+    """The child sent nothing usable: it died, hung, or broke the protocol.
+    ``failure`` says which, as the diagnosis carries it."""
+
+    def __init__(self, text: str, failure: Mapping[str, object]) -> None:
+        super().__init__(text)
+        self.failure = dict(failure)
+
+
+def _protocol_breach(text: str) -> _NoMessage:
+    return _NoMessage(text, {"reason": "protocol_breach", "detail": text})
 
 
 def _next_message(child: BaseProcess, receiver: Connection) -> tuple[object, ...]:
     """The next whole message, within one file's deadline."""
 
     if not receiver.poll(ISOLATED_RECOVERY_TIMEOUT_SECONDS):
-        raise _NoMessage(f"no result within {ISOLATED_RECOVERY_TIMEOUT_SECONDS:g} s")
+        raise _NoMessage(
+            f"no result within {ISOLATED_RECOVERY_TIMEOUT_SECONDS:g} s",
+            {
+                "reason": "recovery_timed_out",
+                "seconds": ISOLATED_RECOVERY_TIMEOUT_SECONDS,
+            },
+        )
     try:
         message = receiver.recv()
     except EOFError:
         child.join(timeout=_CHILD_EXIT_GRACE_SECONDS)
         raise _NoMessage(
-            f"isolated process exited with code {child.exitcode}"
+            f"isolated process exited with code {child.exitcode}",
+            {"reason": "recovery_crashed", "exit_code": child.exitcode},
         ) from None
     if not isinstance(message, tuple) or not message:
-        raise _NoMessage(f"isolated process sent {type(message).__name__}")
+        raise _protocol_breach(f"isolated process sent {type(message).__name__}")
     return message
 
 
@@ -259,6 +405,7 @@ def recover_in_isolation(
     on_advance: Callable[[], None] | None,
     root: str,
     already_confirmed: Sequence[str] = (),
+    primary_failure: Mapping[str, object] | None = None,
 ) -> None:
     """Run ``files`` once each in one single-use child and ``accept`` every
     confirmed result, or raise :class:`WorkerRecoveryError`.
@@ -267,21 +414,29 @@ def recover_in_isolation(
     among them has had two attempts, any other one. ``already_confirmed``
     are the files whose results the parent accepted before recovery; an
     error counts them with the files confirmed here, so its three classes
-    cover the whole run. No second child is ever started, so a limit that
-    kills every process cannot turn recovery into a chain of spawns.
+    cover the whole run. ``primary_failure`` is why recovery was needed; an
+    error keeps it ahead of its own. No second child is ever started, so a
+    limit that kills every process cannot turn recovery into a chain of
+    spawns.
     """
 
     progress = _Progress(files=files, confirmed=already_confirmed)
 
-    def fail(reason: str, cause: BaseException | None = None) -> NoReturn:
+    def fail(
+        failure: str,
+        recovery_failure: Mapping[str, object],
+        cause: BaseException | None = None,
+    ) -> NoReturn:
         culprit = progress.in_flight
         raise WorkerRecoveryError(
             root=root,
             culprit=culprit,
-            reason=reason,
+            failure=failure,
             attempts=(2 if culprit in lost else 1) if culprit is not None else 0,
             confirmed=progress.confirmed,
             not_processed=progress.remaining(),
+            primary_failure=primary_failure,
+            recovery_failure=recovery_failure,
         ) from cause
 
     try:
@@ -289,24 +444,32 @@ def recover_in_isolation(
             (registry, worker, tuple(files), neutral_reuse, collect_phases)
         )
     except Exception as exc:
-        fail(f"recovery process could not start: {exc}", exc)
+        fail(
+            f"recovery process could not start: {exc}",
+            process_creation_failure(exc),
+            exc,
+        )
     completed = False
     try:
         for filepath in files:
             try:
                 started = _next_message(child, receiver)
                 if started != (_START, filepath):
-                    raise _NoMessage(f"expected the start of {filepath}")
+                    raise _protocol_breach(f"expected the start of {filepath}")
                 progress.in_flight = filepath
                 finished = _next_message(child, receiver)
             except _NoMessage as exc:
-                fail(str(exc))
+                fail(str(exc), exc.failure)
             try:
                 if len(finished) != 3 or finished[:2] != (_RESULT, filepath):
                     raise ValueError(f"expected the result of {filepath}")
                 accept(checked_result(finished[2], filepath))
             except Exception as exc:
-                fail(f"result breaks an engine invariant: {exc}", exc)
+                fail(
+                    f"result breaks an engine invariant: {exc}",
+                    {"reason": "engine_invariant", "detail": str(exc)},
+                    exc,
+                )
             progress.confirmed.append(filepath)
             progress.in_flight = None
             if on_advance is not None:
@@ -318,8 +481,12 @@ def recover_in_isolation(
 
 __all__ = [
     "ISOLATED_RECOVERY_TIMEOUT_SECONDS",
+    "PROCESS_CREATION_REFUSALS",
     "UNKNOWN_CULPRIT",
     "WorkerRecoveryError",
     "checked_result",
+    "lost_task_failure",
+    "process_creation_failure",
+    "process_creation_refusal",
     "recover_in_isolation",
 ]
