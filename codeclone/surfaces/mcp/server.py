@@ -10,6 +10,7 @@ import argparse
 import functools
 import inspect
 import ipaddress
+import json
 import os
 import sys
 import time
@@ -21,6 +22,7 @@ from typing import TYPE_CHECKING, Final, Literal, Protocol, TypeVar, cast
 from ... import __version__
 from ...config.observability import resolve_observability_config
 from ...contracts import DEFAULT_COVERAGE_MIN, DOCS_URL
+from ...contracts.errors import ExecutionUnavailableError, IncompleteAnalysisError
 from ...observability import (
     bind_root,
     bootstrap,
@@ -275,6 +277,112 @@ def _instrument_tool(func: MCPCallable) -> MCPCallable:
     return cast("MCPCallable", signature_wrapper)
 
 
+#: The typed answer of an analysis the environment kept from running. The
+#: keys follow the typed answers the other tools give (``status``, ``reason``,
+#: ``retryable``, ``next_step``, ``message``), plus what only this one needs:
+#: how complete the client may take the result to be, and the remediation as
+#: data (maintainer rulings 2026-10-26).
+EXECUTION_UNAVAILABLE_STATUS: Final = "execution_unavailable"
+ANALYSIS_FAILED_STATUS: Final = "analysis_failed"
+COMPLETENESS_UNVERIFIED: Final = "unverified"
+
+
+def execution_unavailable_answer(
+    tool: str, error: ExecutionUnavailableError, *, root: object
+) -> dict[str, object]:
+    """What a client is told when the environment kept the analysis from
+    running: the cause, the completeness it may assume and the remedy as
+    data, all read off the error's own family."""
+
+    answer: dict[str, object] = {
+        "status": EXECUTION_UNAVAILABLE_STATUS,
+        "reason": error.reason,
+        "completeness": COMPLETENESS_UNVERIFIED,
+        # The same call can succeed once the environment allows it, and the
+        # remedy succeeds now.
+        "retryable": True,
+        "remediation": error.remedy(),
+        "next_step": err_msgs.EXECUTION_UNAVAILABLE_NEXT_STEPS.get(
+            error.reason, err_msgs.EXECUTION_UNAVAILABLE_NEXT_STEP
+        ).format(tool=tool),
+        "message": err_msgs.EXECUTION_UNAVAILABLE_MESSAGES.get(
+            error.reason, str(error)
+        ),
+        "detail": str(error),
+    }
+    if isinstance(root, str) and root:
+        answer["root"] = root
+    return answer
+
+
+def analysis_failed_answer(
+    tool: str, error: IncompleteAnalysisError, *, root: object
+) -> dict[str, object]:
+    """What a client is told when the analysis could not be completed for a
+    cause nobody explained: every failure met, the first one first, and no
+    setting offered as the fix (maintainer law 2026-10-26: a secondary
+    failure must not erase the primary one)."""
+
+    answer: dict[str, object] = {
+        "status": ANALYSIS_FAILED_STATUS,
+        "reason": error.reason,
+        "completeness": COMPLETENESS_UNVERIFIED,
+        # Unknown, and said so: whether the same call succeeds depends on a
+        # cause nobody has found.
+        "retryable": None,
+        **error.diagnosis(),
+        "next_step": err_msgs.ANALYSIS_FAILED_NEXT_STEP.format(tool=tool),
+        "message": str(error),
+    }
+    if isinstance(root, str) and root:
+        answer["root"] = root
+    return answer
+
+
+def _failed_call(answer: dict[str, object]) -> object:
+    from mcp.types import CallToolResult, TextContent
+
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(answer, sort_keys=True))],
+        structuredContent=answer,
+        isError=True,
+    )
+
+
+def _answer_execution_unavailable(func: MCPCallable) -> MCPCallable:
+    """A tool whose analysis did not run, or did not finish, fails the call.
+
+    The analysis did not run -- the environment kept it from running -- or
+    could not be completed, so the call is reported as a failed execution
+    (``isError``) and never as a success carrying a warning. The typed answer
+    rides as its structured content and, as JSON, as its text, so a client
+    that reads either one reads it. Only an error whose cause proves the
+    environment refused is raised as the marker; any other failure stays the
+    error it is. The marker is caught, never a class of the engine: this
+    surface does not import the layer that raises it. Signature-preserving,
+    as :func:`_instrument_tool` is, so the tool schemas do not change.
+    """
+
+    tool_name = getattr(func, "__name__", "tool")
+
+    @functools.wraps(func)
+    def wrapper(*args: object, **kwargs: object) -> object:
+        try:
+            return func(*args, **kwargs)
+        except ExecutionUnavailableError as error:
+            return _failed_call(
+                execution_unavailable_answer(tool_name, error, root=kwargs.get("root"))
+            )
+        except IncompleteAnalysisError as error:
+            return _failed_call(
+                analysis_failed_answer(tool_name, error, root=kwargs.get("root"))
+            )
+
+    signature_wrapper = cast("_SignatureBearingToolWrapper", wrapper)
+    signature_wrapper.__signature__ = inspect.signature(func, eval_str=True)
+    return cast("MCPCallable", signature_wrapper)
+
+
 def _load_mcp_runtime() -> tuple[
     type[FastMCP],
     ToolAnnotations,
@@ -456,7 +564,7 @@ def build_mcp_server(
         )
 
         def register(func: MCPCallable) -> MCPCallable:
-            decorator(_instrument_tool(func))
+            decorator(_instrument_tool(_answer_execution_unavailable(func)))
             return func
 
         return register

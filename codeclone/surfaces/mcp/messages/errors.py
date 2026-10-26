@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection
+from types import MappingProxyType
 from typing import Final
 
 ROOT_REQUIRED_ABSOLUTE: Final = (
@@ -24,6 +25,41 @@ ROOT_NOT_EXISTS: Final = "Repository root '{root}' does not exist."
 ROOT_NOT_DIRECTORY: Final = "Repository root '{root}' is not a directory."
 
 INVALID_RELATIVE_PATH: Final = "Invalid path '{value}' relative to '{root}': {error}"
+
+#: The analysis could not run because the environment refused what it needs
+#: (exit 4 on the CLI), by the family's ``reason``; any other family is
+#: described by its own error text and the generic step.
+EXECUTION_UNAVAILABLE_MESSAGES: Final = MappingProxyType(
+    {
+        "process_pool_unavailable": (
+            "Could not start the worker process pool. The environment may "
+            "restrict creating child processes. To analyse again, use "
+            "sequential mode (processes=1)."
+        ),
+    }
+)
+
+EXECUTION_UNAVAILABLE_NEXT_STEPS: Final = MappingProxyType(
+    {
+        "process_pool_unavailable": (
+            "Call {tool} again with processes=1: sequential mode starts no "
+            "worker process."
+        ),
+    }
+)
+
+EXECUTION_UNAVAILABLE_NEXT_STEP: Final = (
+    "Call {tool} again once the environment allows the analysis to run."
+)
+
+#: The analysis could not be completed and CodeClone cannot rule out a defect
+#: of its own (exit 5 on the CLI). No setting is offered as the fix: running
+#: without a pool would only avoid a failure nobody has explained.
+ANALYSIS_FAILED_NEXT_STEP: Final = (
+    "This is an internal failure, not a setting to change: report it with this "
+    "answer -- primary_failure is what failed first. Re-running {tool} with "
+    "the same arguments will tell whether it repeats."
+)
 
 WITHDRAWN_TOOL_PARAMETER: Final = (
     "{tool} no longer accepts {parameter}. Managing the analysis cache is operator "
