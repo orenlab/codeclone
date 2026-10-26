@@ -91,7 +91,7 @@ def resolve_existing_root_path(*, args: object, printer: StatusConsole) -> Path:
         )
     if not root_path.exists():
         exit_contract_error(
-            ui.ERR_ROOT_NOT_FOUND.format(path=root_path),
+            ui.ERR_ROOT_NOT_FOUND.format(path=ui.esc(root_path)),
             printer=printer,
         )
     return root_path

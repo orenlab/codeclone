@@ -201,7 +201,7 @@ def fmt_invalid_output_extension(
 ) -> str:
     return ERR_INVALID_OUTPUT_EXT.format(
         label=label,
-        path=path,
+        path=esc(path),
         expected_suffix=expected_suffix,
         flag=_report_flag(label),
     )
@@ -243,11 +243,11 @@ def fmt_report_write_failed(*, label: str, path: Path, error: object) -> str:
 
 
 def fmt_html_report_open_failed(*, path: Path, error: object) -> str:
-    return WARN_HTML_REPORT_OPEN_FAILED.format(path=path, error=error)
+    return WARN_HTML_REPORT_OPEN_FAILED.format(path=esc(path), error=esc(error))
 
 
 def fmt_coverage_join_ignored(error: object) -> str:
-    return WARN_COVERAGE_JOIN_IGNORED.format(error=error)
+    return WARN_COVERAGE_JOIN_IGNORED.format(error=esc(error))
 
 
 def fmt_unreadable_source_in_gating(*, count: int) -> str:
@@ -259,15 +259,15 @@ def fmt_processing_changed(count: int) -> str:
 
 
 def fmt_worker_failed(error: object) -> str:
-    return WARN_WORKER_FAILED.format(error=error)
+    return WARN_WORKER_FAILED.format(error=esc(error))
 
 
 def fmt_batch_item_failed(error: object) -> str:
-    return WARN_BATCH_ITEM_FAILED.format(error=error)
+    return WARN_BATCH_ITEM_FAILED.format(error=esc(error))
 
 
 def fmt_parallel_fallback(error: object) -> str:
-    return WARN_PARALLEL_FALLBACK.format(error=error)
+    return WARN_PARALLEL_FALLBACK.format(error=esc(error))
 
 
 def fmt_failed_files_header(count: int) -> str:
@@ -286,7 +286,7 @@ def fmt_unsupported_construct_summary(
 
 
 def fmt_cache_save_failed(error: object) -> str:
-    return WARN_CACHE_SAVE_FAILED.format(error=error)
+    return WARN_CACHE_SAVE_FAILED.format(error=esc(error))
 
 
 def fmt_vscode_extension_tip(*, url: str) -> str:
@@ -1209,11 +1209,11 @@ def fmt_baseline_scope_id_required(
 
 
 def fmt_memory_db_not_found(*, error: object) -> str:
-    return ERR_MEMORY_DB_NOT_FOUND.format(error=error)
+    return ERR_MEMORY_DB_NOT_FOUND.format(error=esc(error))
 
 
 def fmt_memory_root_not_found(*, path: object) -> str:
-    return ERR_MEMORY_ROOT_NOT_FOUND.format(path=path)
+    return ERR_MEMORY_ROOT_NOT_FOUND.format(path=esc(path))
 
 
 def fmt_baseline_lock_recovery_failed(*, path: Path, reason: str) -> str:
