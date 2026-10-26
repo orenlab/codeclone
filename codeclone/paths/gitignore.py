@@ -63,7 +63,10 @@ def repo_gitignore_covers_codeclone_cache(root: Path) -> bool:
         return False
     try:
         text = gitignore_path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
+        # Unreadable and undecodable are the same answer here: coverage
+        # cannot be confirmed. Git reads the file as bytes, so a non-UTF-8
+        # ``.gitignore`` is valid; it must not crash every caller.
         return False
     return any(
         gitignore_pattern_covers_codeclone_cache(line) for line in text.splitlines()

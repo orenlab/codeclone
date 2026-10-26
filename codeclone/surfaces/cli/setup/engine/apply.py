@@ -240,7 +240,7 @@ def _apply_gitignore_append(
     if gitignore_path.is_file():
         try:
             before_text = gitignore_path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return _failed_result(action_id, "gitignore_append", ".gitignore", str(exc))
 
     after_text = append_gitignore_line(before_text, line)

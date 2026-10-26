@@ -67,6 +67,23 @@ def test_repo_gitignore_covers_codeclone_cache_read_failure(
     assert repo_gitignore_covers_codeclone_cache(tmp_path) is False
 
 
+def test_repo_gitignore_covers_codeclone_cache_undecodable_file(
+    tmp_path: Path,
+) -> None:
+    """A non-UTF-8 ``.gitignore`` is valid for git; it reads as unconfirmed.
+
+    ``UnicodeDecodeError`` is a ``ValueError``, so the ``OSError`` handler
+    above let it through and every ``setup`` command and MCP analysis died on
+    it. The positive control is the same two lines written as UTF-8.
+    """
+
+    (tmp_path / ".gitignore").write_bytes(b"# caf\xe9\n.codeclone/\n")
+    assert repo_gitignore_covers_codeclone_cache(tmp_path) is False
+
+    (tmp_path / ".gitignore").write_text("# café\n.codeclone/\n", "utf-8")
+    assert repo_gitignore_covers_codeclone_cache(tmp_path) is True
+
+
 def test_repo_gitignore_covers_codeclone_cache(tmp_path: Path) -> None:
     assert repo_gitignore_covers_codeclone_cache(tmp_path) is False
 

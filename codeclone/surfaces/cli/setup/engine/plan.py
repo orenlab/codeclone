@@ -208,7 +208,7 @@ def _plan_gitignore_append(ctx: DiscoverContext) -> dict[str, object] | None:
     if path.is_file():
         try:
             before_text = path.read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return {
                 "id": "gitignore_append:workspace_hygiene",
                 "capability_id": "workspace_hygiene",
