@@ -186,6 +186,8 @@ Analysis tools return a `run_id`, a `health` block with `score`, `grade` and per
 | Scope already dirty | `start_controlled_change` may return `status: "blocked"` unless recovery flag is set |
 | Missing after-run evidence | `finish_controlled_change` returns `status: "unverified"` with `next_step` hint |
 | Scope mismatch on finish | `finish_controlled_change` returns `status: "violated"` with details |
+| Worker pool refused by the environment (`analyze_repository`, `analyze_changed_paths`) | A failed call (`isError: true`) whose structured content is `status: "execution_unavailable"`, `reason: "process_pool_unavailable"`, `completeness: "unverified"`, `retryable: true`, `remediation: {"action": "use_sequential_mode", "processes": 1}`, with `next_step`, `message` and `detail`; the same JSON is the text. Nothing was analysed and no run is registered |
+| Analysis that could not be completed (a worker died and its retry failed) | A failed call whose structured content is `status: "analysis_failed"`, `reason: "worker_recovery_failed"`, `completeness: "unverified"`, `retryable: null` (unknown), `primary_failure` -- what failed first, for example `{"reason": "worker_crashed", "cause": "unknown"}` -- and `recovery_failure`, for example `{"reason": "process_creation_unavailable", "errno": "EAGAIN"}`, with the culprit and file counts. No setting is offered as the fix |
 
 If a step cannot proceed, the response includes `next_step` and/or `user_action_required` to guide recovery.
 

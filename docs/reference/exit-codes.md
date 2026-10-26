@@ -33,9 +33,37 @@ Exit codes are deterministic: the same input always produces the same code.
 | Code | Meaning | Cause | Action |
 |------|---------|-------|--------|
 | **0** | Success | No gate violations and no errors. Findings may still be present — exit `0` means nothing enabled gated on them, not that the report is empty | Run succeeded; review findings if any |
-| **2** | Contract error | Untrusted/invalid baseline, invalid output configuration, incompatible versions, unreadable sources in CI/gating mode, a path argument CodeClone cannot use, a parallel worker pool that cannot be started | Fix configuration or baseline before proceeding; for the worker pool, run sequentially with `--processes 1` |
+| **2** | Contract error | Untrusted/invalid baseline, invalid output configuration, incompatible versions, unreadable sources in CI/gating mode, a path argument CodeClone cannot use | Fix configuration or baseline before proceeding |
 | **3** | Gating failure | New clones, threshold violations, or metrics quality gate failures | Address findings or adjust thresholds before merge |
-| **5** | Internal error | Unexpected exception, or an analysis that could not be completed: a file whose isolated retry after a worker death died or timed out, a retry process that could not be started, or a result that breaks an internal invariant. The message gives the reason and the files confirmed, the culprit (`UNKNOWN` when no file was in flight) with the attempts on it, and the files not processed; no report or baseline is written | Report the error with `--debug` output |
+| **4** | Unverified | The environment prevented the analysis from running: the worker pool could not start, no worker ran, and the operating system's error proves it refused (see the table below). Nothing was measured: no verdict, no report and no baseline are written | Run sequentially with `--processes 1` (or `processes = 1` under `[tool.codeclone]`), or lift the limit |
+| **5** | Internal error | Unexpected exception, or an analysis that could not be completed: a file whose isolated retry after a worker death died or timed out, a retry process that could not be started, or a result that breaks an internal invariant. The message keeps every failure, the first one first -- for example the worker crash, then why the retry failed -- and gives the files confirmed, the culprit (`UNKNOWN` when no file was in flight) with the attempts on it, and the files not processed; no report or baseline is written | Report the error with `--debug` output |
+
+## Why a worker pool could not start
+
+Execution unavailable is not invalid input, and neither is it proof of an
+internal defect. Exit 4 needs positive proof that the environment refused: an
+error number the operating system set while the pool created its processes
+(its construction, or the start of its workers). Any other cause -- an error
+without a number, a number not listed here, an error raised by anything but
+process creation -- keeps its own exit code, so exit 4 never hides a defect.
+
+| Error number | Meaning | Exit |
+|--------------|---------|------|
+| `EAGAIN` | A process or thread limit was reached (what a real process limit raises on every start method) | 4 |
+| `ENOMEM` | Not enough memory to start a worker process | 4 |
+| `EMFILE`, `ENFILE` | The per-process or system-wide limit on open files was reached | 4 |
+| `EPERM`, `EACCES` | The operating system or a sandbox refused a process or a resource the pool needs | 4 |
+| `ENOSYS`, `ENOSPC` | The platform lacks, or has no room for, the process-shared semaphores the pool needs | 4 |
+| Any other cause | Not proven to be the environment's | 5 |
+
+| Situation | Exit |
+|-----------|------|
+| The pool never started, an error number above proves why, no worker ran | 4 |
+| A worker died and the isolated retry succeeded | The full result |
+| A worker died and the retry process could not be started -- even for `EAGAIN` | 5 |
+| A worker died and the retry died, hung or broke the protocol | 5 |
+| Some workers ran, then the pool was refused | 5 |
+| `--processes 1` (sequential mode) | Starts no pool |
 
 ## Inputs that are a contract error, not a crash
 
@@ -52,10 +80,12 @@ message that names the input, or handled as described:
 | A stored report whose digest is not ASCII | Refused as a digest mismatch of that tier; `memory init` runs a fresh analysis |
 | An empty `[project.scripts]` value (`x = ""`) | Ignored; the other entry points still resolve |
 | A worker process that dies mid-run | The files it never returned are retried once, in a separate child process; nothing is counted twice. If the retry dies or times out too, the run ends with exit 5 (above) |
-| A parallel worker pool that cannot be started | Exit 2 before any file is analysed, with `--processes 1` as the way to run sequentially. It used to fall back to sequential analysis in the main process with a warning |
 
 `codeclone setup apply --json` without `--yes` or `--dry-run` is also exit 2:
 `--json` output is one JSON document and cannot carry an interactive prompt.
+
+A parallel worker pool the environment refuses is exit 4 (above). It used to
+fall back to sequential analysis in the main process with a warning.
 
 ## Key commands
 

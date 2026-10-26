@@ -44,18 +44,24 @@ file has its own 120-second deadline.
 
 If that child cannot return a file (it dies, or gives no result in time), or a
 result breaks an internal invariant, the run stops with exit 5. The message
-gives the reason and splits the run's files into three groups: the files
-confirmed, the culprit -- the file the child had started, with the attempts
-made on it -- and the files not processed. A child that dies between two
+keeps every failure, the first one first -- the worker crash, then why the
+retry failed -- so a later failure never hides the one that started it. It
+splits the run's files into three groups: the files confirmed, the culprit
+-- the file the child had started, with the attempts made on it -- and the
+files not processed. A child that dies between two
 files, or before its first, had no file in flight: the culprit is reported as
 `UNKNOWN` rather than guessed. The child is ended and reaped however recovery
-ends, and if it cannot be started at all the run stops with exit 5 too. No
-report is written and no baseline is published from such a run: an incomplete
-analysis never reads as a complete one.
+ends, and if it cannot be started at all the run stops with exit 5 too --
+even when the operating system refused it, because the worker crash before
+it is still unexplained. No report is written and no baseline is published
+from such a run: an incomplete analysis never reads as a complete one.
 
 If parallel processing is in use and its worker pool cannot be started -- a
-sandbox or a process limit that refuses it, say -- the run stops with exit 2
-before analysing anything and says so. Nothing is analysed in the main
+sandbox or a process limit that refuses it, say -- the run stops with exit 4
+(unverified) before analysing anything and says so. That needs proof: the
+operating system's error number for the process it refused (see
+[exit codes](exit-codes.md#why-a-worker-pool-could-not-start)); a pool that
+fails for any other reason is exit 5. Nothing is analysed in the main
 process in its place; to run without a pool, choose sequential mode
 explicitly with `--processes 1` (or `processes = 1` under `[tool.codeclone]`).
 
