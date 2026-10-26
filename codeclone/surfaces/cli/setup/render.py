@@ -280,6 +280,14 @@ def _render_apply_rich(console: PrinterLike, result: Mapping[str, object]) -> No
         results,
         status_column="Result",
     )
+    # The reason an action failed or was skipped: the table has no column
+    # for it, and the plain renderer already prints it.
+    for row in results:
+        message = str(row.get("message", ""))
+        if message:
+            console.print(
+                f"  {esc(row.get('kind'))} {esc(row.get('path'))}: {esc(message)}"
+            )
 
 
 def _render_apply_plain(console: PrinterLike, result: Mapping[str, object]) -> None:
