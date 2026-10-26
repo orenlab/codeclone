@@ -62,6 +62,7 @@ from dataclasses import dataclass
 from typing import Final, Protocol
 
 from codeclone.canonical.errors import CanonicalModelError
+from codeclone.contracts import trust_vocabulary as _trust_words
 from codeclone.findings.ids import clone_group_id, dead_code_group_id, design_group_id
 
 #: ``baseline.state`` of the document: no container, every lane of an
@@ -69,23 +70,9 @@ from codeclone.findings.ids import clone_group_id, dead_code_group_id, design_gr
 BASELINE_WITNESS_MISSING: Final = "missing"
 BASELINE_WITNESS_STATES: Final = ("missing", "trusted", "untrusted")
 
-#: The clone-baseline status vocabulary (``codeclone.baseline.BaselineStatus``),
-#: mirrored verbatim and pinned against the enum by test.
-BASELINE_STATUSES: Final = (
-    "generator_mismatch",
-    "integrity_failed",
-    "integrity_missing",
-    "invalid_json",
-    "invalid_type",
-    "mismatch_fingerprint_version",
-    "mismatch_python_version",
-    "mismatch_schema_version",
-    "mismatch_scope_id",
-    "missing",
-    "missing_fields",
-    "ok",
-    "too_large",
-)
+#: The clone-baseline status vocabulary (``codeclone.baseline.BaselineStatus``).
+#: Owned by ``codeclone.contracts.trust_vocabulary``; this is that object.
+BASELINE_STATUSES: Final = _trust_words.BASELINE_STATUSES
 
 #: The metrics-baseline status vocabulary
 #: (``codeclone.baseline.MetricsBaselineStatus``), mirrored and pinned the same
@@ -106,8 +93,8 @@ METRICS_BASELINE_STATUSES: Final = (
     "too_large",
 )
 
-#: The status a loaded baseline carries, on both witnesses.
-BASELINE_STATUS_OK: Final = "ok"
+#: The status a loaded baseline carries, on both witnesses (the owner's word).
+BASELINE_STATUS_OK: Final = _trust_words.BASELINE_STATUS_OK
 
 #: The observation lanes (``codeclone.models.ObservationLaneName``), mirrored
 #: and pinned against the literal by test.
@@ -164,28 +151,12 @@ NOVELTY_REASON_COMPARISON_UNAVAILABLE: Final = "comparison_unavailable"
 #: Per-lane trust as the document publishes it (``baseline.sorted_lane_trust``).
 LANE_TRUSTED: Final = "trusted"
 LANE_TRUST_STATUSES: Final = ("trusted", "unavailable")
-#: The reason a trusted lane carries, and the reason every lane carries when
-#: there is no container at all.
-LANE_TRUST_COMPATIBLE: Final = "compatible"
-LANE_TRUST_BASELINE_MISSING: Final = "baseline_missing"
-#: ``codeclone.models.LaneTrustReason`` plus the two reasons the document adds
-#: for a lane the trust vector cannot vouch for (no container / unverified
-#: root), pinned against the literal by test.
-LANE_TRUST_REASONS: Final = (
-    "algorithm_revision",
-    "baseline_missing",
-    "baseline_scope_id",
-    "canonicalization_version",
-    "compatible",
-    "descriptor_version",
-    "lane_digest_mismatch",
-    "payload_schema",
-    "payload_schema_outdated",
-    "required_contract",
-    "root_digest_mismatch",
-    "root_unverified",
-    "runtime_lane_unknown",
-)
+#: The reason a trusted lane carries, the reason every lane carries when there
+#: is no container at all, and every lane-trust reason. Owned by
+#: ``codeclone.contracts.trust_vocabulary``; these are its objects.
+LANE_TRUST_COMPATIBLE: Final = _trust_words.LANE_TRUST_COMPATIBLE
+LANE_TRUST_BASELINE_MISSING: Final = _trust_words.LANE_TRUST_BASELINE_MISSING
+LANE_TRUST_REASONS: Final = _trust_words.LANE_TRUST_REASONS
 
 #: The three availability words; ``disabled`` is NOT one of them — it is the
 #: ``disabled_capability`` production, a different fact about the run.

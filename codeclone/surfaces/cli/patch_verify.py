@@ -17,6 +17,11 @@ from ...budget.patch_contract import (
 )
 from ...contracts import ExitCode
 from ...contracts.comparison_state import COMPARISON_HEALTH, TERM_SCORE_DELTA
+from ...contracts.trust_vocabulary import (
+    BASELINE_STATUS_NOT_REFUSED,
+    LANE_TRUST_BASELINE_MISSING,
+    LANE_TRUST_NOT_REFUSED,
+)
 from ...core._types import AnalysisResult
 from ...report.gates.evaluator import (
     _POPULATION_REFUSALS,
@@ -178,18 +183,6 @@ GATE_LABEL_REFUSED: Final = "REFUSED"
 GATE_LABEL_UNAVAILABLE: Final = "UNAVAILABLE"
 GATE_LABEL_ERROR: Final = "ERROR"
 _LANE_UNAVAILABLE_PREFIX: Final = "lane:unavailable:"
-#: The lane-trust word for a trusted lane, and for a lane with no container
-#: behind it (``canonical.comparison_rows.LANE_TRUST_COMPATIBLE`` and
-#: ``LANE_TRUST_BASELINE_MISSING``, which a surface may not import).  Every
-#: other lane-trust reason the document states is a refusal of that lane.
-_LANE_TRUSTED: Final = "compatible"
-_LANE_NO_CONTAINER: Final = "baseline_missing"
-#: The baseline file statuses that are not a refusal: no file at all, or a
-#: status the document does not state.  Any other status is a file the run
-#: found and refused (integrity, schema, scope id, ...): it records every
-#: lane as having no container, so the file status is what tells the two
-#: apart.
-_BASELINE_NOT_REFUSED: Final = frozenset({"missing", "ok", ""})
 
 
 def _refused_by_the_baseline(
@@ -217,13 +210,15 @@ def _refused_by_the_baseline(
     meta_baseline = _as_mapping(
         _as_mapping(report_document.get("meta")).get("baseline")
     )
-    file_refused = str(meta_baseline.get("status") or "") not in _BASELINE_NOT_REFUSED
+    # A document that states no file status refuses nothing.
+    file_status = str(meta_baseline.get("status") or "")
+    file_refused = bool(file_status) and file_status not in BASELINE_STATUS_NOT_REFUSED
 
     def refused(lane: str) -> bool:
         reason = trust.get(lane)
-        if reason == _LANE_NO_CONTAINER:
+        if reason == LANE_TRUST_BASELINE_MISSING:
             return file_refused
-        return reason is not None and reason != _LANE_TRUSTED
+        return reason is not None and reason not in LANE_TRUST_NOT_REFUSED
 
     return all(refused(lane) for lane in lanes)
 

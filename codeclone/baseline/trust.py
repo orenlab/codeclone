@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Final
 import orjson
 
 from ..contracts import DEFAULT_MAX_BASELINE_SIZE_MB
+from ..contracts import trust_vocabulary as trust_words
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -23,19 +24,23 @@ MAX_BASELINE_SIZE_BYTES = DEFAULT_MAX_BASELINE_SIZE_MB * 1024 * 1024
 
 
 class BaselineStatus(str, Enum):
-    OK = "ok"
-    MISSING = "missing"
-    TOO_LARGE = "too_large"
-    INVALID_JSON = "invalid_json"
-    INVALID_TYPE = "invalid_type"
-    MISSING_FIELDS = "missing_fields"
-    MISMATCH_SCHEMA_VERSION = "mismatch_schema_version"
-    MISMATCH_FINGERPRINT_VERSION = "mismatch_fingerprint_version"
-    MISMATCH_PYTHON_VERSION = "mismatch_python_version"
-    MISMATCH_SCOPE_ID = "mismatch_scope_id"
-    GENERATOR_MISMATCH = "generator_mismatch"
-    INTEGRITY_MISSING = "integrity_missing"
-    INTEGRITY_FAILED = "integrity_failed"
+    """The clone-baseline file status; its words are the shared trust owner's."""
+
+    OK = trust_words.BASELINE_STATUS_OK
+    MISSING = trust_words.BASELINE_STATUS_MISSING
+    TOO_LARGE = trust_words.BASELINE_STATUS_TOO_LARGE
+    INVALID_JSON = trust_words.BASELINE_STATUS_INVALID_JSON
+    INVALID_TYPE = trust_words.BASELINE_STATUS_INVALID_TYPE
+    MISSING_FIELDS = trust_words.BASELINE_STATUS_MISSING_FIELDS
+    MISMATCH_SCHEMA_VERSION = trust_words.BASELINE_STATUS_MISMATCH_SCHEMA_VERSION
+    MISMATCH_FINGERPRINT_VERSION = (
+        trust_words.BASELINE_STATUS_MISMATCH_FINGERPRINT_VERSION
+    )
+    MISMATCH_PYTHON_VERSION = trust_words.BASELINE_STATUS_MISMATCH_PYTHON_VERSION
+    MISMATCH_SCOPE_ID = trust_words.BASELINE_STATUS_MISMATCH_SCOPE_ID
+    GENERATOR_MISMATCH = trust_words.BASELINE_STATUS_GENERATOR_MISMATCH
+    INTEGRITY_MISSING = trust_words.BASELINE_STATUS_INTEGRITY_MISSING
+    INTEGRITY_FAILED = trust_words.BASELINE_STATUS_INTEGRITY_FAILED
 
 
 BASELINE_UNTRUSTED_STATUSES: Final[frozenset[BaselineStatus]] = frozenset(

@@ -1243,3 +1243,66 @@ def test_low_value_segment_filter_never_judges_policy_held_groups() -> None:
         f"merge_segment_report_groups for a lane a suppression rule withheld: "
         f"{offenders}"
     )
+
+
+# ---------------------------------------------------------------------------
+# One owner for the shared trust vocabulary (maintainer ruling 2026-10-26).
+#
+# ``codeclone.contracts.trust_vocabulary`` owns the lane-trust reasons and the
+# clone-baseline file statuses that several layers read. No other production
+# module may define them again: a status set, tuple, ``Literal``, enum body,
+# named constant or comparison with a trust field that spells the owned words
+# is counted (``tests/_trust_vocabulary_scan.py``); messages are not.
+#
+# The places below predate the owner. The list may only shrink: a new file, or
+# one more use in a listed file, fails; so does a use that went away until its
+# count is lowered here.
+# ---------------------------------------------------------------------------
+
+_TRUST_VOCABULARY_OWNER = "codeclone/contracts/trust_vocabulary.py"
+
+_TRUST_VOCABULARY_LEGACY_USES: dict[str, int] = {
+    # Separate owners by ruling, not copies: the metrics-baseline statuses,
+    # their canonical mirror, and the cache statuses.
+    "codeclone/baseline/_metrics_baseline_contract.py": 1,
+    "codeclone/baseline/metrics_baseline.py": 2,
+    "codeclone/cache/versioning.py": 1,
+    # The canonical house: the metrics mirror and the witness state "missing".
+    "codeclone/canonical/comparison_rows.py": 2,
+    # Typing mirrors a ``Literal`` must spell; pinned to the owner by test
+    # (``LaneTrustReason``) or a different vocabulary sharing words (read
+    # failures).
+    "codeclone/models.py": 3,
+    # Producers and readers that compare reasons and statuses in place.
+    "codeclone/baseline/clone_baseline.py": 2,
+    "codeclone/baseline/container.py": 2,
+    "codeclone/baseline/container_trust.py": 5,
+    "codeclone/metrics/overloaded_modules.py": 1,
+    "codeclone/report/html/sections/_overview.py": 1,
+    "codeclone/report/meta.py": 1,
+}
+
+
+def _trust_vocabulary_uses() -> dict[str, int]:
+    from codeclone.contracts.trust_vocabulary import (
+        BASELINE_STATUSES,
+        LANE_TRUST_REASONS,
+    )
+
+    from tests._trust_vocabulary_scan import semantic_uses
+
+    root = Path(__file__).resolve().parents[1]
+    words = frozenset(LANE_TRUST_REASONS) | frozenset(BASELINE_STATUSES)
+    counts: dict[str, int] = {}
+    for _module_name, path in _iter_codeclone_modules(root):
+        relative = path.relative_to(root).as_posix()
+        if relative == _TRUST_VOCABULARY_OWNER:
+            continue
+        uses = semantic_uses(path.read_text("utf-8"), words)
+        if uses:
+            counts[relative] = len(uses)
+    return counts
+
+
+def test_no_module_defines_the_trust_vocabulary_beside_its_owner() -> None:
+    assert _trust_vocabulary_uses() == _TRUST_VOCABULARY_LEGACY_USES

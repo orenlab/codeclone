@@ -14,6 +14,7 @@ from typing import Final, TypeVar
 from uuid import UUID
 
 from ..contracts.errors import BaselineValidationError
+from ..contracts.trust_vocabulary import LANE_TRUST_COMPATIBLE
 from ..models import (
     BaselineContainerV3,
     BaselineLane,
@@ -65,7 +66,7 @@ def _semantic_reason(
     # recorded proves no conformance, any more than a stored one that differs.
     if dict(actual.required_contracts) != dict(expected.required_contracts):
         return "required_contract"
-    return "compatible"
+    return LANE_TRUST_COMPATIBLE
 
 
 def _lane_trust(
@@ -105,7 +106,7 @@ def _lane_trust(
     reason = _semantic_reason(lane, runtime)
     return LaneTrust(
         name=lane.name,
-        status="trusted" if reason == "compatible" else "unavailable",
+        status="trusted" if reason == LANE_TRUST_COMPATIBLE else "unavailable",
         reason=reason,
     )
 

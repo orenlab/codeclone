@@ -75,6 +75,7 @@ from codeclone.contracts import (
     LIVENESS_POLICY_VERSION,
     METRICS_BASELINE_SCHEMA_VERSION,
     STORAGE_SCHEMA_REVISION,
+    trust_vocabulary,
 )
 from codeclone.models import LaneTrustReason, ObservationLaneName
 from tests.test_canonical_roundtrip import (
@@ -151,6 +152,7 @@ def _novelty(**overrides: object) -> FindingNoveltyRow:
 def test_the_mirrored_vocabularies_equal_their_producers() -> None:
     assert (
         tuple(sorted(status.value for status in BaselineStatus))
+        == trust_vocabulary.BASELINE_STATUSES
         == comparison_rows.BASELINE_STATUSES
     )
     assert (
@@ -161,16 +163,19 @@ def test_the_mirrored_vocabularies_equal_their_producers() -> None:
         tuple(sorted(typing.get_args(ObservationLaneName)))
         == comparison_rows.OBSERVATION_LANES
     )
+    # The lane-trust reasons are the shared owner's; the typing mirror and
+    # the document's two extra reasons must still add up to them.
     assert (
         tuple(
             sorted(
                 {
                     *typing.get_args(LaneTrustReason),
-                    "baseline_missing",
-                    "root_unverified",
+                    trust_vocabulary.LANE_TRUST_BASELINE_MISSING,
+                    trust_vocabulary.LANE_TRUST_ROOT_UNVERIFIED,
                 }
             )
         )
+        == trust_vocabulary.LANE_TRUST_REASONS
         == comparison_rows.LANE_TRUST_REASONS
     )
     assert set(comparison_rows.COMPARED_LANES) == set(

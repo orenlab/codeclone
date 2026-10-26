@@ -11,6 +11,10 @@ from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from ...contracts import REPORT_SCHEMA_VERSION
+from ...contracts.trust_vocabulary import (
+    LANE_TRUST_BASELINE_MISSING,
+    LANE_TRUST_ROOT_UNVERIFIED,
+)
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 
@@ -223,9 +227,9 @@ def _baseline_projection(
             "reason": (
                 trust_by_lane[name].reason
                 if name in trust_by_lane and trust is not None and trust.root_verified
-                else "baseline_missing"
+                else LANE_TRUST_BASELINE_MISSING
                 if container is None
-                else "root_unverified"
+                else LANE_TRUST_ROOT_UNVERIFIED
             ),
         }
         for name in enabled_lanes
