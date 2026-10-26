@@ -33,9 +33,9 @@ Exit codes are deterministic: the same input always produces the same code.
 | Code | Meaning | Cause | Action |
 |------|---------|-------|--------|
 | **0** | Success | No gate violations and no errors. Findings may still be present — exit `0` means nothing enabled gated on them, not that the report is empty | Run succeeded; review findings if any |
-| **2** | Contract error | Untrusted/invalid baseline, invalid output configuration, incompatible versions, unreadable sources in CI/gating mode, a path argument CodeClone cannot use | Fix configuration or baseline before proceeding |
+| **2** | Contract error | Untrusted/invalid baseline, invalid output configuration, incompatible versions, unreadable sources in CI/gating mode, a path argument CodeClone cannot use, a parallel worker pool that cannot be started | Fix configuration or baseline before proceeding; for the worker pool, run sequentially with `--processes 1` |
 | **3** | Gating failure | New clones, threshold violations, or metrics quality gate failures | Address findings or adjust thresholds before merge |
-| **5** | Internal error | Unexpected exception, or an analysis that could not be completed: a file whose isolated retry after a worker death died or timed out, or a result that breaks an internal invariant. The message names the file, the reason, the attempts and the files left unverified; no report or baseline is written | Report the error with `--debug` output |
+| **5** | Internal error | Unexpected exception, or an analysis that could not be completed: a file whose isolated retry after a worker death died or timed out, a retry process that could not be started, or a result that breaks an internal invariant. The message gives the reason and the files confirmed, the culprit (`UNKNOWN` when no file was in flight) with the attempts on it, and the files not processed; no report or baseline is written | Report the error with `--debug` output |
 
 ## Inputs that are a contract error, not a crash
 
@@ -51,7 +51,8 @@ message that names the input, or handled as described:
 | A baseline whose stored digest is not ASCII | Baseline status `integrity_failed`, as for any other digest mismatch: ignored with a warning, exit 2 under `--ci` |
 | A stored report whose digest is not ASCII | Refused as a digest mismatch of that tier; `memory init` runs a fresh analysis |
 | An empty `[project.scripts]` value (`x = ""`) | Ignored; the other entry points still resolve |
-| A worker process that dies mid-run | The files it never returned are retried once, in a separate child process; nothing is counted twice. If the retry dies or times out too, the run ends with exit 5 (below) |
+| A worker process that dies mid-run | The files it never returned are retried once, in a separate child process; nothing is counted twice. If the retry dies or times out too, the run ends with exit 5 (above) |
+| A parallel worker pool that cannot be started | Exit 2 before any file is analysed, with `--processes 1` as the way to run sequentially. It used to fall back to sequential analysis in the main process with a warning |
 
 `codeclone setup apply --json` without `--yes` or `--dry-run` is also exit 2:
 `--json` output is one JSON document and cannot carry an interactive prompt.

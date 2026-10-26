@@ -37,14 +37,27 @@ Specialized subcommands manage setup, engineering memory, analytics, baseline pu
 If a worker process dies, the results already accepted are kept and each
 counted once. The files the pool did not return are retried once each, in one
 separate single-use child process -- never in the main process, where a file
-that kills a worker would take the run down with it. If that child cannot
-return a file either (it dies, or gives no result within 120 seconds), or a
-result breaks an internal invariant, the run stops with exit 5 and names the
-file, the reason, the attempts made on it and every file whose result was
-never accepted. No report is written and no baseline is published from such a
-run: an incomplete analysis never reads as a complete one. If the worker pool
-cannot be started at all, nothing is suspected and the run continues
-sequentially in the main process.
+that kills a worker would take the run down with it. That child announces each
+file before it starts it and then sends the whole result; a file counts as
+confirmed only once its complete result has arrived and been checked, and each
+file has its own 120-second deadline.
+
+If that child cannot return a file (it dies, or gives no result in time), or a
+result breaks an internal invariant, the run stops with exit 5. The message
+gives the reason and splits the run's files into three groups: the files
+confirmed, the culprit -- the file the child had started, with the attempts
+made on it -- and the files not processed. A child that dies between two
+files, or before its first, had no file in flight: the culprit is reported as
+`UNKNOWN` rather than guessed. The child is ended and reaped however recovery
+ends, and if it cannot be started at all the run stops with exit 5 too. No
+report is written and no baseline is published from such a run: an incomplete
+analysis never reads as a complete one.
+
+If parallel processing is in use and its worker pool cannot be started -- a
+sandbox or a process limit that refuses it, say -- the run stops with exit 2
+before analysing anything and says so. Nothing is analysed in the main
+process in its place; to run without a pool, choose sequential mode
+explicitly with `--processes 1` (or `processes = 1` under `[tool.codeclone]`).
 
 ### Baseline and cache
 
