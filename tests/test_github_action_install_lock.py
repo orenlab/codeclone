@@ -11,7 +11,7 @@ import importlib.util
 import re
 import shutil
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -50,6 +50,12 @@ def _toml(path: Path) -> dict[str, Any]:
         path.read_text(encoding="utf-8")
     )
     return loaded
+
+
+def _instant(value: str) -> datetime:
+    # uv writes 1-6 fractional digits; Python 3.10 parses only 3 or 6.
+    head, _, fraction = value.removesuffix("Z").partition(".")
+    return datetime.fromisoformat(f"{head}.{fraction:0<6.6}+00:00")
 
 
 def _project_version() -> str:
@@ -229,6 +235,7 @@ def test_release_build_is_reproducible_and_gated_on_the_pinned_wheel() -> None:
         'SOURCE_DATE_EPOCH: "315532800"',
         "umask 0022",
         "find codeclone -type f -exec chmod 0644 {} +",
+        "chmod 0644 pyproject.toml LICENSE LICENSE-MIT docs/README-pypi.md",
         "--build-constraints .github/release-build-constraints.txt",
         "--require-hashes",
     )
@@ -266,11 +273,7 @@ def test_runtime_dependencies_stop_below_the_next_major_of_the_lock() -> None:
 
 
 def test_locked_files_respect_the_quarantine_cutoffs() -> None:
-    def instant(value: str) -> datetime:
-        # uv writes 1-6 fractional digits; Python 3.10 parses only 3 or 6.
-        head, _, fraction = value.removesuffix("Z").partition(".")
-        return datetime.fromisoformat(f"{head}.{fraction:0<6.6}+00:00")
-
+    instant = _instant
     uv = _toml(REPO_ROOT / "pyproject.toml")["tool"]["uv"]
     lock = _toml(REPO_ROOT / "uv.lock")
     exceptions = {name: instant(at) for name, at in uv["exclude-newer-package"].items()}
@@ -319,4 +322,65 @@ def test_every_action_reference_is_pinned_to_a_full_commit() -> None:
     ]
 
     assert len(uses) >= 20
+    assert loose == []
+
+
+def test_quarantine_cutoff_is_fourteen_days_before_the_release_date() -> None:
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    heading = re.search(
+        rf"^## \[{re.escape(_project_version())}\] - (\d{{4}}-\d{{2}}-\d{{2}})$",
+        changelog,
+        re.MULTILINE,
+    )
+    assert heading is not None
+    released = datetime.fromisoformat(f"{heading.group(1)}T00:00:00+00:00")
+    entry = changelog.split(heading.group(0), 1)[1].split("\n## [", 1)[0]
+    uv = _toml(REPO_ROOT / "pyproject.toml")["tool"]["uv"]
+    unnamed = [name for name in uv["exclude-newer-package"] if f"`{name}`" not in entry]
+
+    assert _instant(uv["exclude-newer"]) <= released - timedelta(days=14)
+    assert unnamed == []
+
+
+def test_publish_jobs_need_an_unconditional_wheel_gate() -> None:
+    publish = (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text(
+        encoding="utf-8"
+    )
+    jobs = dict(
+        re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)", publish, re.M | re.S)
+    )
+    gate = jobs["build"].split(
+        "- name: Verify the wheel is the one the GitHub Action pins"
+    )
+    gate_step = gate[1].split("- name:", 1)[0]
+
+    assert len(gate) == 2
+    assert [key for key in ("continue-on-error", "if:") if key in gate_step] == []
+    assert "continue-on-error" not in jobs["build"]
+    assert [
+        job
+        for job in ("publish-testpypi", "publish-pypi")
+        if "needs: build" not in jobs[job]
+    ] == []
+
+
+def test_ci_installs_are_locked_and_never_build_from_source() -> None:
+    commands = [
+        (path.name, " ".join(command.split()))
+        for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+        for command in re.findall(
+            r"uv (?:sync|run)\b[^\n]*", path.read_text(encoding="utf-8")
+        )
+    ]
+    syncs = [(name, cmd) for name, cmd in commands if cmd.startswith("uv sync")]
+    tools = [(name, cmd) for name, cmd in commands if "--with" in cmd.split()]
+    loose = [
+        (name, cmd)
+        for name, cmd in syncs + tools
+        if "--no-build" not in cmd.split()
+        or (cmd.startswith("uv sync") and "--locked" not in cmd.split())
+        or any("==" not in tool for tool in re.findall(r"--with (\S+)", cmd))
+    ]
+
+    assert (len(syncs) >= 4, len(tools) >= 2) == (True, True)
     assert loose == []

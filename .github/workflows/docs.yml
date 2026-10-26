@@ -39,7 +39,7 @@ jobs:
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
 
       - name: Build docs site
-        run: uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+        run: uv run --no-build --with mkdocs==1.6.1 --with mkdocs-material==9.7.7 mkdocs build --strict
 
       - name: Generate sample report artifacts
         run: uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live

@@ -40,6 +40,9 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
+          # Younger than the 14-day quarantine on purpose: 0.13.4 is the first uv
+          # with the fix for GHSA-hq85-5cpj-mr62 (critical: its bundled CA store
+          # trusted the compromised emSign root), a reviewed security exception.
           version: "0.13.4"
           enable-cache: true
 
@@ -80,7 +83,7 @@ jobs:
         run: python scripts/action_requirements.py verify-wheel dist/codeclone-*.whl
 
       - name: Validate distributions
-        run: uv run --with twine==7.0.0 twine check dist/*
+        run: uv run --no-build --with twine==7.0.0 twine check dist/*
 
       - name: Upload distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
