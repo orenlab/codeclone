@@ -743,6 +743,9 @@ _CONSUMER_PATHS: dict[str, tuple[str, ...]] = {
         "metrics.families.dependencies.dynamic_boundaries",
         "metrics.families.dependencies.items",
     ),
+    # ``meta.baseline.status`` since the gate label (2026-10-23): a baseline
+    # file the run found and refused records every lane as having no
+    # container, and only its status tells REFUSED from UNAVAILABLE.
     "codeclone/surfaces/cli/patch_verify.py": (
         "baseline",
         "baseline.sorted_lane_trust",
@@ -750,6 +753,9 @@ _CONSUMER_PATHS: dict[str, tuple[str, ...]] = {
         "evaluation.outcome",
         "evaluation.outcome.exit_code",
         "evaluation.outcome.reasons",
+        "meta",
+        "meta.baseline",
+        "meta.baseline.status",
     ),
 }
 

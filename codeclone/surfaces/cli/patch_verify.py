@@ -137,10 +137,6 @@ def _gate_result_from_report_document(
     )
 
 
-def _gate_status(gate_result: GateResult) -> str:
-    return "FAIL" if gate_result.exit_code != 0 else "pass"
-
-
 #: The gate's closed exit contract.  A pass and a failure on a fact are a
 #: verdict; the contract-error code is a required check that did not run (a
 #: lane it could not read, a comparison the run did not make, a missing
@@ -167,6 +163,85 @@ def _refused_over_the_population(gate_result: GateResult) -> bool:
         and bool(gate_result.reasons)
         and all(reason in _POPULATION_REFUSAL_REASONS for reason in gate_result.reasons)
     )
+
+
+#: The gate label: one word per gate outcome (maintainer ruling 2026-10-23).
+#: It names what the gate said, never the patch verdict, and it never changes
+#: an exit code.  ``REFUSED`` is a baseline the run would not compare against
+#: -- another project's, one that failed its integrity check, or one written
+#: under an incompatible contract; ``UNAVAILABLE`` is a measurement the run
+#: did not have -- no baseline, a comparison it did not make, a population
+#: nobody measured, a missing evaluation.
+GATE_LABEL_PASS: Final = "PASS"
+GATE_LABEL_VIOLATED: Final = "VIOLATED"
+GATE_LABEL_REFUSED: Final = "REFUSED"
+GATE_LABEL_UNAVAILABLE: Final = "UNAVAILABLE"
+GATE_LABEL_ERROR: Final = "ERROR"
+_LANE_UNAVAILABLE_PREFIX: Final = "lane:unavailable:"
+#: The lane-trust word for a trusted lane, and for a lane with no container
+#: behind it (``canonical.comparison_rows.LANE_TRUST_COMPATIBLE`` and
+#: ``LANE_TRUST_BASELINE_MISSING``, which a surface may not import).  Every
+#: other lane-trust reason the document states is a refusal of that lane.
+_LANE_TRUSTED: Final = "compatible"
+_LANE_NO_CONTAINER: Final = "baseline_missing"
+#: The baseline file statuses that are not a refusal: no file at all, or a
+#: status the document does not state.  Any other status is a file the run
+#: found and refused (integrity, schema, scope id, ...): it records every
+#: lane as having no container, so the file status is what tells the two
+#: apart.
+_BASELINE_NOT_REFUSED: Final = frozenset({"missing", "ok", ""})
+
+
+def _refused_by_the_baseline(
+    gate_result: GateResult, report_document: Mapping[str, object]
+) -> bool:
+    """The gate named unavailable lanes, and the document states each of
+    those lanes refused -- read off the run's own lane trust and baseline
+    status, never re-derived.  A refused lane beside one the run simply did
+    not compare is not a refusal of the whole gate."""
+    lanes = [
+        reason.removeprefix(_LANE_UNAVAILABLE_PREFIX)
+        for reason in gate_result.reasons
+        if reason.startswith(_LANE_UNAVAILABLE_PREFIX)
+    ]
+    if not lanes:
+        return False
+    baseline = _as_mapping(report_document.get("baseline"))
+    trust = {
+        str(row.get("name", "")): str(row.get("reason", ""))
+        for row in (
+            _as_mapping(item)
+            for item in _as_sequence(baseline.get("sorted_lane_trust"))
+        )
+    }
+    meta_baseline = _as_mapping(
+        _as_mapping(report_document.get("meta")).get("baseline")
+    )
+    file_refused = str(meta_baseline.get("status") or "") not in _BASELINE_NOT_REFUSED
+
+    def refused(lane: str) -> bool:
+        reason = trust.get(lane)
+        if reason == _LANE_NO_CONTAINER:
+            return file_refused
+        return reason is not None and reason != _LANE_TRUSTED
+
+    return all(refused(lane) for lane in lanes)
+
+
+def gate_label(gate_result: GateResult, report_document: Mapping[str, object]) -> str:
+    """The word for the gate's outcome, by its closed exit contract."""
+    code = gate_result.exit_code
+    if code == _GATE_PASSED:
+        return GATE_LABEL_PASS
+    if code == _GATE_FAILED:
+        if _refused_over_the_population(gate_result):
+            return GATE_LABEL_UNAVAILABLE
+        return GATE_LABEL_VIOLATED
+    if code == _GATE_UNAVAILABLE:
+        if _refused_by_the_baseline(gate_result, report_document):
+            return GATE_LABEL_REFUSED
+        return GATE_LABEL_UNAVAILABLE
+    return GATE_LABEL_ERROR
 
 
 def contract_violations(
@@ -501,7 +576,7 @@ def render_patch_verify(
     health_after = _health_after(analysis)
     health_delta = _health_delta(diff_context)
     regressions = _regressions(diff_context)
-    gate_status = _gate_status(gate_result)
+    gate_status = gate_label(gate_result, report_document)
 
     if quiet:
         console.print(
@@ -553,8 +628,14 @@ def render_patch_verify(
 
 
 __all__ = [
+    "GATE_LABEL_ERROR",
+    "GATE_LABEL_PASS",
+    "GATE_LABEL_REFUSED",
+    "GATE_LABEL_UNAVAILABLE",
+    "GATE_LABEL_VIOLATED",
     "VALID_STRICTNESS_PROFILES",
     "contract_violations",
+    "gate_label",
     "internal_errors",
     "not_verified",
     "patch_complete",

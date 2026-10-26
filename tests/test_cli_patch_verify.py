@@ -187,7 +187,7 @@ def test_patch_verify_accepts_clean_patch_quiet() -> None:
     assert exit_code == int(ExitCode.SUCCESS)
     assert printer.text == (
         "patch-verify: accepted | health=0 delta=n/a (not compared) "
-        "regressions=0 gates=pass\n"
+        "regressions=0 gates=PASS\n"
         "  Verdict: ACCEPTED\n"
         "  Completeness: COMPLETE\n"
         "  Exit: 0\n"
@@ -203,7 +203,7 @@ def test_patch_verify_accepts_clean_patch_quiet() -> None:
             "ci",
             int(ExitCode.GATING_FAILURE),
             "patch-verify: violated | health=0 delta=n/a (not compared) "
-            "regressions=1 gates=FAIL\n"
+            "regressions=1 gates=VIOLATED\n"
             "  Verdict: VIOLATED\n"
             "  Completeness: COMPLETE\n"
             "  Exit: 3 (proven violation)\n"
@@ -214,7 +214,7 @@ def test_patch_verify_accepts_clean_patch_quiet() -> None:
             "relaxed",
             int(ExitCode.SUCCESS),
             "patch-verify: violated | health=0 delta=n/a (not compared) "
-            "regressions=1 gates=pass\n"
+            "regressions=1 gates=PASS\n"
             "  Verdict: VIOLATED\n"
             "  Completeness: COMPLETE\n"
             "  Exit: 0 (relaxed: violations are advisory)\n"
@@ -415,7 +415,12 @@ def test_patch_verify_renders_canonical_gate_reasons() -> None:
 def test_patch_verify_missing_canonical_evaluation_fails_closed() -> None:
     """No evaluation in the document: the gate did not run, so the patch is
     not verified -- the contract-error code, never ``accepted`` and never
-    the code of a violation nobody proved."""
+    the code of a violation nobody proved.
+
+    The gate label used to read ``FAIL`` here, the same word as a gate that
+    failed on a fact; this pin held it.  The maintainer's ruling of
+    2026-10-23 names a gate that never ran ``UNAVAILABLE``, so the
+    label agrees with the verdict beneath it instead of contradicting it."""
     printer = _RecordingPrinter()
 
     exit_code = render_patch_verify(
@@ -432,7 +437,7 @@ def test_patch_verify_missing_canonical_evaluation_fails_closed() -> None:
     assert exit_code == int(ExitCode.CONTRACT_ERROR)
     assert (printer.lines[0], _verdict_block(printer.text)) == (
         "patch-verify: unverified | health=0 delta=n/a (not compared) "
-        "regressions=0 gates=FAIL",
+        "regressions=0 gates=UNAVAILABLE",
         (
             "Verdict: UNVERIFIED",
             "Completeness: INCOMPLETE",
@@ -1293,3 +1298,165 @@ def test_the_compared_population_is_verified(
     text, code = cli_patch_verify_runs[("compared", True)]
     assert "patch-verify: unverified" not in text, text
     assert code in (None, int(ExitCode.SUCCESS), int(ExitCode.GATING_FAILURE))
+
+
+# -- the gate label: one word per gate outcome (maintainer ruling 2026-10-23) ---
+#
+# The label used to be ``pass`` for exit 0 and ``FAIL`` for everything else, so
+# a check that never ran, a refusal over an unmeasured population, a baseline
+# from another project and the gate's own crash all read like a violation
+# proven against the patch.  Exit codes are unchanged; only the word is.
+
+_UNMEASURED = f"metric:{gate_msgs.GATE_REASON_UNMEASURED_POPULATION}"
+_EMPTY_SCOPE = f"metric:{gate_msgs.GATE_REASON_EMPTY_ANALYSIS_SCOPE}"
+
+
+def _with_lane_trust(
+    document: dict[str, object],
+    reasons: dict[str, str],
+    *,
+    file_status: str | None = None,
+) -> dict[str, object]:
+    """The document with the named lanes untrusted for the given reasons,
+    and the baseline file status the run recorded."""
+    meta = cast(dict[str, object], document["meta"])
+    cast(dict[str, object], meta["baseline"])["status"] = file_status
+    baseline = cast(dict[str, object], document["baseline"])
+    rows = cast(list[dict[str, object]], baseline["sorted_lane_trust"])
+    for row in rows:
+        reason = reasons.get(str(row["name"]))
+        if reason is not None:
+            row["status"] = "unavailable"
+            row["reason"] = reason
+    return document
+
+
+def _gate_labels(
+    document: dict[str, object],
+) -> tuple[str, str]:
+    """The label as the quiet line and the verbose preview print it."""
+    labels: list[str] = []
+    for quiet in (True, False):
+        printer = _RecordingPrinter()
+        render_patch_verify(
+            console=printer,
+            args=cast(Any, _args()),
+            strictness="ci",
+            report_document=document,
+            analysis=_analysis(),
+            diff_context=_diff_context(),
+            baseline_state=cast(Any, _baseline_state()),
+            quiet=quiet,
+        )
+        pattern = r"gates=(\S+)" if quiet else r"Gate preview\s+(\S+) \(exit"
+        match = re.search(pattern, printer.text)
+        assert match is not None, printer.text
+        labels.append(match.group(1))
+    return labels[0], labels[1]
+
+
+_LANE = "clones.functions"
+_OTHER_LANE = "clones.blocks"
+
+
+@pytest.mark.parametrize(
+    ("gate_exit_code", "gate_reasons", "lane_reasons", "file_status", "label"),
+    [
+        pytest.param(0, (), {}, None, "PASS", id="0-pass"),
+        pytest.param(3, ("clone:new",), {}, None, "VIOLATED", id="3-fact"),
+        pytest.param(3, (_UNMEASURED,), {}, None, "UNAVAILABLE", id="3-unmeasured"),
+        pytest.param(3, (_EMPTY_SCOPE,), {}, None, "UNAVAILABLE", id="3-empty-scope"),
+        pytest.param(
+            3,
+            ("clone:new", _UNMEASURED),
+            {},
+            None,
+            "VIOLATED",
+            id="3-fact-beside-refusal",
+        ),
+        pytest.param(
+            2,
+            (f"lane:unavailable:{_LANE}",),
+            {_LANE: "baseline_scope_id"},
+            None,
+            "REFUSED",
+            id="2-foreign-baseline",
+        ),
+        pytest.param(
+            2,
+            (f"lane:unavailable:{_LANE}",),
+            {_LANE: "root_digest_mismatch"},
+            None,
+            "REFUSED",
+            id="2-integrity",
+        ),
+        pytest.param(
+            2,
+            (f"lane:unavailable:{_LANE}",),
+            {_LANE: "algorithm_revision"},
+            None,
+            "REFUSED",
+            id="2-other-contract",
+        ),
+        pytest.param(
+            2,
+            (f"lane:unavailable:{_LANE}",),
+            {_LANE: "baseline_missing"},
+            None,
+            "UNAVAILABLE",
+            id="2-no-baseline",
+        ),
+        pytest.param(
+            2,
+            (f"lane:unavailable:{_LANE}",),
+            {},
+            None,
+            "UNAVAILABLE",
+            id="2-not-compared",
+        ),
+        pytest.param(
+            2,
+            (f"lane:unavailable:{_LANE}", f"lane:unavailable:{_OTHER_LANE}"),
+            {_LANE: "baseline_scope_id"},
+            None,
+            "UNAVAILABLE",
+            id="2-refused-beside-not-compared",
+        ),
+        pytest.param(
+            2,
+            (f"lane:unavailable:{_LANE}",),
+            {_LANE: "baseline_missing"},
+            "integrity_failed",
+            "REFUSED",
+            id="2-refused-file",
+        ),
+        pytest.param(
+            2,
+            (f"lane:unavailable:{_LANE}",),
+            {_LANE: "baseline_missing"},
+            "missing",
+            "UNAVAILABLE",
+            id="2-no-baseline-file",
+        ),
+        pytest.param(5, ("gate crashed",), {}, None, "ERROR", id="5-crash"),
+        pytest.param(7, (), {}, None, "ERROR", id="7-outside-contract"),
+    ],
+)
+def test_the_gate_label_names_the_gate_outcome(
+    gate_exit_code: int,
+    gate_reasons: tuple[str, ...],
+    lane_reasons: dict[str, str],
+    file_status: str | None,
+    label: str,
+) -> None:
+    document = _with_lane_trust(
+        _report_document(gate_exit_code=gate_exit_code, gate_reasons=gate_reasons),
+        lane_reasons,
+        file_status=file_status,
+    )
+
+    assert _gate_labels(document) == (label, label)
+
+
+def test_a_missing_evaluation_is_labelled_unavailable() -> None:
+    assert _gate_labels({}) == ("UNAVAILABLE", "UNAVAILABLE")

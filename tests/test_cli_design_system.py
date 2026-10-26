@@ -859,6 +859,12 @@ _ALLCAPS_VOCABULARY = frozenset(
         "INCOMPLETE",
         "UNVERIFIED",
         "VIOLATED",
+        # The patch-verify gate labels (maintainer ruling 2026-10-23):
+        # one word per gate outcome. VIOLATED and ERROR are registered above
+        # and below for their other uses.
+        "PASS",
+        "REFUSED",
+        "UNAVAILABLE",
         "ANSI",
         "API",
         "AST",
@@ -911,14 +917,28 @@ def _unregistered_allcaps(modules: tuple[types.ModuleType, ...]) -> list[str]:
 
 
 def test_allcaps_is_reserved_for_verdicts_and_acronyms() -> None:
+    from codeclone.surfaces.cli import patch_verify
     from codeclone.ui_messages import controller, runtime
     from codeclone.ui_messages import help as help_msgs
 
-    violations = _unregistered_allcaps((runtime, controller, help_msgs))
+    violations = _unregistered_allcaps((runtime, controller, help_msgs, patch_verify))
     assert violations == [], (
         "Unexpected ALL-CAPS token(s); extend the message or use sentence "
         "case: " + "\n".join(violations)
     )
+
+
+def test_the_allcaps_guard_reads_the_patch_verify_gate_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive control of the scan: the gate labels live in the patch-verify
+    surface, not a message module, and a shouted word planted there is still
+    named -- the guard reads that module rather than passing it by."""
+    from codeclone.surfaces.cli import patch_verify
+
+    monkeypatch.setattr(patch_verify, "GATE_LABEL_PROBE", "ZORBLAX", raising=False)
+    with pytest.raises(AssertionError, match="GATE_LABEL_PROBE: ZORBLAX"):
+        test_allcaps_is_reserved_for_verdicts_and_acronyms()
 
 
 def test_the_allcaps_guard_still_refuses_an_unregistered_token() -> None:
