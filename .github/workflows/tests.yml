@@ -74,3 +74,6 @@ jobs:
 
       - name: Mypy
         run: uv run mypy .
+
+      - name: Ty
+        run: uv run ty check codeclone .github/actions benchmarks
