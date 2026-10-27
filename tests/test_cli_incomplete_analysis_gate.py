@@ -18,13 +18,18 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Concatenate, ParamSpec, TypeVar
 
 import pytest
 
 import codeclone.core.discovery as core_discovery
 import codeclone.core.worker as core_worker
+import codeclone.qualnames as qualnames_module
+from codeclone.analysis.units import extract_units_and_stats_from_source
 from codeclone.cache.store import file_stat_signature
+from codeclone.core._types import FileProcessResult
 from tests._cli_inprocess_run import flat, run_cli
 
 _CLEAN = "def used(x):\n    return x + 1\n\n\nprint(used(1))\n"
@@ -51,6 +56,37 @@ def _skip_by_parse_error(
     return _repo(tmp_path, clean=_CLEAN, broken=_SYNTAX_ERROR), "broken.py"
 
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_MakeRepo = Callable[[pytest.MonkeyPatch, Path], tuple[Path, str]]
+
+
+def _raising_for(name: str, real: Callable[_P, _R]) -> Callable[_P, _R]:
+    """*real*, except that it fails like a worker bug for the file *name*."""
+
+    def _probe(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if str(kwargs.get("filepath", "")).endswith(name):
+            raise RuntimeError("worker failure probe")
+        return real(*args, **kwargs)
+
+    return _probe
+
+
+def _unexplained_failure_for(
+    name: str, real: Callable[Concatenate[str, _P], FileProcessResult]
+) -> Callable[Concatenate[str, _P], FileProcessResult]:
+    """*real*, except that the file *name* fails without any reason given."""
+
+    def _probe(
+        filepath: str, /, *args: _P.args, **kwargs: _P.kwargs
+    ) -> FileProcessResult:
+        if filepath.endswith(name):
+            return FileProcessResult(filepath=filepath, success=False, error="?")
+        return real(filepath, *args, **kwargs)
+
+    return _probe
+
+
 def _skip_by_size(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, str]:
     repo = _repo(tmp_path, clean=_CLEAN, huge="x = 1\n" * 40)
     monkeypatch.setattr(core_worker, "MAX_FILE_SIZE", 120)
@@ -61,14 +97,11 @@ def _skip_by_internal_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[Path, str]:
     repo = _repo(tmp_path, clean=_CLEAN, boom="y = 2\n")
-    real = core_worker.extract_units_and_stats_from_source  # type: ignore[attr-defined]
-
-    def _extract(*args: object, **kwargs: object) -> object:
-        if str(kwargs.get("filepath", "")).endswith("boom.py"):
-            raise RuntimeError("worker failure probe")
-        return real(*args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(core_worker, "extract_units_and_stats_from_source", _extract)
+    monkeypatch.setattr(
+        core_worker,
+        "extract_units_and_stats_from_source",
+        _raising_for("boom.py", extract_units_and_stats_from_source),
+    )
     return repo, "boom.py"
 
 
@@ -96,7 +129,7 @@ def _skip_by_parse_timeout(
     from codeclone.contracts.errors import ParseError
 
     repo = _repo(tmp_path, clean=_CLEAN, slow="w = 4\n")
-    real = analysis_units._parse_with_limits  # type: ignore[attr-defined]
+    real = analysis_parser._parse_with_limits
 
     def _parse(source: str, timeout_s: int) -> object:
         if "w = 4" in source:
@@ -112,17 +145,12 @@ def _skip_by_parse_timeout(
 def _skip_with_no_reason(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[Path, str]:
-    from codeclone.core._types import FileProcessResult
-
     repo = _repo(tmp_path, clean=_CLEAN, odd="v = 5\n")
-    real = core_worker.process_file
-
-    def _process(filepath: str, *args: object, **kwargs: object) -> object:
-        if filepath.endswith("odd.py"):
-            return FileProcessResult(filepath=filepath, success=False, error="?")
-        return real(filepath, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(core_worker, "process_file", _process)
+    monkeypatch.setattr(
+        core_worker,
+        "process_file",
+        _unexplained_failure_for("odd.py", core_worker.process_file),
+    )
     return repo, "odd.py"
 
 
@@ -159,9 +187,9 @@ def test_gated_run_over_a_skipped_file_is_a_contract_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    make_repo: object,
+    make_repo: _MakeRepo,
 ) -> None:
-    repo, skipped = make_repo(monkeypatch, tmp_path)  # type: ignore[operator]
+    repo, skipped = make_repo(monkeypatch, tmp_path)
 
     code = _run_cli(monkeypatch, repo, ".", "--no-progress", "--fail-dead-code")
 
@@ -354,10 +382,10 @@ def test_exclusion_never_covers_a_reason_other_than_syntax(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    make_repo: object,
+    make_repo: _MakeRepo,
     reason: str | None,
 ) -> None:
-    repo, skipped = make_repo(monkeypatch, tmp_path)  # type: ignore[operator]
+    repo, skipped = make_repo(monkeypatch, tmp_path)
 
     code, output = _gated_run_excluding(monkeypatch, capsys, repo, f"pkg/{skipped}")
     if reason is not None:
@@ -419,14 +447,11 @@ def test_unused_exclusion_is_reported(
 
 
 def test_worker_names_a_syntax_error_and_the_interpreter(tmp_path: Path) -> None:
-    from codeclone.analysis.normalizer import NormalizationConfig
 
     source = tmp_path / "bad.py"
     source.write_text(_SYNTAX_ERROR, encoding="utf-8")
 
-    result = core_worker.process_file(
-        str(source), str(tmp_path), NormalizationConfig(), 1, 1
-    )
+    result = _process_alone(source, tmp_path)
 
     assert result.success is False
     assert result.error_kind == "syntax_error"
@@ -495,14 +520,20 @@ def test_exclusion_through_a_link_leading_outside_the_root_is_refused(
     assert "not a file this run found" in output
 
 
+def _process_alone(source: Path, root: Path) -> FileProcessResult:
+    """One worker call on *source*, the way the pipeline makes it."""
+
+    from codeclone.analysis.normalizer import NormalizationConfig
+
+    return core_worker.process_file(str(source), str(root), NormalizationConfig(), 1, 1)
+
+
 def test_syntax_error_raised_inside_codeclone_is_not_a_file_syntax_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Only the parse of the file's own text proves a syntax rejection: a
     # SyntaxError from CodeClone's later work on a parsed tree is unknown.
-    import codeclone.analysis.units as analysis_units
-    from codeclone.analysis.normalizer import NormalizationConfig
 
     source = tmp_path / "fine.py"
     source.write_text("def f():\n    return 1\n", encoding="utf-8")
@@ -512,14 +543,12 @@ def test_syntax_error_raised_inside_codeclone_is_not_a_file_syntax_error(
             raise SyntaxError("raised by CodeClone, not by the file")
 
     monkeypatch.setattr(
-        analysis_units._qualnames,  # type: ignore[attr-defined]
+        qualnames_module,
         "QualnameCollector",
         _Collector,
     )
 
-    result = core_worker.process_file(
-        str(source), str(tmp_path), NormalizationConfig(), 1, 1
-    )
+    result = _process_alone(source, tmp_path)
 
     assert result.success is False
     assert result.error_kind == "unexpected_error"
@@ -531,7 +560,6 @@ def test_worker_names_a_parse_timeout_as_its_own_reason(
 ) -> None:
     import codeclone.analysis.parser as analysis_parser
     import codeclone.analysis.units as analysis_units
-    from codeclone.analysis.normalizer import NormalizationConfig
 
     source = tmp_path / "slow.py"
     source.write_text("x = 1\n", encoding="utf-8")
@@ -546,9 +574,7 @@ def test_worker_names_a_parse_timeout_as_its_own_reason(
 
     monkeypatch.setattr(analysis_units, "_parse_with_limits", _timeout)
 
-    result = core_worker.process_file(
-        str(source), str(tmp_path), NormalizationConfig(), 1, 1
-    )
+    result = _process_alone(source, tmp_path)
 
     assert result.success is False
     assert result.error_kind == "parse_timeout"
@@ -706,7 +732,6 @@ def test_parse_error_that_is_neither_syntax_nor_timeout_stays_unknown(
     import ast
 
     import codeclone.analysis.units as analysis_units
-    from codeclone.analysis.normalizer import NormalizationConfig
 
     source = tmp_path / "odd.py"
     source.write_text("x = 1\n", encoding="utf-8")
@@ -716,9 +741,7 @@ def test_parse_error_that_is_neither_syntax_nor_timeout_stays_unknown(
         lambda _source, _timeout: ast.Expression(body=ast.Constant(value=1)),
     )
 
-    result = core_worker.process_file(
-        str(source), str(tmp_path), NormalizationConfig(), 1, 1
-    )
+    result = _process_alone(source, tmp_path)
 
     assert result.success is False
     assert result.error_kind == "unexpected_error"

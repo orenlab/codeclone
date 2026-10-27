@@ -21,7 +21,7 @@ from types import ModuleType
 from typing import Any, cast
 
 import pytest
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 
 def _load_action_impl() -> ModuleType:

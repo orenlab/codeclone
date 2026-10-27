@@ -64,10 +64,12 @@ class _Layout:
         return cache_path
 
 
-def _analyze(repo: Path, **request: object) -> dict[str, object]:
+def _analyze(repo: Path, *, cache_path: str | None = None) -> dict[str, object]:
     service = CodeCloneMCPService(history_limit=2)
     return service.analyze_repository(
-        MCPAnalysisRequest(root=str(repo), respect_pyproject=False, **request)  # type: ignore[arg-type]
+        MCPAnalysisRequest(
+            root=str(repo), respect_pyproject=False, cache_path=cache_path
+        )
     )
 
 

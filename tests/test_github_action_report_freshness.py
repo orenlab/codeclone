@@ -28,7 +28,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 _ACTION = Path(__file__).resolve().parents[1] / ".github" / "actions" / "codeclone"
 _CODECLONE = Path(sys.executable).with_name("codeclone")

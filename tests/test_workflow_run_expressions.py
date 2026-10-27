@@ -24,7 +24,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 _REPO = Path(__file__).resolve().parents[1]
 _EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.DOTALL)
