@@ -210,6 +210,10 @@ def _run_release_tag_check(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the release job runs bash on Linux")
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="the release job runs Python 3.14; its step needs tomllib",
+)
 def test_release_tag_check_reads_the_tag_as_data(tmp_path: Path) -> None:
     # A tag may carry `$(...)`: pasted into the script, the shell ran it.
     result = _run_release_tag_check(tmp_path, "v2.0.3$(touch${IFS}tag-ran)")
@@ -220,6 +224,10 @@ def test_release_tag_check_reads_the_tag_as_data(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the release job runs bash on Linux")
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="the release job runs Python 3.14; its step needs tomllib",
+)
 @pytest.mark.parametrize(
     ("tag", "returncode"),
     [
