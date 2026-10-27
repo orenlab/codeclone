@@ -43,6 +43,12 @@ Upgrade to it now; plan the move to 3.0.
   upgrading pip through the runner's pip.
 - A `pyproject.toml` nested too deeply to read is a contract error instead of an
   internal error.
+- The GitHub Action reports a JSON or SARIF file (outputs, PR comment, code
+  scanning upload) only when this run wrote it: a report committed at the
+  output path no longer passes for the result of a run that stopped early.
+- The release and benchmark workflows pass the release tag and the dispatch
+  input to their shell steps through the environment instead of pasting them
+  into the script.
 
 ### Report
 

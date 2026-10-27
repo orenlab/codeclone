@@ -45,6 +45,8 @@ jobs:
       - name: Verify release tag matches project version
         if: ${{ github.event_name == 'release' }}
         shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
           project_version="$(python - <<'PY'
@@ -53,7 +55,7 @@ jobs:
           print(payload["project"]["version"])
           PY
           )"
-          release_tag="${{ github.event.release.tag_name }}"
+          release_tag="$RELEASE_TAG"
           normalized_tag="${release_tag#v}"
           if [ "$normalized_tag" != "$project_version" ]; then
             echo "release tag $release_tag does not match project version $project_version" >&2

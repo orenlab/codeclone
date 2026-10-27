@@ -66,6 +66,8 @@ jobs:
     steps:
       - name: Resolve run profile gate
         shell: bash
+        env:
+          DISPATCH_PROFILE: ${{ inputs.profile }}
         run: |
           enabled=0
           if [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
@@ -73,7 +75,7 @@ jobs:
               enabled=1
             fi
           else
-            if [ "${{ matrix.profile }}" = "${{ inputs.profile }}" ]; then
+            if [ "${{ matrix.profile }}" = "$DISPATCH_PROFILE" ]; then
               enabled=1
             fi
           fi

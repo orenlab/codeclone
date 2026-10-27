@@ -199,6 +199,12 @@ def run_codeclone(inputs: ActionInputs) -> RunResult:
     ensure_parent_dir(inputs.json_path)
     if inputs.sarif:
         ensure_parent_dir(inputs.sarif_path)
+    # What stands at the output paths now -- a report the repository
+    # committed, for one -- is not this run's report.
+    before = (
+        _observe_report(Path(inputs.json_path)),
+        _observe_report(Path(inputs.sarif_path)),
+    )
 
     argv = ["codeclone", *build_codeclone_args(inputs)]
 
@@ -206,9 +212,11 @@ def run_codeclone(inputs: ActionInputs) -> RunResult:
         completed = subprocess.run(argv, check=False, timeout=600, shell=False)
     except subprocess.TimeoutExpired:
         print("::error::CodeClone analysis timed out after 10 minutes")
-        return _run_result_from_paths(exit_code=5, inputs=inputs)
+        return _run_result_from_paths(exit_code=5, inputs=inputs, before=before)
 
-    return _run_result_from_paths(exit_code=completed.returncode, inputs=inputs)
+    return _run_result_from_paths(
+        exit_code=completed.returncode, inputs=inputs, before=before
+    )
 
 
 def render_pr_comment(report: dict[str, object], *, exit_code: int) -> str:
@@ -327,19 +335,60 @@ def _boolean_codeclone_flags(inputs: ActionInputs) -> tuple[tuple[bool, str], ..
     )
 
 
-def _run_result_from_paths(*, exit_code: int, inputs: ActionInputs) -> RunResult:
-    """Build a run result from expected output paths."""
+def _run_result_from_paths(
+    *,
+    exit_code: int,
+    inputs: ActionInputs,
+    before: tuple[_Observation, _Observation],
+) -> RunResult:
+    """Build a run result from expected output paths and what stood there before."""
 
     json_path = Path(inputs.json_path)
     sarif_path = Path(inputs.sarif_path)
+    json_before, sarif_before = before
 
     return RunResult(
         exit_code=exit_code,
         json_path=inputs.json_path,
-        json_exists=json_path.exists(),
+        json_exists=_written_by_this_run(json_path, json_before),
         sarif_path=inputs.sarif_path,
-        sarif_exists=inputs.sarif and sarif_path.exists(),
+        sarif_exists=inputs.sarif and _written_by_this_run(sarif_path, sarif_before),
     )
+
+
+# A report path as seen before the run: the file's (device, inode, mtime_ns,
+# size), ``None`` when nothing was there, ``"unobserved"`` when it could not be
+# looked at.
+_Observation = tuple[int, int, int, int] | None | Literal["unobserved"]
+
+
+def _observe_report(path: Path) -> _Observation:
+    """The identity of the file at *path*; nothing there is changed or removed."""
+
+    try:
+        status = path.stat()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return "unobserved"
+    return (status.st_dev, status.st_ino, status.st_mtime_ns, status.st_size)
+
+
+def _written_by_this_run(path: Path, before: _Observation) -> bool:
+    """Whether the report at *path* is one this run wrote.
+
+    A repository can commit a file at the output path and make the run stop
+    before it writes; that file must not pass for this run's report. Writing a
+    report, in place or anew, changes the file's modification time or inode, so
+    an unchanged identity means the run did not write it (a rewrite within the
+    clock's resolution would hide a report, never invent one). A look that
+    failed before the run proves nothing about what was there: nothing counts.
+    """
+
+    if before == "unobserved":
+        return False
+    after = _observe_report(path)
+    return after not in (None, "unobserved") and after != before
 
 
 def _mapping(value: object) -> dict[str, object]:
