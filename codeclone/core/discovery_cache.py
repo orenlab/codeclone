@@ -130,7 +130,7 @@ def _dead_candidate_kind(value: object) -> _DeadCandidateKind | None:
 
 def _security_surface_category(value: object) -> SecuritySurfaceCategory | None:
     match value:
-        case (
+        case str(
             "archive_extraction"
             | "crypto_transport"
             | "database_boundary"
@@ -151,7 +151,7 @@ def _security_surface_location_scope(
     value: object,
 ) -> SecuritySurfaceLocationScope | None:
     match value:
-        case "module" | "class" | "callable":
+        case str("module" | "class" | "callable"):
             return value
         case _:
             return None
@@ -161,7 +161,7 @@ def _security_surface_classification_mode(
     value: object,
 ) -> SecuritySurfaceClassificationMode | None:
     match value:
-        case "exact_builtin" | "exact_call" | "exact_import":
+        case str("exact_builtin" | "exact_call" | "exact_import"):
             return value
         case _:
             return None
@@ -171,7 +171,7 @@ def _security_surface_evidence_kind(
     value: object,
 ) -> SecuritySurfaceEvidenceKind | None:
     match value:
-        case "builtin" | "call" | "import":
+        case str("builtin" | "call" | "import"):
             return value
         case _:
             return None
@@ -181,7 +181,7 @@ def _runtime_reachability_framework(
     value: object,
 ) -> RuntimeReachabilityFramework | None:
     match value:
-        case (
+        case str(
             "aiogram"
             | "aiohttp"
             | "celery"
@@ -203,7 +203,7 @@ def _runtime_reachability_edge_kind(
     value: object,
 ) -> RuntimeReachabilityEdgeKind | None:
     match value:
-        case (
+        case str(
             "declares_dependency"
             | "provides"
             | "registers_command"
@@ -220,7 +220,7 @@ def _runtime_reachability_confidence(
     value: object,
 ) -> RuntimeReachabilityConfidence | None:
     match value:
-        case "high" | "medium" | "low":
+        case str("high" | "medium" | "low"):
             return value
         case _:
             return None
@@ -230,7 +230,7 @@ def _runtime_reachability_target_kind(
     value: object,
 ) -> RuntimeReachabilityTargetKind | None:
     match value:
-        case "function" | "class" | "method":
+        case str("function" | "class" | "method"):
             return value
         case _:
             return None

@@ -84,6 +84,9 @@ Upgrade to it now; plan the move to 3.0.
   package.
 - Bump the Python package and composite GitHub Action default install version to
   `2.0.3`.
+- `ty check codeclone .github/actions benchmarks` reports no diagnostics: the
+  57 findings of ty 0.0.84 were fixed in the code and annotations, with no
+  suppressions and no change in behaviour.
 
 ## [2.0.2] - 2026-05-19
 

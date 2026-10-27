@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import ast
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -17,8 +18,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
 __all__ = ["CFG", "CFGBuilder"]
-
-TryStar = getattr(ast, "TryStar", ast.Try)
 
 
 @dataclass(slots=True)
@@ -104,7 +103,8 @@ class CFGBuilder:
                     orelse=stmt.orelse,
                     finalbody=stmt.finalbody,
                 )
-            case _ if TryStar is not None and isinstance(stmt, TryStar):
+            # ``try``/``except*`` (3.11+) has the same fields as ``try``.
+            case _ if sys.version_info >= (3, 11) and isinstance(stmt, ast.TryStar):
                 self._visit_try(
                     body=stmt.body,
                     handlers=stmt.handlers,

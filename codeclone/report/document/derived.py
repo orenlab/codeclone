@@ -337,8 +337,8 @@ def _build_derived_overview(
 
 def _representative_location_rows(
     suggestion: Suggestion,
-) -> list[dict[str, object]]:
-    rows = [
+) -> list[dict[str, str | int]]:
+    rows: list[dict[str, str | int]] = [
         {
             "relative_path": (
                 location.relative_path

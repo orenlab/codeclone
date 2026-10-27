@@ -289,7 +289,7 @@ def _as_risk_literal(value: object) -> Literal["low", "medium", "high"] | None:
 
 def _as_security_surface_category(value: object) -> str | None:
     match value:
-        case (
+        case str(
             "archive_extraction"
             | "crypto_transport"
             | "database_boundary"
@@ -308,7 +308,7 @@ def _as_security_surface_category(value: object) -> str | None:
 
 def _as_security_surface_location_scope(value: object) -> str | None:
     match value:
-        case "module" | "class" | "callable":
+        case str("module" | "class" | "callable"):
             return value
         case _:
             return None
@@ -316,7 +316,7 @@ def _as_security_surface_location_scope(value: object) -> str | None:
 
 def _as_security_surface_classification_mode(value: object) -> str | None:
     match value:
-        case "exact_builtin" | "exact_call" | "exact_import":
+        case str("exact_builtin" | "exact_call" | "exact_import"):
             return value
         case _:
             return None
@@ -324,7 +324,7 @@ def _as_security_surface_classification_mode(value: object) -> str | None:
 
 def _as_security_surface_evidence_kind(value: object) -> str | None:
     match value:
-        case "builtin" | "call" | "import":
+        case str("builtin" | "call" | "import"):
             return value
         case _:
             return None
@@ -332,7 +332,7 @@ def _as_security_surface_evidence_kind(value: object) -> str | None:
 
 def _as_runtime_reachability_framework(value: object) -> str | None:
     match value:
-        case (
+        case str(
             "aiogram"
             | "aiohttp"
             | "flask"
@@ -352,7 +352,7 @@ def _as_runtime_reachability_framework(value: object) -> str | None:
 
 def _as_runtime_reachability_edge_kind(value: object) -> str | None:
     match value:
-        case (
+        case str(
             "declares_dependency"
             | "provides"
             | "registers_command"
@@ -367,7 +367,7 @@ def _as_runtime_reachability_edge_kind(value: object) -> str | None:
 
 def _as_runtime_reachability_confidence(value: object) -> str | None:
     match value:
-        case "high" | "medium" | "low":
+        case str("high" | "medium" | "low"):
             return value
         case _:
             return None
@@ -375,7 +375,7 @@ def _as_runtime_reachability_confidence(value: object) -> str | None:
 
 def _as_runtime_reachability_target_kind(value: object) -> str | None:
     match value:
-        case "function" | "class" | "method":
+        case str("function" | "class" | "method"):
             return value
         case _:
             return None

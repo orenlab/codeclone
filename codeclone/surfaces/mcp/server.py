@@ -156,8 +156,19 @@ def build_mcp_server(
     # FastMCP otherwise reports the `mcp` package version in initialize/serverInfo.
     mcp._mcp_server.version = __version__
 
-    def tool(*args: object, **kwargs: object) -> Callable[[MCPCallable], MCPCallable]:
-        decorator = mcp.tool(*args, **kwargs)  # type: ignore[arg-type]
+    def tool(
+        *,
+        title: str,
+        description: str,
+        annotations: ToolAnnotations,
+        structured_output: bool,
+    ) -> Callable[[MCPCallable], MCPCallable]:
+        decorator = mcp.tool(
+            title=title,
+            description=description,
+            annotations=annotations,
+            structured_output=structured_output,
+        )
 
         def register(func: MCPCallable) -> MCPCallable:
             decorator(func)
@@ -166,10 +177,18 @@ def build_mcp_server(
         return register
 
     def resource(
-        *args: object,
-        **kwargs: object,
+        uri: str,
+        *,
+        title: str,
+        description: str,
+        mime_type: str,
     ) -> Callable[[MCPCallable], MCPCallable]:
-        decorator = mcp.resource(*args, **kwargs)  # type: ignore[arg-type]
+        decorator = mcp.resource(
+            uri,
+            title=title,
+            description=description,
+            mime_type=mime_type,
+        )
 
         def register(func: MCPCallable) -> MCPCallable:
             decorator(func)

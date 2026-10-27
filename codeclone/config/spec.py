@@ -58,8 +58,8 @@ class OptionSpec:
     cli_kind: CliKind | None = None
     flags: tuple[str, ...] = ()
     default: object = _UNSET
-    value_type: type[object] | None = None
-    const: object | None = None
+    value_type: type[int] | None = None
+    const: str | int | None = None
     nargs: str | int | None = None
     metavar: str | None = None
     help_text: str | None = None
@@ -79,8 +79,8 @@ def _option(
     cli_kind: CliKind | None = None,
     flags: tuple[str, ...] = (),
     default: object = _UNSET,
-    value_type: type[object] | None = None,
-    const: object | None = None,
+    value_type: type[int] | None = None,
+    const: str | int | None = None,
     nargs: str | int | None = None,
     metavar: str | None = None,
     help_text: str | None = None,

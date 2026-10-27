@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import NoReturn
+from typing import NoReturn, TypedDict
 
 from .. import ui_messages as ui
 from ..contracts import ExitCode, cli_help_epilog
@@ -22,6 +22,20 @@ class _HelpFormatter(argparse.RawTextHelpFormatter):
     """Product-oriented help formatter extension point."""
 
 
+class _ArgumentOptions(TypedDict, total=False):
+    """The ``add_argument`` keywords an option spec can produce."""
+
+    help: str | None
+    dest: str
+    nargs: str | int | None
+    const: str | int | None
+    metavar: str | None
+    type: type[int]
+    action: str | type[argparse.Action]
+    default: str
+    version: str
+
+
 def _add_option(
     group: argparse._ArgumentGroup,
     *,
@@ -37,52 +51,64 @@ def _add_option(
         )
         return
 
-    argument_kwargs: dict[str, object] = {"help": option.help_text}
+    argument_kwargs: _ArgumentOptions = {"help": option.help_text}
 
     if option.cli_kind == "value":
         argument_kwargs.update(
-            dest=option.dest,
-            nargs=option.nargs,
-            const=option.const,
-            metavar=option.metavar,
+            {
+                "dest": option.dest,
+                "nargs": option.nargs,
+                "const": option.const,
+                "metavar": option.metavar,
+            }
         )
         if option.value_type is not None:
             argument_kwargs["type"] = option.value_type
     elif option.cli_kind == "append":
         argument_kwargs.update(
-            dest=option.dest,
-            action="append",
-            metavar=option.metavar,
+            {
+                "dest": option.dest,
+                "action": "append",
+                "metavar": option.metavar,
+            }
         )
     elif option.cli_kind == "optional_path":
         argument_kwargs.update(
-            dest=option.dest,
-            nargs="?",
-            const=option.const,
-            metavar=option.metavar or "FILE",
+            {
+                "dest": option.dest,
+                "nargs": "?",
+                "const": option.const,
+                "metavar": option.metavar or "FILE",
+            }
         )
     elif option.cli_kind == "bool_optional":
         argument_kwargs.update(
-            action=argparse.BooleanOptionalAction,
-            default=argparse.SUPPRESS,
+            {
+                "action": argparse.BooleanOptionalAction,
+                "default": argparse.SUPPRESS,
+            }
         )
     elif option.cli_kind in {"store_true", "store_false"}:
         argument_kwargs.update(
-            dest=option.dest,
-            action=option.cli_kind,
-            default=argparse.SUPPRESS,
+            {
+                "dest": option.dest,
+                "action": option.cli_kind,
+                "default": argparse.SUPPRESS,
+            }
         )
     elif option.cli_kind == "help":
         argument_kwargs["action"] = "help"
     elif option.cli_kind == "version":
         argument_kwargs.update(
-            action="version",
-            version=ui.version_output(version),
+            {
+                "action": "version",
+                "version": ui.version_output(version),
+            }
         )
     else:
         raise RuntimeError(f"Unsupported CLI option kind: {option.cli_kind}")
 
-    group.add_argument(*option.flags, **argument_kwargs)  # type: ignore[arg-type]
+    group.add_argument(*option.flags, **argument_kwargs)
 
 
 def build_parser(version: str) -> _ArgumentParser:

@@ -36,6 +36,7 @@ from ..models import (
     DeadItem,
     DepGraph,
     GroupItemLike,
+    GroupMap,
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
@@ -202,7 +203,7 @@ def analyze(
         and cached_projection.get("digest") == segment_groups_raw_digest
     ):
         projection_groups = cached_projection.get("groups", {})
-        segment_groups = {
+        segment_groups: GroupMap = {
             group_key: [
                 {
                     "segment_hash": str(item["segment_hash"]),

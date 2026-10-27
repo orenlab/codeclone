@@ -167,7 +167,7 @@ def _invoke_process_file(
     segment_min_loc: int,
     segment_min_stmt: int,
 ) -> FileProcessResult:
-    optional_kwargs: dict[str, object] = {
+    optional_kwargs: dict[str, bool | int] = {
         "collect_structural_findings": collect_structural_findings,
         "collect_api_surface": collect_api_surface,
         "api_include_private_modules": api_include_private_modules,
@@ -193,8 +193,8 @@ def _invoke_process_file(
                 for key, value in optional_kwargs.items()
                 if key in supported_names
             }
-    process_callable: Callable[..., FileProcessResult] = process_file
-    return process_callable(
+    return _call_process_file(
+        process_file,
         filepath,
         root,
         cfg,
@@ -202,3 +202,23 @@ def _invoke_process_file(
         min_stmt,
         **supported_kwargs,
     )
+
+
+def _call_process_file(
+    process: Callable[..., FileProcessResult],
+    filepath: str,
+    root: str,
+    cfg: NormalizationConfig,
+    min_loc: int,
+    min_stmt: int,
+    **options: bool | int,
+) -> FileProcessResult:
+    """Call ``process`` with the positional arguments and the given options.
+
+    ``process`` is typed ``Callable[...]`` on purpose: tests replace
+    ``process_file`` with doubles that accept only some of the options, and
+    ``_invoke_process_file`` passes only those. Taking it as a parameter
+    keeps that boundary explicit; an annotated local would be narrowed back
+    to the exact signature of ``process_file`` by a type checker.
+    """
+    return process(filepath, root, cfg, min_loc, min_stmt, **options)

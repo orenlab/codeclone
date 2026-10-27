@@ -13,7 +13,7 @@ import os
 import signal
 import tokenize
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from ..contracts.errors import ParseError
 
@@ -31,12 +31,27 @@ _DeclarationTokenIndexKey = tuple[int, int, str]
 _DECLARATION_TOKEN_STRINGS = frozenset({"def", "async", "class"})
 
 
-def _consumed_cpu_seconds(resource_module: object) -> float:
+class _ResourceUsage(Protocol):
+    """The part of ``resource.struct_rusage`` read here."""
+
+    @property
+    def ru_utime(self) -> float: ...
+    @property
+    def ru_stime(self) -> float: ...
+
+
+class _ResourceModule(Protocol):
+    """The part of the POSIX ``resource`` module read here."""
+
+    @property
+    def RUSAGE_SELF(self) -> int: ...
+    def getrusage(self, who: int, /) -> _ResourceUsage: ...
+
+
+def _consumed_cpu_seconds(resource_module: _ResourceModule) -> float:
     """Return consumed CPU seconds for the current process."""
     try:
-        usage = resource_module.getrusage(  # type: ignore[attr-defined]
-            resource_module.RUSAGE_SELF  # type: ignore[attr-defined]
-        )
+        usage = resource_module.getrusage(resource_module.RUSAGE_SELF)
         return float(usage.ru_utime) + float(usage.ru_stime)
     except Exception:
         return 0.0

@@ -321,25 +321,26 @@ def build_directory_hotspots(
             finding_groups = len(row.finding_ids)
             affected_items = row.affected_items
             files = len(row.files)
-            item = {
-                "path": row.path,
-                "finding_groups": finding_groups,
-                "affected_items": affected_items,
-                "files": files,
-                "share_pct": round(
-                    (affected_items / total_affected_items) * 100.0,
-                    1,
-                )
-                if total_affected_items > 0
-                else 0.0,
-                "source_scope": source_scope_from_locations(row.locations),
-            }
+            items.append(
+                {
+                    "path": row.path,
+                    "finding_groups": finding_groups,
+                    "affected_items": affected_items,
+                    "files": files,
+                    "share_pct": round(
+                        (affected_items / total_affected_items) * 100.0,
+                        1,
+                    )
+                    if total_affected_items > 0
+                    else 0.0,
+                    "source_scope": source_scope_from_locations(row.locations),
+                }
+            )
             if bucket == "all":
-                item["kind_breakdown"] = {
+                items[-1]["kind_breakdown"] = {
                     key: len(row.kind_breakdown_ids[key])
                     for key in _DIRECTORY_KIND_BREAKDOWN_KEYS
                 }
-            items.append(item)
         hotspots[bucket] = {
             "total_directories": total_directories,
             "returned": len(items),
