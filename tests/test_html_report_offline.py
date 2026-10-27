@@ -41,7 +41,10 @@ _LOADER_TAG = r"<(?:img|script|link|iframe|source|video|audio|embed|object)\b"
 _SCRIPT_NETWORK_LOAD = re.compile(
     r"\bfetch\s*\("
     r"|\bXMLHttpRequest\b"
-    r"|\bnew\s+(?:Image|WebSocket|EventSource|Worker|SharedWorker)\b"
+    r"|\bnew\s+(?:Image|Audio|Video|FontFace|WebSocket|EventSource|Worker|SharedWorker)\b"
+    r"|\bFontFace\b"
+    # CSS written from a script: `url(` that is not a method call such as `s.url(`
+    r"|(?<![\w.$])url\("
     r"|\bnavigator\.sendBeacon\b"
     r"|\bimport\s*\("
     r"|\bdocument\.write(?:ln)?\s*\("
@@ -52,6 +55,40 @@ _SCRIPT_NETWORK_LOAD = re.compile(
     r"|\binsertAdjacentHTML\s*\([^;]*?" + _LOADER_TAG + r"[^;]*",
     re.IGNORECASE,
 )
+
+
+# Every external address the built report may contain, and why it is there.
+# A new address fails the test until it is added here with its purpose: the
+# loader scans below can only list the ways a page fetches that someone thought
+# of, while this list does not depend on how the address would be used.
+ALLOWED_EXTERNAL_ADDRESSES: dict[str, str] = {
+    "http://www.w3.org/2000/svg": (
+        "SVG namespace name inside an inline data: image; an identifier, never fetched"
+    ),
+    "https://github.com/orenlab/codeclone": "footer <a href>; navigation on click",
+    "https://orenlab.github.io/codeclone/": "footer Docs <a href>; navigation on click",
+    "https://github.com/orenlab/codeclone/issues": (
+        "footer Report Issue <a href>; navigation on click"
+    ),
+    "https://img.shields.io/badge/codeclone-": (
+        "badge address shown as text to copy; the page never loads it"
+    ),
+}
+_ABSOLUTE_ADDRESS = re.compile(r"https?://[^\s\"'<>`)\\]+", re.IGNORECASE)
+_PROTOCOL_RELATIVE_ADDRESS = re.compile(
+    r"(?<![:\w/\\])//[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+[^\s\"'<>`)\\]*"
+)
+
+
+def external_addresses(html: str) -> list[str]:
+    """Every absolute or protocol-relative address anywhere in the page."""
+
+    return sorted(
+        {
+            *_ABSOLUTE_ADDRESS.findall(html),
+            *_PROTOCOL_RELATIVE_ADDRESS.findall(html),
+        }
+    )
 
 
 def script_network_loads(html: str) -> list[str]:
@@ -99,6 +136,8 @@ def test_the_script_scan_sees_each_way_a_script_can_load() -> None:
     probe = (
         "<script>"
         "fetch('/api');var x=new XMLHttpRequest();var i=new Image();"
+        "new Audio(src).play();document.fonts.add(new FontFace('F',src));"
+        "el.style.background='url('+src+')';a.setAttribute('href',s.url(f,l));"
         "navigator.sendBeacon('/b');import('./m.js');document.write('x');"
         "var s=document.createElement('script');"
         "img.src='https://img.example/a.png';el.setAttribute('src',u);"
@@ -114,6 +153,9 @@ def test_the_script_scan_sees_each_way_a_script_can_load() -> None:
         "fetch(",
         "XMLHttpRequest",
         "new Image",
+        "new Audio",
+        "new FontFace",
+        "url(",
         "navigator.sendBeacon",
         "import(",
         "document.write(",
@@ -176,3 +218,54 @@ def test_the_badge_dialog_still_offers_the_badge_to_copy(
         "if(ht)ht.textContent='<img src=\"'+url+'\" alt=\"'+alt+'\">';",
     ):
         assert expected in scripts, expected
+
+
+def test_the_address_scan_finds_addresses_in_markup_styles_and_scripts() -> None:
+    # Positive control: attribute, CSS and script addresses, absolute and
+    # protocol-relative, are found; a script comment is not an address.
+    probe = (
+        '<a href="https://docs.example/a">a</a>'
+        "<style>.x{background:url(//cdn.example/x.png)}</style>"
+        "<script>// a comment\nnew Audio('https://x.example/ping.mp3');"
+        "var u='//img.example/b.png';</script>"
+    )
+
+    assert external_addresses(probe) == [
+        "//cdn.example/x.png",
+        "//img.example/b.png",
+        "https://docs.example/a",
+        "https://x.example/ping.mp3",
+    ]
+
+
+def test_every_external_address_in_the_report_is_on_the_allowed_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unexpected = [
+        address
+        for address in external_addresses(_report_html(tmp_path, monkeypatch))
+        if address not in ALLOWED_EXTERNAL_ADDRESSES
+    ]
+
+    assert unexpected == []
+
+
+def test_every_allowed_address_is_in_the_report_for_its_purpose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The other side: the links and the badge address stay, each only in the
+    # place its purpose names, so the list cannot drift into a blank cheque.
+    html = _report_html(tmp_path, monkeypatch)
+    scripts = "".join(script.group(1) for script in _SCRIPT.finditer(html))
+
+    assert sorted(external_addresses(html)) == sorted(ALLOWED_EXTERNAL_ADDRESSES)
+    for link in (
+        "https://github.com/orenlab/codeclone",
+        "https://orenlab.github.io/codeclone/",
+        "https://github.com/orenlab/codeclone/issues",
+    ):
+        assert f'<a href="{link}" target="_blank" rel="noopener">' in html, link
+    assert "url='https://img.shields.io/badge/codeclone-'" in scripts
+    assert re.search(
+        r"url\(\"data:image/svg\+xml,[^\"]*xmlns='http://www\.w3\.org/2000/svg'", html
+    )
