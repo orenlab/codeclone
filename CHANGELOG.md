@@ -1,137 +1,71 @@
 # Changelog
 
-## [2.0.3] - Unreleased
+## [2.0.3] - 2026-10-27
 
-`2.0.3` is a security release and the last planned release of the 2.x line.
-Upgrade to it now; plan the move to 3.0.
-
-`2.0.3` is the last planned release of the 2.x line. It bounds and pins what
-CodeClone installs, so the release keeps installing the same, known-good bytes
-after 2.x stops receiving patches. Analysis behavior is unchanged.
+`2.0.3` is a security release and the last planned release of the 2.x line. It
+keeps an analysed repository from steering CodeClone, its launchers and its
+GitHub Action, and pins what CodeClone installs. Upgrade to it now; plan the
+move to 3.0.
 
 ### Security
 
 - The Codex plugin launcher, the Claude Desktop bundle and the VS Code
-  extension no longer start a `codeclone-mcp` found inside the opened workspace
-  (`.venv`, `venv`, an ancestor virtualenv, a Poetry environment, a
-  repository-local `uv run`, or a relative `PATH` entry). They start the
-  launcher you configured by absolute path, a user-level install, or an
+  extension never start a `codeclone-mcp` found inside the opened workspace;
+  they start a configured absolute launcher, a user-level install or an
   absolute `PATH` entry, and otherwise stop with setup instructions.
-- A path in the analysed repository's `pyproject.toml` (report outputs,
-  `baseline`, `metrics_baseline`, `cache_path`, `coverage_xml`) must stay inside
-  the repository, after symbolic links are followed; otherwise the run stops
-  with a contract error before anything is written or read. Paths given on the
-  command line are unchanged.
-- A report is never written through a symbolic link, and a path spelled inside
-  the repository that a linked directory leads outside it is refused.
-- `--update-baseline` no longer writes through a link the repository planted
-  outside the analysed root; reading a baseline through such a link still works.
-- The cache is never read or written through a link that leads outside the
-  repository (a committed `.cache` link, for example); the CLI run and the MCP
-  `analyze_repository` call stop instead.
-- In gating mode (`--ci`, `--fail-*`), a file that was found but not analysed
-  is a contract error (exit `2`) instead of being skipped silently: over the
-  size limit, unreadable, a parse timeout, an internal error, a failed `stat`
-  while walking the tree, or a syntax error. A syntax error can be excluded file
-  by file with the new command-line flag `--allow-syntax-error FILE`; excluded
-  files are listed and the run reports that the full scope was not verified.
-  This can make gated runs fail on repositories with intentionally invalid
-  `.py` files, or with newer syntax than the Python running CodeClone.
-- File names and qualnames in the Markdown report and the MCP PR summary are
-  rendered as inert code spans: a backtick or a newline in a name can no longer
-  produce live HTML or a forged line.
-- Changed-file review (`--diff-against`, MCP `analyze_changed_paths`) runs git
-  without the analysed repository's filesystem monitor, hooks or filter
-  drivers, and without inherited `GIT_DIR`-style variables.
-- The GitHub Action installs pip from a SHA-256-verified wheel instead of
-  upgrading pip through the runner's pip.
-- A `pyproject.toml` nested too deeply to read is a contract error instead of an
-  internal error.
-- The GitHub Action reports a JSON or SARIF file (outputs, PR comment, code
-  scanning upload) only when this run wrote it: a report committed at the
-  output path no longer passes for the result of a run that stopped early.
-- The release and benchmark workflows pass the release tag and the dispatch
-  input to their shell steps through the environment instead of pasting them
-  into the script.
-- Opening the HTML report no longer requests fonts from `fonts.googleapis.com`
-  and `fonts.gstatic.com`; it uses locally installed or system fonts.
-- The HTML report's badge dialog shows the badge address as text instead of
-  loading a preview image from `img.shields.io`.
+- Paths in the analysed repository's `pyproject.toml` must stay inside the
+  repository after links are followed. Reports, `--update-baseline` and the
+  cache (CLI and MCP `analyze_repository`) are never written or read through a
+  link that leads outside it.
+- In gating mode a file that was found but not analysed is a contract error
+  (exit `2`); a syntax error can be excluded file by file with
+  `--allow-syntax-error FILE`. Report schema `2.12` and every report show the
+  verified scope and the excluded files.
+- File names and qualnames are inert code spans in the Markdown report and the
+  MCP PR summary.
+- Changed-file review runs git without the repository's filesystem monitor,
+  hooks, filter drivers and inherited `GIT_DIR`-style variables.
+- The HTML report loads nothing from the network: no web fonts, and the badge
+  dialog shows the badge address as text.
 
-### Report
+### Fixed
 
-- Report schema `2.12` adds the analysis scope to `inventory`
-  (`files.verified`, `files.excluded`, `files.full_scope_verified`,
-  `excluded_files`); the Markdown, text and HTML reports and the Action PR
-  comment show it when files were excluded, and SARIF carries it on the run's
-  invocation (`toolExecutionNotifications` per excluded file and
-  `properties.fullScopeVerified`).
-
-### Enhancements
-
-- Add `server.json` for the official MCP Registry
-  (`io.github.orenlab/codeclone`, PyPI package `codeclone`, stdio
-  `codeclone --mcp` with the `mcp` extra) and the `mcp-name` ownership marker in
-  the PyPI and GitHub READMEs.
-- Add the `codeclone --mcp` flag, a link to `codeclone-mcp`: it passes the
-  arguments that follow it to the same server entry point and, without the
-  `mcp` extra, refuses with the same install hint and exit code `2`. The
-  registry entry launches it as
-  `uvx --with 'codeclone[mcp]==2.0.3' codeclone@2.0.3 --mcp --transport stdio`.
-- Add `glama.json` with the Glama maintainer record.
-- Add `.pre-commit-hooks.yaml`, so `repo: https://github.com/orenlab/codeclone`
-  with `rev: v2.0.3` provides the `codeclone` hook.
-
-### Documentation
-
-- README, the PyPI description and the package's `Documentation` URL link to
-  the documentation of the `v2.0.3` tag; the website describes the current
-  release.
-- MCP help topics, the Codex plugin and Claude Desktop bundle manifests, and
-  the extension, plugin and Action READMEs link the `v2.0.3` documentation
-  instead of site pages that no longer exist.
+- A `pyproject.toml` nested too deeply to read is a contract error instead of
+  an internal error.
 
 ### Dependencies
 
-- Cap every runtime dependency below its next major version: `orjson<4`,
-  `packaging<27`, `pygments<3`, `rich<16`, `tomli<3`. Lower bounds are
-  unchanged and already above every known advisory.
-- Raise the `mcp` extra to `mcp>=1.30.0,<2`, the first 1.x release without
-  known advisories.
-- Refresh `uv.lock` to releases at least 14 days old (`exclude-newer`), with
-  reviewed security exceptions for `certifi`, `filelock` and `virtualenv`.
-- Refresh 8 npm packages in the VS Code extension lock after byte-level
-  verification; the extension bundle itself ships no npm packages.
+- Cap runtime dependencies below their next major version and raise the `mcp`
+  extra to `mcp>=1.30.0,<2`.
+- Lock releases at least 14 days old (`exclude-newer`), with reviewed security
+  exceptions for `certifi`, `filelock` and `virtualenv`; refresh the VS Code
+  extension lock after byte-level verification.
 
 ### GitHub Action
 
-- Install the shipped version from `requirements.txt` next to the action: the
-  release wheel and every runtime dependency at an exact version, each file
-  pinned by SHA-256, with `pip install --require-hashes --only-binary :all:`.
-- Move the composite action to the Node 24 releases of `setup-python`,
-  `upload-sarif` and `github-script`, pinned to exact commits.
+- Install the release from `requirements.txt`: every wheel pinned by SHA-256,
+  installed with a pip that is itself fetched and checked by SHA-256.
+- Publish a JSON or SARIF report only when this run wrote it.
+- Run on Node 24 releases of the actions it uses, pinned to full commits.
+
+### Documentation
+
+- README, the PyPI description, the package metadata, the MCP help topics and
+  the plugin and bundle manifests link the documentation of the `v2.0.3` tag.
 
 ### Internal
 
-- Publish `server.json` to the MCP Registry after the PyPI release, using a
-  checksum-verified `mcp-publisher` and GitHub OIDC login.
-- Pin every action in the publish workflow to a full commit SHA and pin `build`
-  and `twine` to their locked versions.
-- Refresh the CI dependency locks after byte-level verification of every
-  package.
+- List CodeClone in the MCP Registry (`server.json`, `codeclone --mcp`) and on
+  Glama (`glama.json`), and ship a pre-commit hook manifest.
+- Build the release wheel reproducibly and refuse to publish a wheel other than
+  the one the Action pins; pin every workflow action to a full commit and
+  install CI dependencies with `uv sync --locked --no-build`.
+- Pass the release tag and workflow inputs to shell steps through the
+  environment.
+- `ty check codeclone .github/actions benchmarks` reports no diagnostics, with
+  `ty` 0.0.84 pinned and run in CI, and no type suppressions added.
 - Bump the Python package and composite GitHub Action default install version to
   `2.0.3`.
-- `ty check codeclone .github/actions benchmarks` reports no diagnostics: the
-  57 findings of ty 0.0.84 were fixed in the code and annotations, with no
-  suppressions and no change in behaviour.
-- Build the release wheel reproducibly (fixed timestamps and file modes,
-  hash-pinned build requirements) and refuse to publish a wheel whose SHA-256
-  differs from the one the Action pins.
-- Pin every action in the workflows to an exact commit and install CI
-  dependencies with `uv sync --locked --no-build`.
-- Bump the Python package and composite GitHub Action default install version to
-  `2.0.3`.
-
 
 ## [2.0.2] - 2026-05-19
 
