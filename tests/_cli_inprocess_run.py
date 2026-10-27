@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import codeclone.surfaces.cli.workflow as cli
+import codeclone.ui_messages as ui
 
 
 def flat(text: str) -> str:
@@ -25,8 +26,12 @@ def flat(text: str) -> str:
 def run_cli(monkeypatch: pytest.MonkeyPatch, cwd: Path, *args: str) -> int:
     """Exit code of ``codeclone *args`` run from *cwd* (0 when it returns)."""
 
-    # A wide console keeps long temporary paths on one line.
+    # A wide console keeps long temporary paths on one line. The CLI console
+    # has a fixed layout width, so COLUMNS alone does not widen it: with the
+    # default width a long temporary path is folded mid-name, and where it
+    # folds depends on the machine's temporary directory.
     monkeypatch.setenv("COLUMNS", "4000")
+    monkeypatch.setattr(ui, "CLI_LAYOUT_MAX_WIDTH", 4000)
     monkeypatch.chdir(cwd)
     monkeypatch.setattr(sys, "argv", ["codeclone", *args])
     try:
