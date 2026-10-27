@@ -1,3 +1,5 @@
+> Documentation for this version: [github.com/orenlab/codeclone/tree/v2.0.3/docs](https://github.com/orenlab/codeclone/tree/v2.0.3/docs) — the website describes the current release.
+
 <div align="center">
 
   <picture>
@@ -74,8 +76,8 @@ Live sample report: [orenlab.github.io/codeclone/examples/report/](https://orenl
 >
 </details>
 
-Architecture: [Architecture narrative](https://orenlab.github.io/codeclone/architecture/) ·
-CFG semantics: [CFG semantics](https://orenlab.github.io/codeclone/cfg/)
+Architecture: [Architecture narrative](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/architecture.md) ·
+CFG semantics: [CFG semantics](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/cfg.md)
 
 ## Installation
 
@@ -188,7 +190,7 @@ codeclone . --fail-on-api-break
 codeclone . --coverage coverage.xml --fail-on-untested-hotspots --coverage-min 50
 ```
 
-Gate details: [Metrics and quality gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/)
+Gate details: [Metrics and quality gates](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/15-metrics-and-quality-gates.md)
 
 ### Pre-commit
 
@@ -239,8 +241,8 @@ codeclone-mcp --transport streamable-http
 > Keep `stdio` as the default transport for local IDE and agent clients; HTTP exposure beyond
 > loopback requires explicit `--allow-remote`.
 
-[MCP usage guide](https://orenlab.github.io/codeclone/mcp/) ·
-[MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
+[MCP usage guide](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/mcp.md) ·
+[MCP interface contract](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/20-mcp-interface.md)
 
 ### Native Client Surfaces
 
@@ -252,9 +254,9 @@ codeclone-mcp --transport streamable-http
 
 All three are native clients over the same `codeclone-mcp` contract — no second analysis engine.
 
-[VS Code extension docs](https://orenlab.github.io/codeclone/book/21-vscode-extension/) ·
-[Claude Desktop docs](https://orenlab.github.io/codeclone/book/22-claude-desktop-bundle/) ·
-[Codex plugin docs](https://orenlab.github.io/codeclone/book/23-codex-plugin/)
+[VS Code extension docs](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/21-vscode-extension.md) ·
+[Claude Desktop docs](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/22-claude-desktop-bundle.md) ·
+[Codex plugin docs](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/23-codex-plugin.md)
 
 ## Configuration
 
@@ -281,7 +283,7 @@ segment_min_stmt = 10
 
 Precedence: CLI flags > `pyproject.toml` > built-in defaults.
 
-Config reference: [Config and defaults](https://orenlab.github.io/codeclone/book/04-config-and-defaults/)
+Config reference: [Config and defaults](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/04-config-and-defaults.md)
 
 ## Baseline Workflow
 
@@ -292,7 +294,7 @@ Baselines capture the current duplication state. Once committed, they become the
 - Trust is verified via `generator`, `fingerprint_version`, and `payload_sha256`
 - In `--ci` mode, an untrusted baseline is a contract error (exit 2)
 
-Full contract: [Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)
+Full contract: [Baseline contract](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/06-baseline.md)
 
 ## Exit Codes
 
@@ -305,7 +307,7 @@ Full contract: [Baseline contract](https://orenlab.github.io/codeclone/book/06-b
 
 Contract errors (`2`) take precedence over gating failures (`3`).
 
-Full policy: [Exit codes and failure policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/)
+Full policy: [Exit codes and failure policy](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/03-contracts-exit-codes.md)
 
 ## Reports
 
@@ -321,13 +323,13 @@ All formats are rendered from one canonical JSON report.
 `--open-html-report` opens the HTML in the default browser.
 `--timestamped-report-paths` appends a UTC timestamp to default filenames.
 
-Report contract: [Report contract](https://orenlab.github.io/codeclone/book/08-report/) ·
-[HTML render](https://orenlab.github.io/codeclone/book/10-html-render/)
+Report contract: [Report contract](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/08-report.md) ·
+[HTML render](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/10-html-render.md)
 
 <details>
 <summary>Canonical JSON report shape (v2.11)</summary>
 
-Full schema contract: [Report contract](https://orenlab.github.io/codeclone/book/08-report/)
+Full schema contract: [Report contract](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/08-report.md)
 
 Top-level keys: `report_schema_version`, `meta`, `inventory`, `findings`, `metrics`, `derived`, `integrity`.
 
@@ -424,8 +426,8 @@ class Middleware:  # codeclone: ignore[dead-code]
     ...
 ```
 
-Suppression contract: [Inline suppressions](https://orenlab.github.io/codeclone/book/19-inline-suppressions/) ·
-[Dead-code contract](https://orenlab.github.io/codeclone/book/16-dead-code-contract/)
+Suppression contract: [Inline suppressions](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/19-inline-suppressions.md) ·
+[Dead-code contract](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/16-dead-code-contract.md)
 
 ## Benchmarking
 
@@ -447,7 +449,7 @@ CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
 ```
 
 Performance claims are backed by the reproducible benchmark workflow documented in
-[Benchmarking contract](https://orenlab.github.io/codeclone/book/18-benchmarking/).
+[Benchmarking contract](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/18-benchmarking.md).
 
 </details>
 
@@ -456,11 +458,11 @@ Performance claims are backed by the reproducible benchmark workflow documented 
 Full docs and contract book: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/)
 
 Quick links:
-[Baseline](https://orenlab.github.io/codeclone/book/06-baseline/) ·
-[Report](https://orenlab.github.io/codeclone/book/08-report/) ·
-[Metrics & gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/) ·
-[MCP](https://orenlab.github.io/codeclone/book/20-mcp-interface/) ·
-[CLI](https://orenlab.github.io/codeclone/book/09-cli/)
+[Baseline](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/06-baseline.md) ·
+[Report](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/08-report.md) ·
+[Metrics & gates](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/15-metrics-and-quality-gates.md) ·
+[MCP](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/20-mcp-interface.md) ·
+[CLI](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/09-cli.md)
 
 ## License
 

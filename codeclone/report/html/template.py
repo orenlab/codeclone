@@ -7,25 +7,14 @@
 """Minimal HTML skeleton template for the report.
 
 CSS and JS are injected via ${css} and ${js} placeholders.
-Body content is injected via ${body}.
+Body content is injected via ${body}. The page loads nothing from the
+network: the CSS font stacks name Inter and JetBrains Mono only as locally
+installed fonts and fall back to the system fonts.
 """
 
 from __future__ import annotations
 
 from string import Template
-
-FONT_CSS_URL = (
-    "https://fonts.googleapis.com/css2?"
-    # Inter Variable — single file, full weight axis (100..900), smoother
-    # rendering than static cuts. Used for body text AND display (KPI numbers,
-    # headings). Google Fonts' Inter Tight subset drops the `zero` OT feature,
-    # so we stick to a single Inter family and apply display weight/tracking
-    # via CSS instead of a sibling family.
-    "family=Inter:wght@100..900&"
-    # JetBrains Mono — code/monospace surfaces.
-    "family=JetBrains+Mono:wght@400;500&"
-    "display=swap"
-)
 
 REPORT_TEMPLATE = Template(
     r"""<!doctype html>
@@ -34,9 +23,6 @@ REPORT_TEMPLATE = Template(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="${font_css_url}" rel="stylesheet">
 <style>${css}</style>
 </head>
 <body>
@@ -47,6 +33,5 @@ ${body}
 )
 
 __all__ = [
-    "FONT_CSS_URL",
     "REPORT_TEMPLATE",
 ]

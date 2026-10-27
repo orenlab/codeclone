@@ -49,6 +49,8 @@ Upgrade to it now; plan the move to 3.0.
 - The release and benchmark workflows pass the release tag and the dispatch
   input to their shell steps through the environment instead of pasting them
   into the script.
+- Opening the HTML report no longer requests fonts from `fonts.googleapis.com`
+  and `fonts.gstatic.com`; it uses locally installed or system fonts.
 
 ### Report
 
@@ -73,6 +75,12 @@ Upgrade to it now; plan the move to 3.0.
 - Add `glama.json` with the Glama maintainer record.
 - Add `.pre-commit-hooks.yaml`, so `repo: https://github.com/orenlab/codeclone`
   with `rev: v2.0.3` provides the `codeclone` hook.
+
+### Documentation
+
+- README, the PyPI description and the package's `Documentation` URL link to
+  the documentation of the `v2.0.3` tag; the website describes the current
+  release.
 
 ### Internal
 

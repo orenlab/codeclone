@@ -1,3 +1,5 @@
+> Documentation for this version: [github.com/orenlab/codeclone/tree/v2.0.3/docs](https://github.com/orenlab/codeclone/tree/v2.0.3/docs) — the website describes the current release.
+
 <p align="center">
   <picture>
     <source
@@ -116,7 +118,7 @@ codeclone . --text
 
 All formats are rendered from one canonical report payload.
 
-Report contract: <https://orenlab.github.io/codeclone/book/08-report/>
+Report contract: <https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/08-report.md>
 
 ## MCP and Native Clients
 
@@ -139,7 +141,7 @@ baselines, cache, or repository state.
 | Claude Desktop bundle | <https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone> |
 | Codex plugin          | <https://github.com/orenlab/codeclone/tree/main/plugins/codeclone>                   |
 
-MCP docs: <https://orenlab.github.io/codeclone/book/20-mcp-interface/>
+MCP docs: <https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/20-mcp-interface.md>
 
 ## Configuration
 
@@ -158,7 +160,7 @@ fail_health = 80
 
 Precedence: CLI flags > `pyproject.toml` > built-in defaults.
 
-Config reference: <https://orenlab.github.io/codeclone/book/04-config-and-defaults/>
+Config reference: <https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/04-config-and-defaults.md>
 
 ## License
 

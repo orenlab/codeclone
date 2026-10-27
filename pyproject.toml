@@ -60,7 +60,7 @@ Homepage = "https://github.com/orenlab/codeclone"
 Repository = "https://github.com/orenlab/codeclone"
 Issues = "https://github.com/orenlab/codeclone/issues"
 Changelog = "https://github.com/orenlab/codeclone/releases"
-Documentation = "https://orenlab.github.io/codeclone/"
+Documentation = "https://github.com/orenlab/codeclone/tree/v2.0.3/docs"
 
 [project.optional-dependencies]
 mcp = [

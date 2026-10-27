@@ -28,7 +28,7 @@ from .sections._meta import build_topbar_provenance_summary, render_meta_panel
 from .sections._overview import render_overview_panel
 from .sections._structural import render_structural_panel
 from .sections._suggestions import render_suggestions_panel
-from .template import FONT_CSS_URL, REPORT_TEMPLATE
+from .template import REPORT_TEMPLATE
 from .widgets.icons import BRAND_LOGO, ICONS, section_icon_html
 from .widgets.snippets import _FileCache, _pygments_css
 
@@ -431,7 +431,6 @@ def build_html_report(
 
     return REPORT_TEMPLATE.safe_substitute(
         title=_escape_html(title),
-        font_css_url=FONT_CSS_URL,
         css=css_html,
         js=js_html,
         body=body_html,
