@@ -315,7 +315,9 @@ def test_action_installs_a_hash_verified_pip_wheel_offline_before_codeclone() ->
     revoked for key compromise in October 2026.  The Action now fetches the
     pip 26.2.2 wheel itself, checks its SHA-256 before pip sees it, installs it
     from the local file with neither an index nor dependencies, and only then
-    installs CodeClone with the pip it just verified.
+    installs CodeClone with the pip it just verified: the release's
+    SHA-256-pinned set from ``requirements.txt``, or the plain spec for a
+    checkout of the action repository.
     """
     step = _action_step(_INSTALL_STEP)
     env = cast(dict[str, str], step.get("env", {}))
@@ -330,7 +332,8 @@ def test_action_installs_a_hash_verified_pip_wheel_offline_before_codeclone() ->
     url = env.get("PIP_BOOTSTRAP_URL", "")
     assert url.startswith(_PIP_BOOTSTRAP_HOST)
     assert url.endswith(f"/{_PIP_BOOTSTRAP_WHEEL}")
-    assert len(pip_installs) == 2, lines
+    # the verified pip, then CodeClone: the hash-pinned set or the plain spec
+    assert len(pip_installs) == 3, lines
     assert len(verifiers) == 1, lines
     assert verifiers[0] < pip_installs[0]
 
@@ -341,7 +344,10 @@ def test_action_installs_a_hash_verified_pip_wheel_offline_before_codeclone() ->
         "${pip_wheel}"
     ]
     assert f'pip_wheel="${{RUNNER_TEMP}}/{_PIP_BOOTSTRAP_WHEEL}"' in lines
-    assert shlex.split(lines[pip_installs[1]])[-1] == "${INSTALL_SPEC}"
+    pinned_set = " ".join(lines[pip_installs[1] : pip_installs[1] + 2])
+    assert "--require-hashes" in pinned_set, pinned_set
+    assert pinned_set.endswith('-r "${INSTALL_REQUIREMENTS}"'), pinned_set
+    assert shlex.split(lines[pip_installs[2]])[-1] == "${INSTALL_SPEC}"
 
 
 def _other_hex_digit(digit: str) -> str:

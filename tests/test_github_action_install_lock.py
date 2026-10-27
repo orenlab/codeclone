@@ -357,10 +357,29 @@ def test_publish_jobs_need_an_unconditional_wheel_gate() -> None:
     assert len(gate) == 2
     assert [key for key in ("continue-on-error", "if:") if key in gate_step] == []
     assert "continue-on-error" not in jobs["build"]
+    # Every publishing job waits for the gated build, directly or through
+    # another publishing job, and none of them runs past a failure.
+    publishing = sorted(job for job in jobs if job.startswith("publish"))
+    assert {"publish-testpypi", "publish-pypi", "publish-registry"} <= set(publishing)
+    needs = {
+        job: re.findall(r"^    needs: ([\w-]+)$", jobs[job], re.M) for job in publishing
+    }
+    reaches_build: set[str] = set()
+    while True:
+        grown = {
+            job
+            for job in publishing
+            if any(need == "build" or need in reaches_build for need in needs[job])
+        }
+        if grown == reaches_build:
+            break
+        reaches_build = grown
+    assert sorted(reaches_build) == publishing
     assert [
         job
-        for job in ("publish-testpypi", "publish-pypi")
-        if "needs: build" not in jobs[job]
+        for job in publishing
+        if "continue-on-error" in jobs[job]
+        or re.search(r"\b(?:always|failure|cancelled)\(\)", jobs[job])
     ] == []
 
 
