@@ -15,7 +15,7 @@
     "url": "https://github.com/orenlab/codeclone.git"
   },
   "homepage": "https://github.com/orenlab/codeclone",
-  "documentation": "https://orenlab.github.io/codeclone/claude-desktop-bundle/",
+  "documentation": "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/claude-desktop-bundle.md",
   "support": "https://github.com/orenlab/codeclone/issues",
   "privacy_policies": [
     "https://orenlab.github.io/codeclone/privacy-policy/"

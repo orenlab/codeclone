@@ -64,6 +64,6 @@ single-metric queries, pre-merge sanity checks, coverage/adoption/API snapshots.
 
 ## Links
 
-- [Codex plugin guide](https://orenlab.github.io/codeclone/codex-plugin/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
+- [Codex plugin guide](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/codex-plugin.md)
+- [MCP usage guide](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/mcp.md)
 - [Privacy Policy](https://orenlab.github.io/codeclone/privacy-policy/)

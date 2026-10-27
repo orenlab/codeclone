@@ -21,7 +21,10 @@ def test_codex_plugin_manifest_is_consistent() -> None:
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"
     assert manifest["license"] == "MPL-2.0"
-    assert manifest["homepage"] == "https://orenlab.github.io/codeclone/codex-plugin/"
+    assert (
+        manifest["homepage"]
+        == "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/codex-plugin.md"
+    )
     assert isinstance(marketplace, dict)
     assert marketplace["plugins"][0]["name"] == manifest["name"]
 

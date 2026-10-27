@@ -508,11 +508,11 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
         "doc_links": [
             {
                 "title": "MCP interface contract",
-                "url": "https://orenlab.github.io/codeclone/book/20-mcp-interface/",
+                "url": "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/20-mcp-interface.md",
             },
             {
                 "title": "MCP usage guide",
-                "url": "https://orenlab.github.io/codeclone/mcp/",
+                "url": "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/mcp.md",
             },
         ],
     }
@@ -546,15 +546,15 @@ def test_mcp_service_help_covers_analysis_profiles() -> None:
     assert compact["doc_links"] == [
         {
             "title": "Config and defaults",
-            "url": "https://orenlab.github.io/codeclone/book/04-config-and-defaults/",
+            "url": "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/04-config-and-defaults.md",
         },
         {
             "title": "Core pipeline",
-            "url": "https://orenlab.github.io/codeclone/book/05-core-pipeline/",
+            "url": "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/05-core-pipeline.md",
         },
         {
             "title": "MCP interface contract",
-            "url": "https://orenlab.github.io/codeclone/book/20-mcp-interface/",
+            "url": "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/20-mcp-interface.md",
         },
     ]
     assert normal["topic"] == "analysis_profile"

@@ -502,7 +502,8 @@ _META_PANEL = """\
     url='https://img.shields.io/badge/codeclone-'
       +encodeURIComponent(label).replace(/-/g,'--')+'-'+badgeColor(_grade);
     var prev=dlg.querySelector('#badge-preview');
-    if(prev)prev.innerHTML='<img src="'+url+'" alt="'+alt+'">';
+    /* the address as text: an <img> preview would fetch from shields.io */
+    if(prev)prev.textContent=url;
     var md=dlg.querySelector('#badge-code-md');
     if(md)md.textContent='!['+alt+']('+url+')';
     var ht=dlg.querySelector('#badge-code-html');

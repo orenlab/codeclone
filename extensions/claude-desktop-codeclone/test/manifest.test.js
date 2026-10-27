@@ -30,7 +30,7 @@ test("manifest keeps the setup surface bounded and local", () => {
     assert.deepEqual(manifest.privacy_policies, [
         "https://orenlab.github.io/codeclone/privacy-policy/",
     ]);
-    assert.equal(manifest.documentation, "https://orenlab.github.io/codeclone/claude-desktop-bundle/");
+    assert.equal(manifest.documentation, "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/claude-desktop-bundle.md");
     assert.equal(manifest.tools_generated, true);
     assert.equal(manifest.tools.length, 11);
     assert.equal("instructions" in manifest, false);

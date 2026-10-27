@@ -45,7 +45,6 @@ from ...contracts import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COMPLEXITY_THRESHOLD,
     DEFAULT_REPORT_DESIGN_COUPLING_THRESHOLD,
-    DOCS_URL,
     REPORT_SCHEMA_VERSION,
 )
 from ...core._types import OutputPaths
@@ -342,35 +341,38 @@ class MCPHelpTopicSpec:
     anti_patterns: tuple[str, ...] = ()
 
 
-_MCP_BOOK_URL: Final = f"{DOCS_URL}book/"
-_MCP_GUIDE_URL: Final = f"{DOCS_URL}mcp/"
+# The 2.0.x documentation lives in the release tag; the site describes the
+# current release and no longer serves these pages.
+_MCP_DOCS_URL: Final = "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/"
+_MCP_BOOK_URL: Final = f"{_MCP_DOCS_URL}book/"
+_MCP_GUIDE_URL: Final = f"{_MCP_DOCS_URL}mcp.md"
 _MCP_INTERFACE_DOC_LINK: Final[tuple[str, str]] = (
     "MCP interface contract",
-    f"{_MCP_BOOK_URL}20-mcp-interface/",
+    f"{_MCP_BOOK_URL}20-mcp-interface.md",
 )
 _BASELINE_DOC_LINK: Final[tuple[str, str]] = (
     "Baseline contract",
-    f"{_MCP_BOOK_URL}06-baseline/",
+    f"{_MCP_BOOK_URL}06-baseline.md",
 )
 _CONFIG_DOC_LINK: Final[tuple[str, str]] = (
     "Config and defaults",
-    f"{_MCP_BOOK_URL}04-config-and-defaults/",
+    f"{_MCP_BOOK_URL}04-config-and-defaults.md",
 )
 _REPORT_DOC_LINK: Final[tuple[str, str]] = (
     "Report contract",
-    f"{_MCP_BOOK_URL}08-report/",
+    f"{_MCP_BOOK_URL}08-report.md",
 )
 _CLI_DOC_LINK: Final[tuple[str, str]] = (
     "CLI contract",
-    f"{_MCP_BOOK_URL}09-cli/",
+    f"{_MCP_BOOK_URL}09-cli.md",
 )
 _PIPELINE_DOC_LINK: Final[tuple[str, str]] = (
     "Core pipeline",
-    f"{_MCP_BOOK_URL}05-core-pipeline/",
+    f"{_MCP_BOOK_URL}05-core-pipeline.md",
 )
 _SUPPRESSIONS_DOC_LINK: Final[tuple[str, str]] = (
     "Inline suppressions contract",
-    f"{_MCP_BOOK_URL}19-inline-suppressions/",
+    f"{_MCP_BOOK_URL}19-inline-suppressions.md",
 )
 _MCP_GUIDE_DOC_LINK: Final[tuple[str, str]] = ("MCP usage guide", _MCP_GUIDE_URL)
 _HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {

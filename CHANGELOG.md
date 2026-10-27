@@ -51,6 +51,8 @@ Upgrade to it now; plan the move to 3.0.
   into the script.
 - Opening the HTML report no longer requests fonts from `fonts.googleapis.com`
   and `fonts.gstatic.com`; it uses locally installed or system fonts.
+- The HTML report's badge dialog shows the badge address as text instead of
+  loading a preview image from `img.shields.io`.
 
 ### Report
 
@@ -81,6 +83,9 @@ Upgrade to it now; plan the move to 3.0.
 - README, the PyPI description and the package's `Documentation` URL link to
   the documentation of the `v2.0.3` tag; the website describes the current
   release.
+- MCP help topics, the Codex plugin and Claude Desktop bundle manifests, and
+  the extension, plugin and Action READMEs link the `v2.0.3` documentation
+  instead of site pages that no longer exist.
 
 ### Internal
 

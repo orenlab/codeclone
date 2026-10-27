@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/github/license/orenlab/codeclone?style=flat-square&color=6366f1)](LICENSE)
 [![Requires CodeClone](https://img.shields.io/badge/requires-codeclone_%3E%3D2.0.0-6366f1?style=flat-square)](https://orenlab.github.io/codeclone/)
 
-Native VS Code surface for [codeclone-mcp](https://orenlab.github.io/codeclone/mcp/).
+Native VS Code surface for [codeclone-mcp](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/mcp.md).
 Brings baseline-aware structural analysis into the editor — triage-first, read-only,
 and driven by the same canonical report as the CLI and HTML output.
 
@@ -148,8 +148,8 @@ full analysis and MCP are disabled until workspace trust is granted.
 ## Documentation
 
 - [CodeClone documentation](https://orenlab.github.io/codeclone/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
-- [MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
+- [MCP usage guide](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/mcp.md)
+- [MCP interface contract](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/book/20-mcp-interface.md)
 
 ---
 

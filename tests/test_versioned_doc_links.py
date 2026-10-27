@@ -10,7 +10,11 @@ The old site served ``/book/NN-.../``, ``/mcp/`` and similar paths; the current
 site no longer does. README, the PyPI description and the package metadata link
 to the ``docs/`` tree of the ``v2.0.3`` tag instead, and every such link must
 name a file or directory that exists in this tree, so the tag carries it.
-Whether the tag itself resolves is checked at release time, not here.
+Whether the tag itself resolves is checked at release time, not here. The
+same holds for the MCP help topics, the Codex plugin and Claude Desktop bundle
+manifests and the extension, plugin and Action READMEs. Site pages that still
+exist on the current site (privacy policy, terms of use, the example report,
+the site root) keep their site address.
 """
 
 from __future__ import annotations
@@ -20,7 +24,17 @@ from collections.abc import Iterator
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[1]
-_SOURCES = ("README.md", "docs/README-pypi.md", "pyproject.toml")
+_SOURCES = (
+    "README.md",
+    "docs/README-pypi.md",
+    "pyproject.toml",
+    ".github/actions/codeclone/README.md",
+    "extensions/claude-desktop-codeclone/README.md",
+    "extensions/claude-desktop-codeclone/manifest.json",
+    "extensions/vscode-codeclone/README.md",
+    "plugins/codeclone/README.md",
+    "plugins/codeclone/.codex-plugin/plugin.json",
+)
 _DOCS_TREE = "https://github.com/orenlab/codeclone/tree/v2.0.3/docs"
 _VERSIONED = re.compile(
     r"https://github\.com/orenlab/codeclone/(?P<kind>blob|tree)/"
@@ -28,7 +42,8 @@ _VERSIONED = re.compile(
 )
 _RETIRED = re.compile(
     r"https://orenlab\.github\.io/codeclone/"
-    r"(?:book/\d{2}-[a-z0-9-]+|mcp|architecture|cfg|codex-plugin|claude-desktop-bundle)/"
+    r"(?:book/\d{2}-[a-z0-9-]+|mcp|architecture|cfg|codex-plugin|claude-desktop-bundle"
+    r"|sarif)/"
 )
 
 
@@ -85,3 +100,23 @@ def test_readmes_open_with_the_versioned_docs_note() -> None:
         first_line = _text(name).splitlines()[0]
         assert _DOCS_TREE in first_line, name
         assert "current release" in first_line, name
+
+
+def test_mcp_help_doc_links_name_versioned_docs_in_this_tree() -> None:
+    from codeclone.surfaces.mcp._session_shared import _HELP_TOPIC_SPECS
+
+    urls = sorted(
+        {url for spec in _HELP_TOPIC_SPECS.values() for _, url in spec.doc_links}
+    )
+    assert len(urls) >= 8, "the help topics' doc links were not found"
+    unresolved = []
+    for url in urls:
+        match = _VERSIONED.fullmatch(url)
+        if (
+            match is None
+            or match.group("tag") != "v2.0.3"
+            or not (_REPO / match.group("path")).is_file()
+        ):
+            unresolved.append(url)
+
+    assert unresolved == []

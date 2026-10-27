@@ -80,6 +80,6 @@ npm run pack     # build .mcpb
 
 ## Links
 
-- [Claude Desktop bundle guide](https://orenlab.github.io/codeclone/claude-desktop-bundle/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
+- [Claude Desktop bundle guide](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/claude-desktop-bundle.md)
+- [MCP usage guide](https://github.com/orenlab/codeclone/blob/v2.0.3/docs/mcp.md)
 - [Issues](https://github.com/orenlab/codeclone/issues)

@@ -7,7 +7,7 @@
     "email": "pytelemonbot@mail.ru",
     "url": "https://github.com/orenlab"
   },
-  "homepage": "https://orenlab.github.io/codeclone/codex-plugin/",
+  "homepage": "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/codex-plugin.md",
   "repository": "https://github.com/orenlab/codeclone",
   "license": "MPL-2.0",
   "keywords": [
@@ -33,7 +33,7 @@
       "Skills",
       "Read-only"
     ],
-    "websiteURL": "https://orenlab.github.io/codeclone/codex-plugin/",
+    "websiteURL": "https://github.com/orenlab/codeclone/blob/v2.0.3/docs/codex-plugin.md",
     "privacyPolicyURL": "https://orenlab.github.io/codeclone/privacy-policy/",
     "termsOfServiceURL": "https://orenlab.github.io/codeclone/terms-of-use/",
     "defaultPrompt": [
