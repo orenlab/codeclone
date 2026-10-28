@@ -159,6 +159,7 @@ min_typing_coverage = 99
 
 [tool.coverage.report]
 show_missing = true
+precision = 2
 fail_under = 99
 
 [tool.mypy]
