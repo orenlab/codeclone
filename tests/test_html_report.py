@@ -1266,6 +1266,22 @@ def test_pygments_css_invalid_style() -> None:
     assert isinstance(css, str)
 
 
+@pytest.fixture
+def fresh_pygments_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drop the cached pygments modules before a test installs its own importer.
+
+    The snippets cache is keyed by ``id(importlib.import_module)``. A fake
+    importer can be allocated at the address of the previous test's freed fake;
+    the cache then keeps serving that test's modules instead of this one's.
+    """
+
+    import codeclone.report.html.widgets.snippets as snippets
+
+    monkeypatch.setattr(snippets, "_PYGMENTS_API", None)
+    monkeypatch.setattr(snippets, "_PYGMENTS_IMPORTER_ID", None)
+
+
+@pytest.mark.usefixtures("fresh_pygments_cache")
 def test_pygments_css_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(_name: str) -> object:
         raise ImportError
@@ -1274,6 +1290,7 @@ def test_pygments_css_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _pygments_css("default") == ""
 
 
+@pytest.mark.usefixtures("fresh_pygments_cache")
 def test_try_pygments_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(_name: str) -> object:
         raise ImportError
@@ -1489,28 +1506,39 @@ def test_render_code_block_truncates_and_fallback(
     assert "codebox" in snippet.code_html
 
 
+@pytest.mark.usefixtures("fresh_pygments_cache")
 def test_pygments_css_get_style_defs_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    selectors: list[str] = []
+
     class _Fmt:
-        def get_style_defs(self, _selector: str) -> str:
+        def get_style_defs(self, selector: str) -> str:
+            selectors.append(selector)
             raise RuntimeError("nope")
 
     class _Mod:
         HtmlFormatter = _Fmt
 
     monkeypatch.setattr(importlib, "import_module", lambda _name: _Mod)
-    assert _pygments_css("default") == ""
+    # This test's own formatter was asked, not one left cached by another test.
+    assert (_pygments_css("default"), selectors) == ("", [".codebox"])
 
 
+@pytest.mark.usefixtures("fresh_pygments_cache")
 def test_pygments_css_formatter_init_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[dict[str, str]] = []
+
     class _Fmt:
-        def __init__(self, *args: object, **kwargs: object) -> None:
+        def __init__(self, **kwargs: str) -> None:
+            attempts.append(kwargs)
             raise RuntimeError("nope")
 
     class _Mod:
         HtmlFormatter = _Fmt
 
     monkeypatch.setattr(importlib, "import_module", lambda _name: _Mod)
-    assert _pygments_css("default") == ""
+    # Both constructions failed on this test's formatter: with the style, then
+    # without it -- the path that ends in the empty stylesheet.
+    assert (_pygments_css("default"), attempts) == ("", [{"style": "default"}, {}])
 
 
 def _metrics_payload(

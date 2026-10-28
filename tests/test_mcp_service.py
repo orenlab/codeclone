@@ -1141,6 +1141,25 @@ def test_mcp_service_effective_freshness_classifies_summary_cache_usage() -> Non
     )
 
 
+def test_mcp_service_metrics_detail_serves_every_family_under_its_own_name(
+    tmp_path: Path,
+) -> None:
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+    families = sorted(mcp_shared_mod._VALID_METRICS_DETAIL_FAMILIES)
+
+    served = {
+        family: service.get_report_section(
+            run_id=run_id, section="metrics_detail", family=family, limit=1
+        )["family"]
+        for family in families
+    }
+
+    assert served == {family: family for family in families} | {
+        "god_modules": "overloaded_modules"
+    }
+
+
 def test_mcp_service_metrics_sections_split_summary_and_detail(
     tmp_path: Path,
 ) -> None:

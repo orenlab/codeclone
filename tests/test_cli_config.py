@@ -208,6 +208,23 @@ def test_validate_config_value_unsupported_spec_raises(
         loader_mod.validate_config_value(key="_unsupported", value=("x",))
 
 
+def test_path_config_value_is_refused_when_the_repository_root_cannot_be_resolved(
+    tmp_path: Path,
+) -> None:
+    # The containment check resolves the root strictly: a root that is gone
+    # refuses the key by name instead of anchoring a path nobody checked.
+    with pytest.raises(
+        ConfigValidationError,
+        match=r"^Invalid value for tool\.codeclone\.cache_path: cannot resolve "
+        r"'cache\.json': ",
+    ):
+        loader_mod.normalize_path_config_value(
+            key="cache_path",
+            value="cache.json",
+            root_path=tmp_path / "missing-root",
+        )
+
+
 def test_normalize_path_config_value_behaviour(tmp_path: Path) -> None:
     assert (
         loader_mod.normalize_path_config_value(
