@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.3] - 2026-10-27
+## [2.0.3] - 2026-10-28
 
 `2.0.3` is a security release and the last planned release of the 2.x line. It
 keeps an analysed repository from steering CodeClone, its launchers and its
