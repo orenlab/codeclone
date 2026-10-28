@@ -62,8 +62,10 @@ move to 3.0.
   install CI dependencies with `uv sync --locked --no-build`.
 - Pass the release tag and workflow inputs to shell steps through the
   environment.
-- `ty check codeclone .github/actions benchmarks` reports no diagnostics, with
-  `ty` 0.0.84 pinned and run in CI, and no type suppressions added.
+- Introduce type checking with `ty`, pinned to `0.0.84` and run in CI on
+  `codeclone`, `.github/actions` and `benchmarks`. It reports no diagnostics on
+  `0.0.84`, with no type suppressions added; newer `ty` releases may still
+  report warnings.
 - Bump the Python package and composite GitHub Action default install version to
   `2.0.3`.
 
