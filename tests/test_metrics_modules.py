@@ -568,6 +568,22 @@ def test_build_import_graph_cycle_depth_and_chain_helpers() -> None:
     assert longest_chains(graph, limit=2)
 
 
+def test_find_cycles_ignores_an_edge_into_an_already_closed_component() -> None:
+    # c's component is closed before b is reached; b -> c must not pull b
+    # below its own root, or the real b <-> d cycle is never reported.
+    graph = {"a": {"c"}, "b": {"c", "d"}, "c": set(), "d": {"b"}}
+
+    assert find_cycles(graph) == (("b", "d"),)
+
+
+def test_longest_chains_keep_the_longer_of_two_sibling_paths() -> None:
+    # a reaches c directly and through b; the direct a -> c chain is shorter.
+    graph = {"a": {"b", "c"}, "b": {"c"}, "c": set()}
+
+    assert max_depth(graph) == 3
+    assert longest_chains(graph, limit=1) == (("a", "b", "c"),)
+
+
 def test_build_dep_graph_deduplicates_edges() -> None:
     repeated = ModuleDep(source="pkg.a", target="pkg.b", import_type="import", line=1)
     external = ModuleDep(source="pkg.a", target="typing", import_type="import", line=2)

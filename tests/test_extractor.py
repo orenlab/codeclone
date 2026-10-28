@@ -1556,6 +1556,37 @@ def orphan():
     assert by_target["pkg.mod:get_system_metrics"].evidence_symbol == "_typed_get"
 
 
+def test_route_decorator_factory_bound_by_an_annotated_assignment_is_reachable() -> (
+    None
+):
+    source = """
+from collections.abc import Callable
+from fastapi import APIRouter
+
+router = APIRouter()
+
+def _typed_get(path: str):
+    route_get: Callable[..., Callable] = router.get
+    return route_get(path)
+
+@_typed_get("/metrics")
+async def get_system_metrics():
+    return {}
+
+def orphan():
+    return 1
+"""
+
+    assert _dead_qualnames_from_source(source) == ("pkg.mod:orphan",)
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+
+    assert by_target["pkg.mod:get_system_metrics"].evidence == (
+        "route decorator factory"
+    )
+    assert by_target["pkg.mod:get_system_metrics"].evidence_symbol == "_typed_get"
+
+
 def test_dead_code_uses_aiogram_router_observer_reachability() -> None:
     source = """
 from aiogram import F, Dispatcher, Router
@@ -2236,6 +2267,23 @@ class Runtime:
         "annotated_lookup",
         "multi_lookup",
     }
+
+
+def test_dynamic_getattr_scan_skips_annotated_values_that_are_not_getattr() -> None:
+    tree = ast.parse(
+        """
+class Runtime:
+    def dispatch(self) -> None:
+        limit: int = 3
+        probe: Callable[[], None] | None = getattr(self, "annotated_lookup", None)
+        if callable(limit):
+            limit()
+        if callable(probe):
+            probe()
+"""
+    )
+
+    assert module_walk_mod._collect_dynamic_getattr_names(tree) == {"annotated_lookup"}
 
 
 def test_extract_resolves_public_reexports_to_source_symbols() -> None:
