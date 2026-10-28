@@ -307,6 +307,10 @@ def _pip_bootstrap_verifiers(script: str) -> list[tuple[int, str]]:
     ]
 
 
+def _indexes_of_lines_with(lines: list[str], needle: str) -> list[int]:
+    return [index for index, line in enumerate(lines) if needle in line]
+
+
 def test_action_installs_a_hash_verified_pip_wheel_offline_before_codeclone() -> None:
     """The runner's own pip never fetches anything for the Action.
 
@@ -323,9 +327,7 @@ def test_action_installs_a_hash_verified_pip_wheel_offline_before_codeclone() ->
     env = cast(dict[str, str], step.get("env", {}))
     script = cast(str, step["run"])
     lines = script.splitlines()
-    pip_installs = [
-        index for index, line in enumerate(lines) if "-m pip install" in line
-    ]
+    pip_installs = _indexes_of_lines_with(lines, "-m pip install")
     verifiers = [index for index, _body in _pip_bootstrap_verifiers(script)]
 
     assert env.get("PIP_BOOTSTRAP_SHA256") == _PIP_BOOTSTRAP_SHA256

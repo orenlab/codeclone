@@ -342,6 +342,37 @@ def test_quarantine_cutoff_is_fourteen_days_before_the_release_date() -> None:
     assert unnamed == []
 
 
+def _publishing_jobs(jobs: dict[str, str]) -> list[str]:
+    return sorted(job for job in jobs if job.startswith("publish"))
+
+
+def _publishing_jobs_reaching_build(jobs: dict[str, str]) -> set[str]:
+    """Publishing jobs that wait for ``build``, directly or through another one."""
+    publishing = _publishing_jobs(jobs)
+    needs = {
+        job: re.findall(r"^    needs: ([\w-]+)$", jobs[job], re.M) for job in publishing
+    }
+    reaches_build: set[str] = set()
+    while True:
+        grown = {
+            job
+            for job in publishing
+            if any(need == "build" or need in reaches_build for need in needs[job])
+        }
+        if grown == reaches_build:
+            return reaches_build
+        reaches_build = grown
+
+
+def _publishing_jobs_running_past_a_failure(jobs: dict[str, str]) -> list[str]:
+    return [
+        job
+        for job in _publishing_jobs(jobs)
+        if "continue-on-error" in jobs[job]
+        or re.search(r"\b(?:always|failure|cancelled)\(\)", jobs[job])
+    ]
+
+
 def test_publish_jobs_need_an_unconditional_wheel_gate() -> None:
     publish = (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text(
         encoding="utf-8"
@@ -359,28 +390,10 @@ def test_publish_jobs_need_an_unconditional_wheel_gate() -> None:
     assert "continue-on-error" not in jobs["build"]
     # Every publishing job waits for the gated build, directly or through
     # another publishing job, and none of them runs past a failure.
-    publishing = sorted(job for job in jobs if job.startswith("publish"))
+    publishing = _publishing_jobs(jobs)
     assert {"publish-testpypi", "publish-pypi", "publish-registry"} <= set(publishing)
-    needs = {
-        job: re.findall(r"^    needs: ([\w-]+)$", jobs[job], re.M) for job in publishing
-    }
-    reaches_build: set[str] = set()
-    while True:
-        grown = {
-            job
-            for job in publishing
-            if any(need == "build" or need in reaches_build for need in needs[job])
-        }
-        if grown == reaches_build:
-            break
-        reaches_build = grown
-    assert sorted(reaches_build) == publishing
-    assert [
-        job
-        for job in publishing
-        if "continue-on-error" in jobs[job]
-        or re.search(r"\b(?:always|failure|cancelled)\(\)", jobs[job])
-    ] == []
+    assert sorted(_publishing_jobs_reaching_build(jobs)) == publishing
+    assert _publishing_jobs_running_past_a_failure(jobs) == []
 
 
 def test_ci_installs_are_locked_and_never_build_from_source() -> None:
